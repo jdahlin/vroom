@@ -1854,7 +1854,7 @@ semantic_analysis::x86_generic_call(SyntaxRef n,
     const struct type t = type_table[first.unqualified()];
     m = expression_meaning();
     m.type = first;
-    if (kind == 15 + 8 && t.kind == type_kind::vector)
+    if (kind == 15 + 8 && is_vector_kind(t.kind))
         m.type = qualified_type::make(t.operand.unqualified(), cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::not_constant;
@@ -2008,7 +2008,7 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
         VTRY_SET(r, expression(clauses[0], a));
         VTRY_SET(r, operand_value(n, a));
         const struct type t = type_table[a.type.unqualified()];
-        if (t.kind != type_kind::vector || !is_integral(t.operand))
+        if (!is_vector_kind(t.kind) || !is_integral(t.operand))
             return ill_formed(n, "argument must be an integer vector",
                               "ext.clang");
         m = expression_meaning();
@@ -2030,7 +2030,7 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
         VTRY_SET(r, operand_value(n, a));
         const struct type t = type_table[a.type.unqualified()];
         qualified_type et = a.type;
-        if (t.kind == type_kind::vector)
+        if (is_vector_kind(t.kind))
             et = t.operand;
         fundamental_type f = fundamental_of(et);
         if (!is_floating(et) &&
@@ -2068,7 +2068,7 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
     const struct type vector = type_table[a.type.unqualified()];
     if ((kind == 2 || kind == 3) && is_floating(a.type))
         return x86_generic_call(n, clauses, static_cast<uint8_t>(kind + 22), m);
-    if (vector.kind != type_kind::vector ||
+    if (!is_vector_kind(vector.kind) ||
         a.type.unqualified() != b.type.unqualified())
         return ill_formed(n,
                           "the first two arguments to __builtin_shufflevector "
@@ -2124,8 +2124,8 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
                                      "__builtin_shufflevector result of "
                                      "non-power-of-two lanes or over 64 bytes");
     m = expression_meaning();
-    m.type = qualified_type::make(type_table.vector_of(vector.operand, lanes),
-                                  cv_none);
+    m.type = qualified_type::make(
+        type_table.vector_like(vector.kind, vector.operand, lanes), cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::not_constant;
     m.beyond_integral_constant = true;

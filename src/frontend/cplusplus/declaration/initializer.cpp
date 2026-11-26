@@ -920,6 +920,7 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
         return reference_initialization(at, m, type, result);
     case type_kind::class_type:
         return class_initialization(at, m, type, direct, result);
+    case type_kind::ext_vector:
     case type_kind::vector:
         /* [ext:gnu_vector_size] a vector is initialized from a vector of
            its type, a copy of its bytes (other conversions not analysed) */
@@ -1365,6 +1366,7 @@ analysis_result semantic_analysis::list_initialization_of(
     switch (type_table[type.unqualified()].kind) {
     case type_kind::array:
         return array_list_initialization(list, clauses, type, direct, result);
+    case type_kind::ext_vector:
     case type_kind::vector:
         /* [ext:gnu_vector_size] the elements in order, the rest zero */
         return element_list_initialization(list, clauses, type, result);
@@ -2236,7 +2238,7 @@ analysis_result semantic_analysis::aggregate_elements(
     const struct type target = type_table[type.unqualified()];
     /* [ext:gnu_vector_size] a vector's elements are listed as an array's */
     bool arraylike =
-        target.kind == type_kind::array || target.kind == type_kind::vector;
+        target.kind == type_kind::array || is_vector_kind(target.kind);
     owned_array<aggregate_class_element> members;
     uint64_t count = 0;
     size_t union_default = 0, first_element = 0;
@@ -2621,7 +2623,7 @@ void semantic_analysis::aggregate_value(SyntaxRef list, qualified_type type,
     expression_meaning list_meaning;
     list_meaning.type = qualified_type::make(type.unqualified(), cv_none);
     if (type_table[type.unqualified()].kind == type_kind::array ||
-        type_table[type.unqualified()].kind == type_kind::vector)
+        is_vector_kind(type_table[type.unqualified()].kind))
         list_meaning.type = type;
     list_meaning.evaluation = all;
     result.node = expression_node(semantic_kind::initializer_list, list_meaning,
@@ -2672,7 +2674,7 @@ analysis_result semantic_analysis::aggregate_element_clause(
     const struct type record = type_table[element.unqualified()];
     bool braced = clause.is(syntax_kind::braced_init_list);
     bool subaggregate =
-        record.kind == type_kind::array || record.kind == type_kind::vector ||
+        record.kind == type_kind::array || is_vector_kind(record.kind) ||
         (record.kind == type_kind::class_type &&
          entity_table[record.entity].kind == entity_kind::class_type &&
          is_aggregate(record.entity));
@@ -2700,12 +2702,12 @@ analysis_result semantic_analysis::aggregate_element_clause(
                 list, "dcl.init.aggr",
                 "a subaggregate converted from another class");
     }
-    if (record.kind == type_kind::vector) {
+    if (is_vector_kind(record.kind)) {
         /* /16: a clause that is a vector initializes the whole vector;
            scalars go to its elements, braces elided */
         expression_meaning e;
         VTRY(r, expression(clause, e));
-        if (type_table[e.type.unqualified()].kind == type_kind::vector) {
+        if (is_vector_kind(type_table[e.type.unqualified()].kind)) {
             next++;
             return initialize_with(at, e, element, false, true, one);
         }

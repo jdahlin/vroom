@@ -884,8 +884,9 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
         if (m.bit_field_width)
             return address_of_bit_field(n.first_token());
         if (m.node && semantics[m.node].kind == semantic_kind::subscript &&
-            type_table[semantics[semantics[m.node].a].type.unqualified()]
-                    .kind == type_kind::vector)
+            is_vector_kind(
+                type_table[semantics[semantics[m.node].a].type.unqualified()]
+                    .kind))
             /* [ext:gnu_vector_size] clang: "address of vector element
                requested" */
             return ill_formed(n, "the address of a vector element", "ext.gnu");
@@ -899,7 +900,7 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
         /* [expr.unary.op]/7, /8, /10: "arithmetic or unscoped
            enumeration type", "integral or unscoped enumeration type" */
         promote_enumeration(m);
-        if (type_table[m.type.unqualified()].kind == type_kind::vector) {
+        if (is_vector_kind(type_table[m.type.unqualified()].kind)) {
             /* [ext:gnu_vector_size] +, - and ~ lane by lane: ~ of integer
                elements, a vector of the operand's type */
             if (o == preprocessing_op_or_punc::TILDE &&

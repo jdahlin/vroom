@@ -594,10 +594,10 @@ uint32_t c_lowering::conversion(const semantic_node &n)
         return cast(expression(n.a), t, AST_CAST_BIT_CAST);
     case conversion_kind::vector_cast: {
         int kind = AST_CAST_VECTOR_BITS;
-        if (record(n.type).kind == type_kind::vector)
+        if (is_vector_kind(record(n.type).kind))
             kind = AST_CAST_UNION;
-        if (record(n.type).kind == type_kind::vector &&
-            record(node(n.a).type).kind == type_kind::vector)
+        if (is_vector_kind(record(n.type).kind) &&
+            is_vector_kind(record(node(n.a).type).kind))
             kind = AST_CAST_NOP;
         return cast(expression(n.a), t, kind);
     }

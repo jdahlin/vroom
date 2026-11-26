@@ -838,7 +838,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             return r;
         expression_meaning *base = &a, *index = &i;
         auto is_vector = [&](const expression_meaning &x) {
-            return type_table[x.type.unqualified()].kind == type_kind::vector;
+            return is_vector_kind(type_table[x.type.unqualified()].kind);
         };
         if (is_vector(a) || is_vector(i)) {
             /* [ext:gnu_vector_size] v[i]: lane i of the vector, an lvalue

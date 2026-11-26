@@ -233,9 +233,10 @@ struct tree_checker {
             /* [ext:gnu_vector_size]: a lane of a vector object is an lvalue
                of that object, which the vector operand is */
             if (node.a >= analysis.semantics.size() ||
-                analysis.type_table[analysis.semantics[node.a]
-                                        .type.unqualified()]
-                        .kind != type_kind::vector)
+                !is_vector_kind(analysis
+                                    .type_table[analysis.semantics[node.a]
+                                                    .type.unqualified()]
+                                    .kind))
                 prvalue(n, node.a, "left operand");
             prvalue(n, node.b, "right operand");
             break;

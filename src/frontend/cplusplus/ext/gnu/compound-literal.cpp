@@ -47,7 +47,7 @@ analysis_result semantic_analysis::gnu_compound_literal(SyntaxRef n,
             "a compound literal that is not ( type-id ) braced-init-list");
     qualified_type to;
     VTRY(r, type_id(n[1], to));
-    if (type_table[to.unqualified()].kind != type_kind::vector)
+    if (!is_vector_kind(type_table[to.unqualified()].kind))
         return not_supported_because(
             n, "ext.gnu", "a compound literal of a type that is not a vector");
     initialized_value result;

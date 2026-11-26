@@ -797,7 +797,12 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
        trailing-return-type in an alias-declaration (using f = auto (*)() -> R) */
     if (id.size() == 2 && id[1].is(syntax_kind::abstract_declarator))
         placeholder_allowed = true;
+    /* [ext:clang_ext_vector_type] also after the type-specifier */
+    s.ext_vector.allowed =
+        tokens.files.behavior.has(extension::clang_ext_vector_type);
     VTRY(r, decl_specifier_seq(id[0], s, false));
+    if (s.ext_vector.given())
+        g.ext_vector = s.ext_vector;
     if (!s.has_type || s.declares_enumeration || s.typedef_ || s.static_ ||
         s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags || s.aligned)
         return not_supported_because(n, "dcl.typedef",
@@ -1554,7 +1559,7 @@ analysis_result semantic_analysis::declare_with_initializer(
            through a packed struct of clang's headers name it, whose
            members are packed whatever it says: taken as the type's own */
         if (aligned && aligned < natural &&
-            type_table[type.unqualified()].kind != type_kind::vector)
+            !is_vector_kind(type_table[type.unqualified()].kind))
             return not_supported_because(
                 declaration, "ext.gnu",
                 "an alignment below the vector type's own");

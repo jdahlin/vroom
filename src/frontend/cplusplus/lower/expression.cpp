@@ -192,7 +192,7 @@ uint32_t c_lowering::expression(uint32_t index)
             return temporary_object(index);
         return call(n);
     case semantic_kind::subscript: {
-        if (record(node(n.a).type).kind == type_kind::vector)
+        if (is_vector_kind(record(node(n.a).type).kind))
             return vector_lane(n);
         uint32_t a = expression(n.a), b = expression(n.b);
         if (!a || !b)

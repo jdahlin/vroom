@@ -118,6 +118,12 @@ enum class type_kind : uint8_t {
     vector,
 };
 
+/* a GNU or an extended vector, whose operators work lane by lane */
+inline bool is_vector_kind(type_kind kind)
+{
+    return kind == type_kind::vector || kind == type_kind::ext_vector;
+}
+
 struct type {
     type_kind kind = type_kind::none;
     /* kind fundamental: which */
@@ -203,6 +209,14 @@ class types
     type_index block_pointer_to(qualified_type function);
     type_index bit_int(uint64_t width, uint32_t parameter, bool is_unsigned);
     type_index vector_of(qualified_type element, uint64_t count);
+    /* a vector of the kind of vector, with element and count */
+    type_index vector_like(type_kind vector, qualified_type element,
+                           uint64_t count)
+    {
+        if (vector == type_kind::ext_vector)
+            return ext_vector_of(element, count, 0);
+        return vector_of(element, count);
+    }
     type_index vector_mask_of(const type &vector, uint64_t element,
                               bool long_is_64);
     type_index ext_vector_of(qualified_type element, uint64_t count,

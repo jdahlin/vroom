@@ -4036,13 +4036,15 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
             number(r.bound);
         text("_");
         done = true;
-    } else if ((r.kind == type_kind::ext_vector ||
-                r.kind == type_kind::vector) &&
-               !r.entity) {
+    } else if (is_vector_kind(r.kind)) {
         /* an ext_vector_type ([ext:clang_ext_vector_type]) as clang
-           mangles it: Dv, the element count, _ and the element type */
+           mangles it: Dv, the element count (a dependent one: its
+           template parameter), _ and the element type */
         text("Dv");
-        number(r.bound);
+        if (r.entity)
+            template_param(analysis.entity_table[r.entity].value);
+        else
+            number(r.bound);
         text("_");
         done = type(r.operand);
     } else if (r.kind == type_kind::pack_expansion) {
