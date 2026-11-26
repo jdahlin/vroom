@@ -128,6 +128,21 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
         t->block_end(ctx, b);
 }
 
+/* whether a block of b's loop that the layout puts at or after b jumps back to it: the top
+ * of a loop as laid out (after rotation, not the loop's header) */
+static bool virbuild_block_tops_loop(const virbuild_lowering *d, uint32_t b)
+{
+    const vir_function *f = d->f;
+    const vir_block *k = &f->blocks[b];
+
+    if (d->lp->inner[b] == VIR_BLOCK_NONE)
+        return false;
+    for (uint32_t i = 0; i < k->predecessor_count; i++)
+        if (d->position[f->extra[k->predecessor_first + i]] >= d->position[b])
+            return true;
+    return false;
+}
+
 VPRIV void virbuild_lower_body(const virbuild_lowering *d)
 {
     const virbuild_lowering_target *t = d->target;
@@ -145,6 +160,8 @@ VPRIV void virbuild_lower_body(const virbuild_lowering *d)
 
         if (b && d->chase[b] != b)
             continue; /* (a block every branch goes past: not emitted) */
+        if (t->loop_align && d->optimize && virbuild_block_tops_loop(d, b))
+            t->loop_align(d->ctx);
         t->label(d->ctx, d->block_label[b]);
         t->block_enter(d->ctx, b);
         virbuild_lower_block(d, b);
