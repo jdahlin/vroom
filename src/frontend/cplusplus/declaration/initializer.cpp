@@ -1625,8 +1625,13 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
             if (target.kind == type_kind::class_type) {
                 /* [dcl.init]/17.6.2: the constructor called with the
                    expression-list as its arguments */
+                /* (a union with constructor templates only: its
+                   constructors' deleted-destructor rules are not
+                   followed) */
                 if (entity_table[target.entity].kind !=
                         entity_kind::class_type ||
+                    (!entity_table[target.entity].first_constructor &&
+                     entity_table[target.entity].union_) ||
                     (!entity_table[target.entity].first_constructor &&
                      !entity_table[target.entity].constructor_templates))
                     return not_supported_because(
