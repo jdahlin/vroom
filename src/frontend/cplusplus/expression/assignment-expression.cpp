@@ -348,10 +348,14 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
                                                     expression_meaning &right,
                                                     expression_meaning &m)
 {
+    /* [over.match.oper]/3.3, /4: no operator function was viable, and no
+       built-in candidate takes a class left operand (no temporary and no
+       user-defined conversion is applied to it): ill-formed */
     if (op != preprocessing_op_or_punc::EQUAL)
-        return not_supported_because(
-            n, "over.match.oper",
-            "a compound assignment to a class with no operator function");
+        return ill_formed(n,
+                          "no operator function for a compound assignment to "
+                          "a class",
+                          "over.match.oper");
     entity_index c = type_table[left.type.unqualified()].entity;
     if (entity_table[c].kind != entity_kind::class_type)
         return not_supported_because(
