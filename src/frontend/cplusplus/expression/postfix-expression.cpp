@@ -1355,6 +1355,19 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 if (r != analysis_result::well_formed)
                     return r;
                 looked_up = true;
+            } else if (!x.entity && set.empty() && !x.unknown && !x.ambiguous &&
+                       (substituting || !declaration_not_parsed_seen)) {
+                /* [basic.lookup.argdep]: neither unqualified lookup nor
+                   argument-dependent lookup found any declaration */
+                size_t spelled_length = 0;
+                const char *spelled =
+                    tokens.pp.identifier_spelling(name - 1, &spelled_length);
+                if (!builtin_spelled(name) &&
+                    !clang_has_builtin(tokens.files.behavior, spelled,
+                                       spelled_length))
+                    return ill_formed_at_token(
+                        t, "use of an undeclared identifier",
+                        "basic.lookup.unqual");
             }
         }
     }
