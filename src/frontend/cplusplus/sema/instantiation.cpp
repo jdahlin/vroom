@@ -40,6 +40,10 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
                                const template_argument *arguments,
                                uint32_t count, entity_index &specialization)
 {
+    /* this specialization is a candidate's; what substituting its
+       signature instantiates is not */
+    bool candidate = collecting_candidates;
+    scoped_value<bool> nested(collecting_candidates, false);
     specialization = 0;
     const entity t = entity_table[template_entity];
     if (t.kind != entity_kind::template_entity || !t.instantiation)
@@ -252,7 +256,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
        specialization whose return type is not deduced yet instantiates
        its definition there, in an unevaluated operand too */
     bool deducing =
-        !collecting_candidates &&
+        !candidate &&
         contains_placeholder(
             type_table[entity_table[specialization].type.unqualified()]
                 .operand);
