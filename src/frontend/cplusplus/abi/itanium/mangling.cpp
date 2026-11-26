@@ -191,6 +191,8 @@ class itanium_mangler
     bool dependent_fold(SyntaxElement fold);
     bool structure_expression(uint32_t s);
     bool named_variable(entity_index t, SyntaxElement name);
+    const semantic_analysis::written_binding *
+    written_object(SyntaxElement name) const;
     /* the dependent_written type being mangled: its bindings
        (sema.h: written_bindings), and the element of the packs among them
        a fold's pattern is mangled for */
@@ -975,6 +977,22 @@ bool itanium_mangler::named_variable(entity_index t, SyntaxElement name)
     return true;
 }
 
+/* the binding of name to an instantiation's pointer or reference
+   parameter, whose argument's object or function is mangled for it */
+const semantic_analysis::written_binding *
+itanium_mangler::written_object(SyntaxElement name) const
+{
+    if (!name.is_token() || !name.is_identifier())
+        return nullptr;
+    uint32_t id = analysis.token_identifier(name.token());
+    for (uint32_t i = 0; i < written_count; i++) {
+        const auto &b = analysis.written_bindings[written_first + i];
+        if (b.identifier == id && b.specialization)
+            return &b;
+    }
+    return nullptr;
+}
+
 /* the type an alias template's instantiation bound the identifier name to,
    for the dependent_written type being mangled (the pack's element being
    mangled for a name bound to a pack) */
@@ -986,7 +1004,8 @@ itanium_mangler::bound(SyntaxElement name) const
     uint32_t id = analysis.token_identifier(name.token());
     for (uint32_t i = 0; i < written_count; i++) {
         const auto &b = analysis.written_bindings[written_first + i];
-        if (b.identifier == id &&
+        /* (a specialization: a value, no type) */
+        if (b.identifier == id && !b.specialization &&
             (b.element == UINT32_MAX || b.element == pack_element))
             return &b;
     }
@@ -1902,8 +1921,9 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                 preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
             text("cl");
             uint32_t unresolved_name = 0;
-            if (base.is_token() && !analysis.function_parameter_position(
-                                       encoding_template, base.token()))
+            if (base.is_token() && !written_object(base) &&
+                !analysis.function_parameter_position(encoding_template,
+                                                      base.token()))
                 unresolved_name = analysis.token_identifier(base.token());
             if (unresolved_name) {
                 if (!source_name(unresolved_name))
@@ -1955,6 +1975,17 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         if (parameter > 1)
             number(parameter - 2);
         text("_");
+        return true;
+    }
+    /* an instantiation's pointer or reference parameter: the argument,
+       [abi:expressions] [ad] L _Z <encoding> E */
+    if (const auto *b = written_object(expression)) {
+        if (record(b->type).kind != type_kind::lvalue_reference)
+            text("ad");
+        text("L_Z");
+        if (!encoding(b->specialization))
+            return false;
+        text("E");
         return true;
     }
     /* a non-type template parameter: its <template-param>

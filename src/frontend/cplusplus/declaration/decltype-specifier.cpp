@@ -213,6 +213,12 @@ bool semantic_analysis::names_dependent_entity(token_index first,
             continue;
         }
         entity_kind k = entity_table[e].kind;
+        /* (an instantiation's pointer or reference parameter is its
+           argument, [temp.dep.expr]) */
+        if (k == entity_kind::none && entity_table[e].argument_bound &&
+            address_parameter_type(entity_table[e].type) &&
+            !depends_on_template_parameter(entity_table[e].type))
+            continue;
         if (k == entity_kind::none || is_template_template_parameter(e))
             return true;
         if ((k == entity_kind::variable || k == entity_kind::typedef_name) &&
@@ -659,6 +665,21 @@ void semantic_analysis::collect_written_bindings(
                 found.append(b);
             }
             continue;
+        }
+        /* an instantiation's pointer or reference parameter: the object
+           its argument names, which the mangler spells
+           (specialization) */
+        if (x.unknown_entity) {
+            const entity &u = entity_table[x.unknown_entity];
+            if (u.kind == entity_kind::none && u.argument_bound && u.value &&
+                address_parameter_type(u.type)) {
+                written_binding b;
+                b.identifier = id;
+                b.type = u.type;
+                b.specialization = static_cast<entity_index>(u.value);
+                found.append(b);
+                continue;
+            }
         }
         entity_index pack = find_pack(id);
         /* (sizeof...(P) is mangled by P's position whatever P is) */

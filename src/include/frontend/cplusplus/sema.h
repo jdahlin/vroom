@@ -2997,7 +2997,9 @@ class semantic_analysis
            template's parameter it is (sizeof...(P) mangles it); 0 else */
         uint32_t pack_position = 0;
         /* a callee template-id with no arguments of its own call, f<A>():
-           the specialization it names (cast: the template-id's node) */
+           the specialization it names (cast: the template-id's node); of a
+           name bound to a pointer or reference parameter (identifier), the
+           object or function its argument names */
         entity_index specialization = 0;
     };
     owned_array<written_binding> written_bindings;
@@ -3480,6 +3482,8 @@ class semantic_analysis
                                        entity_index e, expression_meaning &m);
     /* [expr.prim.id]: the expression that names the entity e, found by
        lookup of the identifier t */
+    analysis_result address_parameter(token_index t, entity_index parameter,
+                                      expression_meaning &m);
     analysis_result named_entity(token_index t, entity_index e,
                                  expression_meaning &m, bool record_use = true);
     /* [expr.prim.this] */

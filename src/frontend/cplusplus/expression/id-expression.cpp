@@ -622,6 +622,9 @@ analysis_result semantic_analysis::id_expression(token_index t,
                 m.node = expression_node(semantic_kind::constant, m, t, 0);
             return analysis_result::well_formed;
         }
+        if (ue.kind == entity_kind::none && ue.argument_bound &&
+            address_parameter_type(ue.type))
+            return address_parameter(t, found.unknown_entity, m);
     }
     if (!e && !found.unknown)
         e = library_builtin(name);
@@ -684,6 +687,55 @@ analysis_result semantic_analysis::id_expression(token_index t,
         return r;
     }
     return named_entity(t, e, m);
+}
+
+/*
+ * [temp.param]/8: "An id-expression naming a non-type template-parameter
+ * of class type T denotes a static storage duration object ...; otherwise
+ * ... it denotes a prvalue", and of a reference type the object or function
+ * referred to ([temp.arg.nontype]/2): an instantiation's name of a pointer
+ * parameter is the address of its argument's entity (or the null pointer),
+ * of a reference parameter that entity.  Access was checked where the
+ * argument was written.
+ */
+analysis_result semantic_analysis::address_parameter(token_index t,
+                                                     entity_index parameter,
+                                                     expression_meaning &m)
+{
+    qualified_type to = entity_table[parameter].type;
+    const struct type record = type_table[to.unqualified()];
+    bool reference = record.kind == type_kind::lvalue_reference;
+    entity_index e = static_cast<entity_index>(entity_table[parameter].value);
+    if (!e) {
+        m.type = to;
+        m.category = value_category::prvalue;
+        m.evaluation = constness::constant;
+        m.value = 0;
+        m.node = expression_node(semantic_kind::constant, m, t, 0);
+        return analysis_result::well_formed;
+    }
+    used(t, e);
+    qualified_type object = entity_table[e].type;
+    const struct type declared = type_table[object.unqualified()];
+    m.type = object;
+    if (reference)
+        m.type = record.operand;
+    m.category = value_category::lvalue;
+    m.entity = e;
+    m.evaluation = constness::constant;
+    m.node = expression_node(semantic_kind::entity, m, t, e);
+    if (reference) {
+        m.entity = 0;
+        m.evaluation = constness::unknown;
+        return analysis_result::well_formed;
+    }
+    /* (an array argument's pointer is to its first element) */
+    if (declared.kind == type_kind::array && record.operand != object) {
+        VTRY(r, operand_value(current_declaration, m));
+        return analysis_result::well_formed;
+    }
+    address_of_glvalue(t, m);
+    return analysis_result::well_formed;
 }
 
 analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
