@@ -350,7 +350,7 @@ bool semantic_analysis::aggregate_built_in_place(uint32_t value) const
     const struct type &t = type_table[n.type.unqualified()];
     if (t.kind == type_kind::class_type) {
         const entity &c = entity_table[t.entity];
-        if (c.union_ || c.base_count || n.count != c.member_count)
+        if (c.union_ || n.count != c.member_count)
             return false;
     } else if (t.kind != type_kind::array || n.count != t.bound) {
         return false;
