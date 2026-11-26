@@ -200,8 +200,16 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
            uses it */
         if (r == analysis_result::well_formed && ft.default_arguments) {
             size_t unsupported_before = unsupported.size();
-            if (default_arguments(ft.declarator, e, entity_kind::function,
-                                  true) != analysis_result::well_formed) {
+            /* (nor are its diagnostics the program's: a map's
+               `= key_compare()` of a comparison without a default
+               constructor) */
+            substitution_mark default_mark = mark_substitution();
+            substituting++;
+            analysis_result checked = default_arguments(
+                ft.declarator, e, entity_kind::function, true);
+            substituting--;
+            if (checked != analysis_result::well_formed) {
+                undo_substitution(default_mark);
                 unsupported.resize(unsupported_before);
                 entity_table[e].unknown_defaults = true;
             }
