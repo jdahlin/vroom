@@ -34,10 +34,10 @@ preprocessing_token token_stream::read()
     return pp.next();
 }
 
-bool token_stream::layout_pragma_at(token_index i)
+uint8_t token_stream::layout_pragma_at(token_index i)
 {
     make_through(i);
-    bool in_effect = false;
+    uint8_t in_effect = 0;
     for (size_t k = 0; k < layout_change_at.size() && layout_change_at[k] <= i;
          k++)
         in_effect = layout_change_to[k];

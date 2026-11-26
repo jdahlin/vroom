@@ -544,6 +544,16 @@ const char *class_layout::data_member(entity &m)
         member_alignment = 1;
     if (m.alignment > member_alignment)
         member_alignment = m.alignment;
+    /* [ext.clang] #pragma pack caps it, an aligned attribute's too: the
+       member is kept as a packed one aligned to the cap */
+    uint32_t cap = table[c].max_field_alignment;
+    if (cap && member_alignment > cap) {
+        member_alignment = cap;
+        m.gnu_flags |= gnu_packed;
+        m.alignment = 0;
+        if (cap > 1)
+            m.alignment = cap;
+    }
     if (table[c].union_) {
         /* [class.union]/2: "The size of a union is sufficient to contain
            the largest of its non-static data members.  Each non-static
@@ -599,6 +609,11 @@ const char *class_layout::allocation_of_members()
     if ((x.gnu_flags & gnu_packed) &&
         (x.base_count || x.virtual_base_count || x.dynamic))
         return "ext.gnu";
+    /* [ext.clang] #pragma pack with bases or a virtual table pointer: rules
+       this does not follow yet */
+    if (x.max_field_alignment &&
+        (x.base_count || x.virtual_base_count || x.dynamic))
+        return "cpp.pragma";
     /* a primary base that is a virtual base is allocated first, at offset
        0 (the others are the first non-virtual base) */
     const dynamic_class *dyn = analysis.dynamic_of(c);
@@ -620,6 +635,8 @@ const char *class_layout::allocation_of_members()
         if (m.base_subobject)
             continue;
         if (m.bit_field) {
+            if (x.max_field_alignment)
+                return "cpp.pragma";
             /* a packed bit-field starts at the next bit whatever its
                type's alignment */
             if ((m.gnu_flags | x.gnu_flags) & gnu_packed) {

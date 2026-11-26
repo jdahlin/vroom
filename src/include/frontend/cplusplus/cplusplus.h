@@ -651,16 +651,17 @@ class source_files
        evaluation was seen (#pragma STDC, float_control, fenv_access,
        clang fp): constant evaluation leaves floating-point values unknown */
     bool floating_point_pragma = false;
-    /* a pragma that changes the layout of classes is in effect here
-       (#pragma pack with a value, ms_struct on, options align): analysis
-       has no rules for them, so the classes in a region of one are not laid
-       out.  The preprocessor keeps the state (layout_pragma_directive); the
-       token stream records where it changes. */
-    bool layout_pragma = false;
-    bool pack_pragma = false;
+    /* a pragma that changes the layout of classes is in effect here:
+       #pragma pack's value, or 255 (ms_struct on, options align, another
+       packing), for which analysis has no rules.  The preprocessor keeps the
+       state (layout_pragma_directive); the token stream records where it
+       changes. */
+    uint8_t layout_pragma = 0; /* 255: other than a pack value */
+    /* #pragma pack's value (1, 2, 4, 8, 16), 0 none, 255 another */
+    uint8_t pack_pragma = 0;
     bool ms_struct_pragma = false;
     bool other_layout_pragma = false;
-    owned_array<bool> pack_stack;
+    owned_array<uint8_t> pack_stack;
     /* text that is not a file: the predefined macros, the command line's,
        or a preprocessing token phase 4 spelled ("<scratch space>") */
     entry &add_text(const char *name, const char *text, size_t length,

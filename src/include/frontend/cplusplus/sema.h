@@ -724,6 +724,9 @@ struct entity {
     /* a class: the alignment its alignment-specifiers ask for, 0 if none
        ([dcl.align]) */
     uint32_t requested_alignment = 0;
+    /* [ext.clang] #pragma pack's value where the class was defined: no
+       member's alignment exceeds it (0: none) */
+    uint8_t max_field_alignment = 0;
     /* a non-static data member with the packed attribute: aligned to 1
        before its aligned attribute ([ext:gnu_attributes]) */
     bool packed = false;
