@@ -2347,6 +2347,14 @@ semantic_analysis::base_subobject_place(const constant_evaluation &state,
 {
     if (!base)
         return CONST_UNKNOWN;
+    /* an inherited member function called on a variable that is no
+       constant (Highway's st.LanesPerKey()): its object has no value, and
+       nothing of it is read through the base either */
+    if (state.member_call_object && !(place & element_place) &&
+        place < state.objects.size() && state.objects[place].opaque) {
+        out = place;
+        return constness::constant;
+    }
     const constant_value &o = place_value(state, place);
     if (o.kind != constant_value_kind::class_object || !o.designator)
         return CONST_UNKNOWN;
