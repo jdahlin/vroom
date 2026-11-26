@@ -444,7 +444,7 @@ def check_stubs(vpp):
         (A64, '__builtin_neon_vabdh_f16', 'is not implemented'),
         (A64, '__builtin_sve_svcntb', 'is not implemented'),
         (A64, '__builtin_sme_svcntsb', 'is not implemented'),
-        (X64, '__builtin_ia32_addcarryx_u32', 'is not implemented'),
+        (X64, '__builtin_ia32_tileloadd64_internal', 'is not implemented'),
         (X64, '__builtin_sve_svcntb', 'undeclared function'),
         (A64, '__builtin_vroom_nonexistent', 'undeclared function'),
     )

@@ -117,10 +117,9 @@ CC_PRIVATE uint32_t cc_builtin_x86_stencil_build(cc *c, const cc_builtin *b,
                         b->name);
         return cc_node_error_new(c, loc);
     }
-    if (row == count || args->n != AST_TYPE(c, cc_builtin_type(c, b))->n) {
-        cc_report_error(c, loc, "wrong number of arguments to '%s'", b->name);
+    /* (a wrong number of arguments: the call has reported it) */
+    if (row == count || args->n != AST_TYPE(c, cc_builtin_type(c, b))->n)
         return cc_node_error_new(c, loc);
-    }
     cc_id_list_append(
         c, args, cc_node_integer_new(c, row, cc_type_basic(AST_TYPE_INT), loc));
     return cc_builtin_node_new(c, CC_BUILTIN_X86_STENCIL, rt, loc, args);
