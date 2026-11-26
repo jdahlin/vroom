@@ -646,14 +646,27 @@ CC_PRIVATE ast_qualified_type cc_builtin_type(cc *c, const cc_builtin *b)
 
 static uint32_t *cc_builtin_directory[CC_DIRECTORY_COUNT];
 
-/* the stencils' entries are together in the table, in their rows' order */
+/*
+ * The stencils' entries are together in the table, in their rows' order: the
+ * __builtin_ia32_ ones first, sorted by name, then the generic ones.  Their
+ * names are not interned (nearly 2000 of them, in every C translation unit's
+ * start): cc_builtin_lookup searches them by name.
+ */
+enum {
+    CC_STENCIL_COUNT = 0
+#define X86_STENCIL(name, signature) +1
+#include "frontend/x86-stencil-names.inc"
+#undef X86_STENCIL
+};
+
+/* the first one's index and how many are __builtin_ia32_ ones; set by
+   cc_builtin_table_init */
+static uint32_t cc_stencil_first, cc_stencil_sorted;
+
 static const cc_builtin *cc_builtin_stencil_first(void)
 {
-    const cc_builtin *b = cc_builtin_table;
-
-    while (b->id != CC_BUILTIN_X86_STENCIL)
-        b++;
-    return b;
+    cc_builtin_table_init(); /* (C++ reaches here without a C parse) */
+    return cc_builtin_table + cc_stencil_first;
 }
 
 CC_PRIVATE uint32_t cc_builtin_stencil_row(const cc_builtin *b)
@@ -702,6 +715,16 @@ CC_PRIVATE void cc_builtin_table_init(void)
         return;
     /* the table is shared by all TUs; building it twice is harmless */
     for (uint32_t i = 0; cc_builtin_table[i].name; i++) {
+        if (cc_builtin_table[i].id == CC_BUILTIN_X86_STENCIL) {
+            uint32_t sorted = CC_STENCIL_COUNT;
+            while (sorted && strncmp(cc_builtin_table[i + sorted - 1].name,
+                                     "__builtin_ia32_", 15))
+                sorted--;
+            cc_stencil_first = i;
+            cc_stencil_sorted = sorted;
+            i += CC_STENCIL_COUNT - 1;
+            continue;
+        }
         size_t l = strlen(cc_builtin_table[i].name);
         char *s = (char *)malloc(l + 17);
         uint32_t id;
@@ -722,12 +745,42 @@ CC_PRIVATE void cc_builtin_table_init(void)
     __atomic_store_n(&done, true, __ATOMIC_RELEASE);
 }
 
+/* the stencil entry of an identifier that is a __builtin_ia32_ name */
+static const cc_builtin *cc_builtin_stencil_search(uint32_t id)
+{
+    /* (not terminated) */
+    const char *name = cc_identifier_string(id);
+    size_t length = (size_t)cc_identifier_length(id);
+
+    if (length <= 15 || memcmp(name, "__builtin_ia32_", 15))
+        return NULL;
+    uint32_t low = 0, high = cc_stencil_sorted;
+    while (low < high) {
+        uint32_t middle = low + (high - low) / 2;
+        const cc_builtin *b = cc_builtin_stencil_first() + middle;
+        int order = strncmp(name, b->name, length);
+
+        if (!order) {
+            if (!b->name[length])
+                return b;
+            order = -1; /* a longer name sorts after this one */
+        }
+        if (order < 0)
+            high = middle;
+        else
+            low = middle + 1;
+    }
+    return NULL;
+}
+
 CC_PRIVATE const cc_builtin *cc_builtin_lookup(uint32_t id)
 {
     uint32_t *pg = cc_builtin_directory[id >> CC_DIRECTORY_BITS];
     uint32_t i = pg ? pg[id & (CC_DIRECTORY_PAGE - 1)] : 0;
 
-    return i ? &cc_builtin_table[i - 1] : NULL;
+    if (i)
+        return &cc_builtin_table[i - 1];
+    return cc_builtin_stencil_search(id);
 }
 
 #include "frontend/c/builtin-stubs.inc"
