@@ -68,6 +68,12 @@ static void vx_target_label(void *ctx, uint32_t label)
     x64_label(((x64_vir_context *)ctx)->context, label);
 }
 
+/* 16 bytes, as clang: where a short loop falls across fetch lines decides its speed */
+static void vx_target_loop_align(void *ctx)
+{
+    x64_vir_text_append((x64_vir_context *)ctx, "\t.p2align\t4\n");
+}
+
 /* the edge blocks, all after the last block: a label, the edge's moves, a jump */
 static void vx_target_after_blocks(void *ctx)
 {
@@ -92,6 +98,7 @@ static const virbuild_lowering_target vx_lowering_target = {
     .edit = vx_target_edit,
     .edge_moves = vx_target_edge_moves,
     .label = vx_target_label,
+    .loop_align = vx_target_loop_align,
     .after_blocks = vx_target_after_blocks,
     /* unresolved differences from arm64 (Q-VIRB-02) */
     .params_in_loop = true,
