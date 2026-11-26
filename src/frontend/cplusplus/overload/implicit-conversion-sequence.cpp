@@ -730,7 +730,12 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                     entity_index found = conversion_function_for(
                         a, qualified_type::make(t1.unqualified(), cv_none),
                         false, several, cannot_tell);
-                    functions = found || several || cannot_tell;
+                    /* ([temp.deduct.conv]/6's deductions of a pointer are
+                       not all made here) */
+                    functions = found || several || cannot_tell ||
+                                ((x.kind == type_kind::pointer ||
+                                  x.kind == type_kind::pointer_to_member) &&
+                                 has_conversion_function_templates(c2));
                 }
                 if (functions) {
                     sequence cannot_tell = of_form(sequence::form::unknown);

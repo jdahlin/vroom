@@ -518,6 +518,13 @@ bool semantic_analysis::deduce_conversion_templates(
     return true;
 }
 
+bool semantic_analysis::has_conversion_function_templates(entity_index c)
+{
+    owned_array<entity_index> functions, templates;
+    return !visible_conversion_functions(c, functions, &templates) ||
+           !templates.empty();
+}
+
 entity_index
 semantic_analysis::conversion_function_for(const expression_meaning &m,
                                            qualified_type to, bool direct,

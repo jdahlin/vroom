@@ -1198,6 +1198,15 @@ semantic_analysis::trivial_constructor_candidate(qualified_type parameter)
     return one;
 }
 
+/* [dcl.init]/16: a braced-init-list written as an argument in parentheses */
+bool semantic_analysis::parenthesized_argument(SyntaxElement list) const
+{
+    token_index before = list.first_token() - 1;
+    return tokens[before].kind == token_kind::operator_or_punctuator &&
+           preprocessing_op_or_punc_primary(tokens[before].op_or_punc) ==
+               preprocessing_op_or_punc::LEFT_PARENTHESIS;
+}
+
 /*
  * Whether the deleted implicit copy constructor of class c can take part
  * in a construction from these arguments ([over.match.ctor]/1): its one
@@ -1379,7 +1388,10 @@ analysis_result semantic_analysis::construct(
                 "a copy or move with no chosen constructor of a class that "
                 "does not copy its bytes");
         if (written_arguments && !written_arguments->empty() &&
-            (*written_arguments)[0].is(syntax_kind::braced_init_list)) {
+            (*written_arguments)[0].is(syntax_kind::braced_init_list) &&
+            /* (not T{{a}}, where [over.best.ics]/4 allows the parameter no
+               user-defined conversion: not told apart here) */
+            parenthesized_argument((*written_arguments)[0])) {
             /* [over.ics.list]/7, [dcl.init.list]/3: T x({a, b}): the
                parameter is copy-list-initialized from the list, and the
                trivial constructor's copy of that temporary is elided into

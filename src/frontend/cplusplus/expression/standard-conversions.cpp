@@ -1068,7 +1068,10 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
             bool several = false, cannot_tell = false;
             entity_index found =
                 conversion_function_for(m, to, false, several, cannot_tell);
-            if (!found && !several && !cannot_tell)
+            /* ([temp.deduct.conv]/6's deductions of a pointer are not all
+               made here) */
+            if (!found && !several && !cannot_tell &&
+                !has_conversion_function_templates(fc.entity))
                 return ill_formed(at, rule, "dcl.init");
         }
         return not_supported_because(

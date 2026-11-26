@@ -4894,6 +4894,7 @@ class semantic_analysis
        default argument, enumerator-list and initializer, an instantiation
        the declaration causes; a function body is function_state.active */
     bool explicit_declaration_names = false;
+    bool parenthesized_argument(SyntaxElement list) const;
     bool copy_argument_candidate(
         entity_index c, const owned_array<expression_meaning> &arguments) const;
     /* [class.derived]: class c's base class subobject of class base,
@@ -7079,6 +7080,7 @@ class semantic_analysis
     /* whether class c or a base class of it declares a conversion
        function ([class.conv.fct]/4: "Conversion functions are
        inherited") */
+    bool has_conversion_function_templates(entity_index c);
     bool has_conversion_functions(entity_index c) const;
     /* whether a conversion function of class c, or a specialization of one
        of its templates deduced for to, may yield an lvalue (true when not
