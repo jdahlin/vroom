@@ -2610,9 +2610,11 @@ class semantic_analysis
                                owned_array<entity_index> &namespaces) const;
     /* [basic.lookup.argdep]/2: the associated entities (classes) and
        namespaces of the type t, added to the sets; false if a class of it
-       is one analysis did not follow */
+       is one analysis did not follow.  A class not complete is defined
+       only when complete is set: not one met as a template argument */
     bool associated_with(qualified_type t, owned_array<entity_index> &classes,
-                         owned_array<entity_index> &namespaces) const;
+                         owned_array<entity_index> &namespaces,
+                         bool complete = true) const;
     /* [basic.scope.namespace]: whether s is a namespace (0: the global
        one), and the innermost namespace that encloses the scope s */
     bool is_namespace(entity_index s) const;
