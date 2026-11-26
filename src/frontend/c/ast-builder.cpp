@@ -655,9 +655,7 @@ uint32_t ast_builder_complex_part(cc *c, uint32_t v, int op)
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
                                     uint32_t vector)
 {
-    return ast_builder_node(c, AST_NODE_BUILTIN, t, 0,
-                            ast_builder_list(c, &vector, 1), 1,
-                            CC_BUILTIN_CONVERTVECTOR, 0);
+    return cc_vector_convert_node(c, t, vector, 0);
 }
 
 uint32_t ast_builder_atomic_load(cc *c, ast_qualified_type t, uint32_t pointer,
