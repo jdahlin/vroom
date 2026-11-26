@@ -2483,8 +2483,12 @@ analysis_result semantic_analysis::template_call(
                 n, "temp.over",
                 "a call where deduction left no candidate template");
         }
+        const owned_array<SyntaxElement> *call_written = nullptr;
+        if (!given && arguments.size() == early.size())
+            call_written = &arguments;
         size_t chosen = 0;
-        VTRY(r, best_viable_function(n, candidates, nullptr, early, chosen));
+        VTRY(r, best_viable_function(n, candidates, nullptr, early, chosen,
+                                     nullptr, true, call_written));
         if (!candidates[chosen].template_index) {
             /* a non-template function: [dcl.fct.def.delete]/2 "If a
                function is overloaded, it is referenced only if the
