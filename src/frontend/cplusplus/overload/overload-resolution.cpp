@@ -683,12 +683,14 @@ analysis_result semantic_analysis::best_viable_function(
             "a best function that depends on an unknown partial ordering");
     /* [over.best.ics]/10: "If a function that uses the ambiguous conversion
        sequence is selected as the best viable function, the call will be
-       ill-formed" (clang's diagnostic names the conversions: not analysed) */
+       ill-formed" */
     for (size_t i = 0; i < width; i++)
         if (ics[w * width + i].ambiguous)
-            return not_supported_because(
-                at, "over.best.ics",
-                "a best function that uses an ambiguous conversion sequence");
+            return ill_formed(at,
+                              "a function that uses an ambiguous conversion "
+                              "sequence is selected as the best viable "
+                              "function, and the call is ill-formed",
+                              "over.best.ics");
     chosen = w;
     return analysis_result::well_formed;
 }
