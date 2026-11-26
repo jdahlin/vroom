@@ -2653,11 +2653,12 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         if (!user_copy && !y.defaulted_copy_constructor)
             copy_deleted = true;
         if (y.defaulted_move_constructor && !trivial_move) {
-            if (y.union_)
-                return not_supported_because(
-                    n, "class.copy.ctor",
-                    "a non-trivial defaulted move constructor of a union");
             entity_table[c].defaulted_move_constructor = false;
+            /* [class.copy.ctor]/10.1: a union with a variant member that has
+               a non-trivial move constructor has its defaulted move
+               constructor defined as deleted */
+            if (y.union_)
+                move_deleted = true;
             /* [class.copy.ctor]/10: "A defaulted move constructor that
                is defined as deleted is ignored by overload resolution"
                ([over.match.funcs]/8) when a subobject can be neither
