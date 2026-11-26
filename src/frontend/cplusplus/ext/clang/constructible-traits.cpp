@@ -255,11 +255,34 @@ analysis_result semantic_analysis::aggregate_paren_initialization(
                     "value-initialization");
             continue;
         }
-        if (type_table[m.type.unqualified()].kind == type_kind::array)
-            return not_supported_because(
-                n, "dcl.init.aggr",
-                "a constructibility trait: parenthesized init of an array "
-                "member");
+        /* [dcl.init]/17.5: an array is not initialized by an expression
+           (a declval is no string literal), and a parenthesized list
+           elides no braces ([dcl.init]/17.6.2.2) */
+        if (type_table[m.type.unqualified()].kind == type_kind::array) {
+            const struct type &from =
+                type_table[arguments[i].type.unqualified()];
+            if (from.kind != type_kind::class_type ||
+                !has_conversion_functions(from.entity))
+                return analysis_result::well_formed;
+            /* the argument's class has conversion functions: an object is
+               made where one gives a c, which the implicit copy
+               constructor's const c & binds */
+            qualified_type parameter = qualified_type::make(
+                type_table.lvalue_reference_to(
+                    qualified_type::make(x.type.unqualified(), cv_const)),
+                cv_none);
+            initialized_value converted;
+            bool made_one = false;
+            VTRY(r, try_initialization(n, arguments[i], parameter, true,
+                                       converted, made_one));
+            if (made_one && nothrow)
+                return not_supported_because(
+                    n, "dcl.init.aggr",
+                    "a constructibility trait: whether an aggregate from a "
+                    "conversion function throws");
+            value = made_one && arguments.size() == 1;
+            return analysis_result::well_formed;
+        }
         initialized_value made;
         bool ok = false;
         VTRY(r, try_initialization(n, arguments[i], m.type, false, made, ok));
@@ -400,6 +423,20 @@ analysis_result semantic_analysis::constructible_types(
         if (is_aggregate(c) && !one_of_its_own) {
             if (!count)
                 return aggregate_value_initialization(n, c, nothrow, value);
+            /* [dcl.init]/17.6.2.2: an aggregate is initialized from a
+               parenthesized list since C++20 only (P0960R3); before it,
+               no object is made, unless a conversion function of the
+               argument's class gives one */
+            bool converting =
+                count == 1 &&
+                type_table[arguments[0].type.unqualified()].kind ==
+                    type_kind::class_type &&
+                has_conversion_functions(
+                    type_table[arguments[0].type.unqualified()].entity);
+            if (tokens.files.behavior.edition <
+                    standard_edition::cplusplus_20 &&
+                !converting)
+                return analysis_result::well_formed;
             return aggregate_paren_initialization(n, c, arguments, nothrow,
                                                   value);
         }
