@@ -1808,6 +1808,24 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                         "nor braces that is not handled");
                 if (r != analysis_result::well_formed)
                     return r;
+                if (!entity_table[e].base_subobject && arguments.size() == 1 &&
+                    !listed_arguments[0].is(syntax_kind::braced_init_list) &&
+                    type_table[arguments[0].type.unqualified()].kind ==
+                        type_kind::class_type &&
+                    arguments[0].type.unqualified() != type.unqualified()) {
+                    qualified_type unqualified =
+                        qualified_type::make(type.unqualified(), cv_none);
+                    bool ambiguous = false, unknown = false;
+                    entity_index conv = conversion_function_for(
+                        arguments[0], unqualified, true, ambiguous, unknown);
+                    if (conv && entity_table[conv].explicit_ && !ambiguous &&
+                        !unknown) {
+                        bool converted = false;
+                        VTRY(cr, conversion_function_call(item, arguments[0],
+                                                          unqualified, true,
+                                                          converted));
+                    }
+                }
                 /* [dcl.init]/17.6.1: a member initialized from a prvalue of
                its class is that object, no constructor called: only one
                whose class copies its bytes is analysed (below) */
