@@ -86,6 +86,11 @@ What a function gets, in order (the rows of `codegen/vir/pass-table.c`):
    the dominator tree, loads forwarded from stores and earlier loads, dead
    stores to slots and dead code removed.  Steps 3-5 run a second time when
    simplification freed a slot's address.
+   Before that second promotion, `slot-address-loads`
+   (`load-of-slot-address.cpp`) turns a load through a choice of slot
+   addresses (a select or block parameter: an inlined function returning a
+   reference to an argument) into a choice of the loaded values, so that the
+   slots can be promoted.
 6. **Condition merge** (`condition-merge.c`): `a && b` and `a || b` whose
    result is a value become one compare chain (arm64: `ccmp`).
 7. **If-conversion** (`if-conversion.c`): diamonds and triangles with small
