@@ -2585,8 +2585,12 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                aggregate initialization of c may not (not analysed for an
                aggregate c; any other class initializes k in its own
                members' context) */
+            /* [class.default.ctor]/1: "A default constructor for a class X
+               is a constructor of class X for which each parameter that is
+               not a function parameter pack has a default argument" */
             bool is_default =
-                !type_table[entity_table[q].type.unqualified()].parameter_count;
+                type_table[entity_table[q].type.unqualified()]
+                    .parameter_count == entity_table[q].default_arguments;
             if (entity_table[q].access && grants(k, c) && !is_default &&
                 is_aggregate(c))
                 return not_supported_because(
@@ -2624,7 +2628,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             }
             if (!usable)
                 continue;
-            if (!type_table[entity_table[q].type.unqualified()].parameter_count)
+            if (is_default)
                 default_ok = true;
             /* [class.copy.ctor]/10.1: a move constructor does not copy */
             if (copy_or_move_constructor(k, q) && !is_move)
