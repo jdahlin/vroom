@@ -2010,6 +2010,9 @@ analysis_result semantic_analysis::declare_with_initializer(
            overload resolution" */
         qualified_type object = element_type(type);
         entity_index record = element_class(object);
+        /* [temp.inst]/2: the object's class is instantiated, an array's
+           elements' too, before its constructors are asked for */
+        require_complete(record);
         if (is_class_entity(record) && default_constructor_deleted(record)) {
             /* C++03 has no deleted functions: the implicit default
                constructor's definition is ill-formed ([class.ctor]/7 there),

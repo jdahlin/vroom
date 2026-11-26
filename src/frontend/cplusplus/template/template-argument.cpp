@@ -422,6 +422,12 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
                  type_table[q].kind != type_kind::dependent) ||
                 !written_type_arguments(member, arguments))
                 return e;
+            /* [impl.clang] an alias template as Q is mangled by its name
+               and arguments as written: the expression is kept as written */
+            entity_index named = type_table[q].entity;
+            if (!named || entity_table[named].name !=
+                              tokens.identifier(qid[0][0][0].token()))
+                return e;
             qualified_type type = qualified_type::make(q, cv_none);
             uint32_t name = tokens.identifier(member[0].token());
             for (entity_index d : dependent_values) {
@@ -898,6 +904,30 @@ analysis_result semantic_analysis::template_argument_for(
            ([temp.dep.constexpr]/2), checked against the parameter's type
            ([temp.arg.nontype]/2) once an instantiation gives C */
         if (depends_on_template_parameter(to)) {
+            token_index first = written.token();
+            token_index end = first + 1;
+            if (!written.is_token()) {
+                first = written.first_token();
+                end = written.end_token();
+            }
+            if (end == first + 1 &&
+                tokens[first].kind == token_kind::identifier) {
+                lookup_result x = lookup_unqualified(tokens.identifier(first),
+                                                     lookup_filter::any);
+                entity_index named = x.entity;
+                if (!named)
+                    named = x.unknown_entity;
+                if (named && entity_table[named].kind == entity_kind::none &&
+                    entity_table[named].instantiation &&
+                    !entity_table[named].held_by_template &&
+                    entity_table[named].type == to) {
+                    out.kind = template_argument::kind_t::value;
+                    out.type = to;
+                    out.template_entity = named;
+                    out.value = entity_table[named].value;
+                    return analysis_result::well_formed;
+                }
+            }
             out.kind = template_argument::kind_t::value;
             out.type = to;
             out.template_entity = dependent_value_entity(written);
@@ -1472,8 +1502,31 @@ analysis_result semantic_analysis::default_template_arguments(
                is an empty pack; a non-type pack of the same template
                that has elements may be typed by it (T ...A), and its
                length is then the pack's ([temp.deduct.type]/10) */
+            uint32_t own =
+                entity_table[template_parameter_entities[ft.first_parameter +
+                                                         i]]
+                    .name;
             for (uint32_t j = 0; j < ft.parameter_count; j++) {
                 template_parameter_parts other;
+                bool names_it = false;
+                SyntaxRef declared =
+                    template_parameter_nodes[ft.first_parameter + j];
+                /* (the node may start after the type: T ...A) */
+                token_index from = declared.first_token();
+                while (from > 0 &&
+                       !is_operator(tokens[from - 1],
+                                    preprocessing_op_or_punc::COMMA) &&
+                       !is_operator(tokens[from - 1],
+                                    preprocessing_op_or_punc::LESS))
+                    from--;
+                for (token_index k = from; j != i && k < declared.end_token();
+                     k++)
+                    names_it =
+                        names_it ||
+                        (own && tokens[k].kind == token_kind::identifier &&
+                         tokens.identifier(k) == own);
+                if (!names_it)
+                    continue;
                 if (j != i && set[j] &&
                     template_parameter_form(
                         template_parameter_nodes[ft.first_parameter + j],

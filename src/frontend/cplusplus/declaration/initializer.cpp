@@ -1009,8 +1009,7 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
                constructor, which may be elided but shall be viable
                ([dcl.init]/17.6.3, [class.copy.elision]/1): not
                analysed */
-            if (direct ||
-                tokens.files.behavior.edition <
+            if (tokens.files.behavior.edition <
                     standard_edition::cplusplus_17 ||
                 s.kind != conversion_sequence::form::user_defined ||
                 s.ambiguous || s.function != found.function)
@@ -1103,11 +1102,6 @@ semantic_analysis::scalar_initialization(SyntaxRef at, expression_meaning &m,
         target.kind != type_kind::pointer_to_member && !enumeration_of(type))
         return not_supported_because(
             at, "dcl.init", "a scalar initialization of this target type");
-    if (target.kind == type_kind::pointer_to_member &&
-        type_table[m.type.unqualified()].kind == type_kind::class_type)
-        /* a conversion function to a pointer to member: not analysed */
-        return not_supported_because(
-            at, "dcl.init", "a conversion function to a pointer to member");
     if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
         /* [dcl.init]/17.7: by a conversion function */
         bool converted = false;

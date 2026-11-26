@@ -698,17 +698,20 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             if (c && entity_table[c].first_constructor) {
                 VTRY_SET(r, construct(n, type, none, object.node, value));
                 semantic_node &initialization = semantics[value.node];
-                if (initialization.kind != semantic_kind::construct)
+                if (initialization.kind != semantic_kind::construct &&
+                    initialization.kind != semantic_kind::zero)
                     return not_supported_because(
                         n, "dcl.init",
                         "a value-initialized new whose initialization is not a "
                         "constructor call");
                 /* [dcl.init]/8.2: value-initialization zeroes the object
                    before calling a non-user-provided default constructor. */
-                if (entity_table[initialization.b].implicit ||
-                    entity_table[c].defaulted_default_constructor)
+                if (initialization.kind == semantic_kind::construct &&
+                    (entity_table[initialization.b].implicit ||
+                     entity_table[c].defaulted_default_constructor))
                     initialization.op = 1;
-            } else if (c) {
+            } else if (c && (entity_table[c].constructor_templates ||
+                             abstract_class(type))) {
                 return not_supported_because(
                     n, "dcl.init",
                     "a value-initialized new of a class without a constructor");
@@ -760,6 +763,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         if (v.kind == semantic_kind::construct)
             v.a = object.node;
         else if (c && v.kind != semantic_kind::initializer_list &&
+                 v.kind != semantic_kind::zero &&
                  !(v.kind == semantic_kind::conversion &&
                    v.op ==
                        static_cast<uint8_t>(conversion_kind::lvalue_to_rvalue)))

@@ -2051,7 +2051,7 @@ class semantic_analysis
     bool destructor_deleted(entity_index c) const;
     bool copy_constructor_deleted_by_move(entity_index c) const;
     bool declares_move_assignment(entity_index c);
-    bool copy_assignment_deleted(entity_index c) const;
+    bool copy_assignment_deleted(entity_index c);
     bool bytewise_const_member(entity_index c) const;
     bool trivial_special_members(entity_index c) const;
     bool copy_or_move_constructor(entity_index c, entity_index k) const;
@@ -2558,6 +2558,9 @@ class semantic_analysis
     void name_held_detail(token_index t, held_cause by);
     const char *unknown_scope_subclause(entity_index s) const;
     lookup_result lookup_unqualified(uint32_t name, lookup_filter filter) const;
+    /* when set, lookup_unqualified appends the declarations it finds in
+       namespaces: the overload set of functions of several */
+    owned_array<entity_index> *collected_names = nullptr;
     /* [namespace.qual]/2: the name looked up in the namespace n (0: the
        global namespace) */
     lookup_result lookup_in_namespace(entity_index n, uint32_t name,
@@ -4396,6 +4399,7 @@ class semantic_analysis
        the arguments (diagnose_if_call) */
     bool diagnose_if_holds(uint32_t condition, const entity_index *parameters,
                            size_t parameter_count, const uint32_t *arguments);
+    bool function_pointer_type(qualified_type t) const;
     constness evaluate_object(constant_evaluation &state, uint32_t node,
                               uint32_t &object);
     constness evaluate_read(constant_evaluation &state, uint32_t node,
@@ -5386,6 +5390,7 @@ class semantic_analysis
            children are its decl-specifier-seq and declarator */
         SyntaxRef declarator = 0;
         uint32_t first_parameter = 0, parameter_count = 0;
+        uint32_t declarator_first_parameter = 0;
         /* a member template defined outside a class template whose
            template-head renames the class's parameters: the first of
            them, and the class specialization (instantiations index plus
@@ -5539,6 +5544,7 @@ class semantic_analysis
        definitions instantiated meanwhile are outside the immediate
        context, their failures counted */
     unsigned substituting = 0;
+    bool collecting_candidates = false;
     /* [temp.res]/6, /8: the statement (or parameter) analysed in an
        instantiation has named a template argument (entity::argument_bound,
        a member of a class specialization found from its scope, this): an
@@ -6222,6 +6228,13 @@ class semantic_analysis
                                  const entity_index *elements, uint32_t count);
     /* the pack an identifier names from the current scope, or 0 */
     entity_index find_pack(uint32_t name) const;
+
+  public:
+    /* the type that stands for an enclosing instantiation's pack in a
+       written pattern (collect_written_bindings); 0 until one is made */
+    type_index substituted_pack_type = 0;
+
+  private:
     /* [temp.variadic]/5: the number of elements of the packs the pattern
        [first, end) names (false: none, packs of different lengths, or a
        pack expansion within it); own set when it names none but a pack of

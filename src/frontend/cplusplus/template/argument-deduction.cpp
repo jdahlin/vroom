@@ -526,9 +526,10 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
                 (pointee == type_kind::template_parameter && pr.operand.cv()))
                 return false;
         }
-        /* (a T* that does not deduce from a class pointer: a T deduced
-           otherwise elsewhere, no base to try) */
-        if (k == type_kind::class_type && pr.kind == type_kind::pointer &&
+        /* (a T* that does not deduce from a class or function pointer: a T
+           deduced otherwise elsewhere, no base to try) */
+        if ((k == type_kind::class_type || k == type_kind::function) &&
+            pr.kind == type_kind::pointer &&
             table[pr.operand.unqualified()].kind ==
                 type_kind::template_parameter)
             return false;
@@ -846,10 +847,10 @@ analysis_result semantic_analysis::deduce_from_call(
         *failed = true;
         return analysis_result::well_formed;
     }
-    /* the template parameter pack, wherever it is ([temp.param]/14: the
-       parameters after it deduced or with defaults) */
+    /* the first template parameter pack, wherever it is ([temp.param]/14:
+       the parameters after it deduced or with defaults) */
     uint32_t pack = ft.parameter_count;
-    for (uint32_t i = 0; i < ft.parameter_count; i++)
+    for (uint32_t i = ft.parameter_count; i-- > 0;)
         if (template_parameter_is_pack(ft.first_parameter + i))
             pack = i;
     /* [temp.arg.explicit]/3: "A template argument list may be specified
@@ -863,7 +864,13 @@ analysis_result semantic_analysis::deduce_from_call(
        are deduced or have defaults); when a function parameter pack
        would extend the sequence by deduction, refused */
     uint32_t given = specified;
-    if (specified > pack && fixed == f.parameter_count)
+    /* (a later template pack takes the function parameter pack: the
+       first one's elements are the specified ones alone) */
+    bool later_pack = false;
+    for (uint32_t i = pack + 1; i < ft.parameter_count; i++)
+        later_pack =
+            later_pack || template_parameter_is_pack(ft.first_parameter + i);
+    if (specified > pack && (fixed == f.parameter_count || later_pack))
         given = pack;
     if (given > ft.parameter_count || given > pack)
         return not_supported_because(

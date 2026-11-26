@@ -627,10 +627,11 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
     /* register arguments */
     gp = 0, fp = 0;
     if (r && r->is_in_memory && !r->is_x87 && !r->is_sse_up) {
-        codegen_lvalue s = x64_fr(r->slot);
+        int into = r->destination != 0;
+        codegen_lvalue s = x64_fr(into ? r->destination : r->slot);
 
-        x64_record_emit_memory(e, X64_OP_LEA, 8, x64_argument_register(gp++),
-                               &s, false);
+        x64_record_emit_memory(e, into ? X64_OP_LD : X64_OP_LEA, 8,
+                               x64_argument_register(gp++), &s, false);
     }
     for (int k = 0; k < n; k++) {
         if (a[k].bool_lane_count) {

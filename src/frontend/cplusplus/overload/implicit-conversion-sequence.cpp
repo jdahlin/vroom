@@ -715,9 +715,7 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
             lvalue = false;
         }
     } else {
-        if (x.kind == type_kind::none || y.kind == type_kind::none ||
-            x.kind == type_kind::pointer_to_member ||
-            y.kind == type_kind::pointer_to_member)
+        if (x.kind == type_kind::none || y.kind == type_kind::none)
             return of_form(sequence::form::unknown);
         bool compatible = reference_compatible(t1, t2);
         bool ambiguous = false;

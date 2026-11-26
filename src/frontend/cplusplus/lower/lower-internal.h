@@ -124,6 +124,7 @@ class c_lowering
     bool dynamic_initialization();
     /* [basic.start.term], [abi:guards]: the run time's functions and
        __dso_handle, 0 until declared */
+    uint32_t memset_function = 0;
     uint32_t cxa_atexit = 0, dso_handle = 0, guard_acquire = 0,
              guard_release = 0, noop_coro_symbol = 0;
     uint32_t runtime_call(uint32_t &slot, const char *name,
@@ -625,6 +626,18 @@ class c_lowering
        statement of the function lowered returns, constructed in the
        result object (clang's NRVO), 0 if none */
     entity_index named_return = 0;
+    /* the return type of a function that returns a class by address, which
+       is built in the result object (AST_NODE_RESULT_OBJECT); none (0)
+       for another */
+    qualified_type returned_in_place;
+    uint32_t function_symbol = 0;
+    uint32_t result_node(ast_qualified_type t);
+    bool empty_object(qualified_type t) const;
+    bool built_in_place(qualified_type t) const;
+    bool holds_address(entity_index c_) const;
+    /* object = value, a call's result written there (AST_NODE_CALL_INTO) */
+    uint32_t store(ast_qualified_type t, qualified_type object_type,
+                   uint32_t object, uint32_t value);
     uint32_t initializer(uint32_t n);
     entity_index returned_variable(uint32_t return_operand) const;
     void find_named_return(uint32_t statement, entity_index &found,

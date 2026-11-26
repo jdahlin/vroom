@@ -157,8 +157,13 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                                          "an explicit specialization with an "
                                          "attribute that has an effect");
     bool defines = inner.is(syntax_kind::function_definition);
+    bool ctor_body =
+        defines && !inner.function_definition().function_body().deleted() &&
+        !inner.function_definition().function_body().defaulted() &&
+        inner.function_definition().function_body().ctor_initializer();
     /* [dcl.fct.def.delete], = default: not yet */
-    if (defines && !inner.function_definition().function_body().plain())
+    if (defines && !inner.function_definition().function_body().plain() &&
+        !ctor_body)
         return not_supported_because(
             n, "temp.expl.spec",
             "a deleted, defaulted or non-plain explicit specialization body");
@@ -173,6 +178,9 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             tail[has_spec].is(syntax_kind::noptr_declarator,
                               syntax_kind::ptr_declarator) &&
             ((defines && has_spec && inner.function_definition().plain()) ||
+             (defines && !has_spec &&
+              (inner.function_definition().function_body().plain() ||
+               ctor_body)) ||
              (defines && !has_spec &&
               inner.function_definition().function_body().plain()) ||
              (!defines &&
@@ -478,10 +486,14 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
            named_declarator.size() &&
            !named_declarator[named_declarator.size() - 1].is_token())
         named_declarator = named_declarator[named_declarator.size() - 1];
-    if (named_declarator.is(syntax_kind::qualified_id) ||
-        (named_declarator.is(syntax_kind::noptr_declarator) &&
-         named_declarator.size() &&
-         named_declarator[0].is(syntax_kind::qualified_id)))
+    SyntaxElement qid;
+    if (named_declarator.is(syntax_kind::qualified_id))
+        qid = named_declarator;
+    else if (named_declarator.is(syntax_kind::noptr_declarator) &&
+             named_declarator.size() &&
+             named_declarator[0].is(syntax_kind::qualified_id))
+        qid = named_declarator[0];
+    if (qid && !(qid.size() == 2 && qid[1].is(syntax_kind::simple_template_id)))
         return member_explicit_instantiation(n, d, lead, extern_);
     if (SyntaxRef id = variable_specialization_id(d))
         return variable_explicit_instantiation(n, d, lead, id, extern_);
@@ -529,6 +541,16 @@ semantic_analysis::record_instantiation(const function_template &ft,
         bind_template_argument(
             record.scope, template_parameter_entities[ft.first_parameter + i],
             arguments[i]);
+    if (ft.declarator_first_parameter) {
+        for (uint32_t i = 0; i < count; i++) {
+            entity_index old_p =
+                template_parameter_entities[ft.declarator_first_parameter + i];
+            entity_index new_p =
+                template_parameter_entities[ft.first_parameter + i];
+            if (entity_table[old_p].name != entity_table[new_p].name)
+                bind_template_argument(record.scope, old_p, arguments[i]);
+        }
+    }
     if (ft.outer_instantiation) {
         const instantiation_record &ox =
             instantiations[ft.outer_instantiation - 1];
@@ -1587,9 +1609,10 @@ semantic_analysis::explicitly_instantiated(entity_index f) const
         return instantiation_kind::none;
     if (x.explicitly_instantiated != instantiation_kind::none)
         return x.explicitly_instantiated;
-    /* /10: a class's member functions that are not special members
-       (an implicitly-declared one is defined where used, [class.default.ctor]/4) */
-    if (x.special != special_member::none || x.implicit)
+    /* /10: a class's member functions, the special members it declares
+       among them (an implicitly-declared one is defined where used,
+       [class.default.ctor]/4) */
+    if (x.implicit)
         return instantiation_kind::none;
     for (entity_index c = x.enclosing;
          c && entity_table[c].kind == entity_kind::class_type;

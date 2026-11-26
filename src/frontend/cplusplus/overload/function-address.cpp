@@ -431,6 +431,8 @@ semantic_analysis::overload_set_sequence(const expression_meaning &a,
     if (p.kind == type_kind::class_type ||
         depends_on_template_parameter(parameter)) {
         s.kind = conversion_sequence::form::unknown;
+        if (p.kind == type_kind::class_type)
+            s.user_defined_if_viable = true;
         return s;
     }
     if (!function_target(parameter, ft)) {
@@ -438,8 +440,12 @@ semantic_analysis::overload_set_sequence(const expression_meaning &a,
            reference to a pointer: [over.over]/1 wants the type of the
            target as the pointer to function) */
         if (p.kind == type_kind::lvalue_reference ||
-            p.kind == type_kind::rvalue_reference)
+            p.kind == type_kind::rvalue_reference) {
             s.kind = conversion_sequence::form::unknown;
+            if (type_table[p.operand.unqualified()].kind ==
+                type_kind::class_type)
+                s.user_defined_if_viable = true;
+        }
         return s;
     }
     function_set set;

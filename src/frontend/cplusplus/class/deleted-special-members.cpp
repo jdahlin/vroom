@@ -148,13 +148,16 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
         }
         return !has_default_init && has_nontrivial;
     }
-    /* a user-declared constructor and no X() = default: no implicit
-       default constructor ([class.default.ctor]/1) */
-    if (!x.defaulted_default_constructor)
+    /* a user-declared constructor (or constructor template) and no
+       X() = default: no implicit default constructor ([class.default.ctor]/1) */
+    if (!x.defaulted_default_constructor) {
+        if (x.constructor_templates)
+            return false;
         for (entity_index k = x.first_constructor; k;
              k = entity_table[k].next_constructor)
             if (!entity_table[k].implicit)
                 return false;
+    }
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
         if (m.kind != entity_kind::variable || !m.nonstatic_member ||
@@ -247,8 +250,18 @@ bool semantic_analysis::declares_move_assignment(entity_index c)
  * type's is ([expr.prim.lambda.closure]/13).  7.2, a const member, is
  * bytewise_const_member's.
  */
-bool semantic_analysis::copy_assignment_deleted(entity_index c) const
+bool semantic_analysis::copy_assignment_deleted(entity_index c)
 {
+    /* [class.copy.assign]/2: a user-declared copy assignment operator
+       is deleted only if declared = delete (not because of a move
+       constructor or subobject) */
+    uint32_t eq = operator_name(preprocessing_op_or_punc::EQUAL);
+    for (entity_index f = entity_table.find(c, eq);
+         f && entity_table[f].enclosing == c;
+         f = entity_table[f].next_overload) {
+        if (!entity_table[f].implicit && copy_assignment_operator(f, c))
+            return entity_table[f].deleted;
+    }
     /* [class.copy.assign]/2: only an implicitly-declared copy assignment
        operator is defined as deleted by a declared move constructor; a
        defaulted X& operator=(const X&) is a declaration of it */
@@ -265,12 +278,23 @@ bool semantic_analysis::copy_assignment_deleted(entity_index c) const
             k == type_kind::rvalue_reference)
             return true;
     }
-    owned_array<entity_index> classes;
-    subobject_classes(c, classes);
-    for (entity_index k : classes)
-        if (entity_table[k].kind == entity_kind::class_type &&
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index k = type_table[entity_table[class_bases[x.first_base + i]]
+                                        .type.unqualified()]
+                             .entity;
+        if (k && entity_table[k].kind == entity_kind::class_type &&
             copy_assignment_deleted(k))
             return true;
+    }
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.base_subobject)
+            continue;
+        entity_index k = element_class(m.type);
+        if (k && entity_table[k].kind == entity_kind::class_type &&
+            copy_assignment_deleted(k))
+            return true;
+    }
     return false;
 }
 

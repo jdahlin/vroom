@@ -4,6 +4,32 @@
 namespace cplusplus::lowering
 {
 
+bool c_lowering::empty_object(qualified_type t) const
+{
+    const struct type &r = record(t);
+    return r.kind == type_kind::class_type && analysis.empty_class(r.entity);
+}
+
+uint32_t c_lowering::result_node(ast_qualified_type t)
+{
+    return make(AST_NODE_RESULT_OBJECT, t, 0, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+}
+
+uint32_t c_lowering::store(ast_qualified_type t, qualified_type object_type,
+                           uint32_t object, uint32_t value)
+{
+    /* [class.copy.elision]/1, [abi:calls]: a class passed by address is
+       built where it ends up, a call's result too */
+    if (built_in_place(object_type) && ast_builder_node_is_call(c, value))
+        return make(AST_NODE_CALL_INTO, void_type, object, value, 0, 0, 0);
+    /* an empty class has no value: its byte may be another member's
+       ([[no_unique_address]], an empty base) */
+    if (empty_object(object_type))
+        return comma(void_type, cast(value, void_type, AST_CAST_VOID),
+                     cast(object, void_type, AST_CAST_VOID));
+    return assign(t, object, value);
+}
+
 /* the initializer n of an object: a prvalue there initializes the object
    itself ([dcl.init]/17.6.1) */
 uint32_t c_lowering::initializer(uint32_t n)
@@ -103,11 +129,33 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
     else if (x.kind == semantic_kind::zero &&
              record(x.type).kind != type_kind::class_type)
         value = scalar_zero(x.type, t, x.at);
-    else
+    else if (x.kind == semantic_kind::zero &&
+             record(x.type).kind == type_kind::class_type &&
+             !holds_data_member_pointer(x.type)) {
+        /* the object itself zeroed (memset), never a temporary as large
+           as it (Stockfish's FeatureTransformer, 100 MB) */
+        ast_qualified_type v = pointer_to(void_type);
+        ast_qualified_type size_type =
+            ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG);
+        ast_qualified_type parameters[3] = {
+            v, ast_builder_type_basic(AST_TYPE_INT), size_type};
+        uint32_t arguments[3] = {
+            address_of(object, pointer_to(t)),
+            ast_builder_integer(c, parameters[1], 0),
+            ast_builder_integer(
+                c, size_type,
+                static_cast<int64_t>(
+                    analysis.entity_table[record(x.type).entity].size))};
+        uint32_t call = runtime_call(memset_function, "memset", v, parameters,
+                                     arguments, 3);
+        if (!call)
+            return 0;
+        return cast(call, void_type, AST_CAST_VOID);
+    } else
         value = initializer(n);
     if (!value)
         return 0;
-    return assign(t, object, value);
+    return store(t, object_type, object, value);
 }
 
 bool c_lowering::piecewise_initializer(uint32_t n) const
@@ -187,7 +235,7 @@ uint32_t c_lowering::initialize_list_into(uint32_t object,
         value = initializer(n);
     if (!value)
         return 0;
-    return assign(AST_QUALIFIED_TYPE_UNQUALIFIED(t), object, value);
+    return store(AST_QUALIFIED_TYPE_UNQUALIFIED(t), object_type, object, value);
 }
 
 /* [dcl.init]/6: "To zero-initialize an object ... of scalar type T means
@@ -476,11 +524,20 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
         return static_temporary(n, pointer);
     entity_index cls = record(bound.type).entity;
     if (record(bound.type).kind == type_kind::class_type &&
-        analysis.entity_table[cls].destructor) {
+        (analysis.entity_table[cls].destructor ||
+         (built_in_place(bound.type) && bound.kind == semantic_kind::call))) {
         /* [class.temporary]/4 and /6: a temporary with a destructor,
            destroyed by the full-expression or as the reference dies: the
            object construct() or call() made */
         uint32_t held = object(n.a);
+        if (!held)
+            return 0;
+        return address_of(held, pointer);
+    }
+    if (built_in_place(bound.type) && bound.kind == semantic_kind::construct &&
+        collecting) {
+        /* constructed in its temporary, never copied there */
+        uint32_t held = temporary_object(n.a);
         if (!held)
             return 0;
         return address_of(held, pointer);

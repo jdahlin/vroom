@@ -40,6 +40,10 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
                                const template_argument *arguments,
                                uint32_t count, entity_index &specialization)
 {
+    /* this specialization is a candidate's; what substituting its
+       signature instantiates is not */
+    bool candidate = collecting_candidates;
+    scoped_value<bool> nested(collecting_candidates, false);
     specialization = 0;
     const entity t = entity_table[template_entity];
     if (t.kind != entity_kind::template_entity || !t.instantiation)
@@ -251,8 +255,11 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
        statement with a non-type-dependent operand"; a use of a
        specialization whose return type is not deduced yet instantiates
        its definition there, in an unevaluated operand too */
-    bool deducing = contains_placeholder(
-        type_table[entity_table[specialization].type.unqualified()].operand);
+    bool deducing =
+        !candidate &&
+        contains_placeholder(
+            type_table[entity_table[specialization].type.unqualified()]
+                .operand);
     if (needed && x.pending && !quiet_member_bodies)
         x.quiet = false;
     if (x.defined || x.defining || (!deducing && (!needed || x.pending)))
@@ -388,6 +395,15 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     size_t unsupported_before = unsupported.size();
     uint32_t hidden_before = horizon_hidden;
     bool quiet = instantiations[index].quiet;
+    /* [impl.clang] one that only bodies nobody uses ask for (a member template called
+       by an unused constructor, deque's __append) is as quiet, and its
+       needs wait as theirs do (not an implicit member's, whose errors
+       clang reports) */
+    entity_index spec = instantiations[index].specialization;
+    if (!entity_table[spec].member_definition_needed)
+        for (const deferred_need &d : deferred_needs)
+            if (d.needed == spec && !entity_table[d.by].implicit)
+                quiet = true;
     diagnostics_suppressed_if hush(diagnostics, quiet);
     /* (what a quiet definition wants is as quiet) */
     quiet_member_bodies += quiet;
@@ -1117,6 +1133,12 @@ int semantic_analysis::definition_parameter_count(SyntaxRef definition) const
         SyntaxElement c = n[i];
         if (!c.is(syntax_kind::parameters_and_qualifiers))
             continue;
+        /* a parameter pack declares as many parameters as the
+           specialization's pack has: any count */
+        for (token_index k = c.first_token(); k < c.end_token(); k++)
+            if (tokens[k].kind == token_kind::operator_or_punctuator &&
+                is_operator(tokens[k], preprocessing_op_or_punc::ELLIPSIS))
+                return -1;
         int count = clause_parameters(c);
         /* (void): no parameter, [dcl.fct]/4 */
         if (count == 1)
@@ -1273,7 +1295,9 @@ bool semantic_analysis::emitted_functions_needed()
         entity &x = entity_table[f];
         if (x.kind != entity_kind::function || !x.defined ||
             x.member_definition_needed || x.member_body_deferred ||
-            x.unsupported_body || x.deleted || x.implicit || x.inline_)
+            x.unsupported_body || x.deleted || x.implicit ||
+            (x.inline_ &&
+             explicitly_instantiated(f) != instantiation_kind::definition))
             continue;
         if (explicitly_instantiated(f) == instantiation_kind::declaration)
             continue;

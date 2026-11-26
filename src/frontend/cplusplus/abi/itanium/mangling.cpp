@@ -1177,6 +1177,16 @@ int itanium_mangler::unresolved_qualifier(SyntaxElement q)
             return 0;
         return 2;
     }
+    /* [impl.clang] an alias template's dependent specialization
+       (libc++'s _CheckOptionalArgsCtor<_Up>::): its name and arguments as
+       written */
+    if (q.is(syntax_kind::simple_template_id) && q.size() >= 3 &&
+        q[0].is_identifier()) {
+        bool dependent = false;
+        if (source_name(analysis.token_identifier(q[0].token())) &&
+            written_template_args(q, dependent))
+            return 2;
+    }
     return 0;
 }
 
@@ -2764,11 +2774,25 @@ bool itanium_mangler::dependent_value(entity_index d)
         uint32_t saved_first = written_first, saved_count = written_count;
         written_first = analysis.entity_table[w.entity].first_member;
         written_count = analysis.entity_table[w.entity].member_count;
-        text("X");
-        bool done = dependent_expression(n);
+        bool done = false;
+        bool pattern = false;
+        /* a pack expansion whose pattern is a type: <type>, Dp */
+        if (n.is(syntax_kind::type_id))
+            for (uint32_t i = 0; i < written_count && !pattern; i++) {
+                const auto &b = analysis.written_bindings[written_first + i];
+                if (b.identifier || b.cast != SyntaxRef(n).index().index() ||
+                    record(b.type).kind != type_kind::pack_expansion)
+                    continue;
+                pattern = true;
+                done = type(b.type);
+            }
+        if (!pattern) {
+            text("X");
+            done = dependent_expression(n);
+            text("E");
+        }
         written_first = saved_first;
         written_count = saved_count;
-        text("E");
         return done;
     }
     text("X");
@@ -3700,6 +3724,15 @@ bool itanium_mangler::bare_function_type(qualified_type t)
  */
 bool itanium_mangler::type(qualified_type t, entity_index member_class)
 {
+    if (analysis.substituted_pack_type && !t.cv() &&
+        t.unqualified() == analysis.substituted_pack_type) {
+        /* [impl.clang] a substitution candidate itself */
+        if (substitution(t, member_class))
+            return true;
+        text("_SUBSTPACK_");
+        add_candidate(t);
+        return true;
+    }
     const struct type &r = record(t);
     /* [impl.clang] an alias template's specialization kept for its
        dependent arguments ([temp.alias]/4) whose type-id is not dependent
@@ -4362,6 +4395,10 @@ bool itanium_mangler::same_candidate(qualified_type a, qualified_type b) const
             return false;
         switch (x.kind) {
         case type_kind::template_parameter:
+            /* (the stand-in for a substituted pack is at no position) */
+            if (a.unqualified() == analysis.substituted_pack_type ||
+                b.unqualified() == analysis.substituted_pack_type)
+                return false;
             return analysis.entity_table[x.entity].value ==
                    analysis.entity_table[y.entity].value;
         case type_kind::pointer:

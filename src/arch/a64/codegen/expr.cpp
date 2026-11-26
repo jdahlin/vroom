@@ -1390,6 +1390,7 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 
         return load_free(e, &l, x->ty);
     }
+    case AST_NODE_RESULT_OBJECT:
     case AST_NODE_COMPOUND_LITERAL: {
         codegen_lvalue l = gen_lval(e, n);
 
@@ -1594,6 +1595,33 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
     }
     case AST_NODE_CALL:
         return gen_call(e, n);
+    case AST_NODE_CALL_INTO: {
+        codegen_lvalue to = gen_lval(e, x->a);
+        codegen_value address = laddr(e, &to);
+        int r = toreg(e, &address);
+        int64_t at = a64_frame_slot_allocate(e, 8, 8);
+        ast_qualified_type rt = N(x->b)->ty;
+
+        a64_record_emit_memory(e, A64_OP_ST, 3, 0, r, A64_REGISTER_FRAME, at);
+        tfree(e, r);
+        if (a64_abi_result_is_indirect(c, rt)) {
+            e->call_destination = at;
+            codegen_value done = gen(e, x->b);
+
+            val_free(e, &done);
+        } else {
+            codegen_value from = gen(e, x->b);
+            int rs = toreg(e, &from);
+            int rd = treg(e);
+
+            a64_record_emit_memory(e, A64_OP_LD, 3, 0, rd, A64_REGISTER_FRAME,
+                                   at);
+            copy_mem(e, rd, rs, codegen_type_size(c, rt));
+            tfree(e, rs);
+            tfree(e, rd);
+        }
+        return codegen_value_none();
+    }
     case AST_NODE_BUILTIN:
         return gen_builtin(e, n);
     case AST_NODE_STATEMENT_EXPRESSION:

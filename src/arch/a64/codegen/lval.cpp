@@ -154,6 +154,14 @@ VPRIV codegen_lvalue gen_lval(codegen_context *e, uint32_t n)
         l.reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_STRING, x->a);
         l.align = c->strs[x->a].esz;
         return l;
+    case AST_NODE_RESULT_OBJECT: {
+        int r = treg(e);
+
+        a64_record_emit_memory(e, A64_OP_LD, 3, 0, r, A64_REGISTER_FRAME,
+                               e->function_instance->return_slot);
+        return lfromval(e, codegen_value_register(r),
+                        codegen_type_alignment(c, x->ty));
+    }
     case AST_NODE_DEREFERENCE: {
         codegen_value p = gen(e, x->a);
         ast_qualified_type bt = T(c, N(x->a)->ty)->base;

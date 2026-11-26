@@ -59,17 +59,12 @@ static triviality assignment_triviality(const semantic_analysis &a,
             work.append(s.a);
             work.append(s.b);
             break;
-        case semantic_kind::call: {
-            /* an implicitly-declared assignment operator that analysis
-               defines memberwise (implicit_assignments) is trivial when
-               every subobject's selected one is, which it does not tell */
-            const semantic_node callee = a.semantics[s.a];
-            if (callee.kind == semantic_kind::entity &&
-                a.entity_table[callee.a].implicit &&
-                a.entity_table[callee.a].operator_function)
-                return triviality::unknown;
+        case semantic_kind::call:
+            /* [class.copy.assign]/12: a trivial implicit assignment is
+               represented as semantic_kind::assignment, not a call; any
+               call (including a memberwise implicit assignment) is
+               non-trivial */
             return triviality::not_trivial;
-        }
         default:
             return triviality::unknown;
         }
@@ -209,13 +204,24 @@ semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
             /* [over.match.ref]/1: a direct-initialization also considers
                the explicit conversion functions, which the binding does
                not */
+            qualified_type target_referred =
+                type_table[t.unqualified()].operand;
             for (entity_index f = own_conversion_functions(uc); f;
-                 f = entity_table[f].next_overload)
-                if (which != 2 && entity_table[f].explicit_)
-                    return not_supported_because(
-                        n, "over.match.ref",
-                        "a reference-temporary trait through an explicit "
-                        "conversion function");
+                 f = entity_table[f].next_overload) {
+                if (which != 2 && entity_table[f].explicit_) {
+                    qualified_type ret =
+                        type_table[entity_table[f].type.unqualified()].operand;
+                    const struct type &rr = type_table[ret.unqualified()];
+                    if (rr.kind == type_kind::lvalue_reference ||
+                        rr.kind == type_kind::rvalue_reference)
+                        ret = rr.operand;
+                    if (ret.unqualified() == target_referred.unqualified())
+                        return not_supported_because(
+                            n, "over.match.ref",
+                            "a reference-temporary trait through an explicit "
+                            "conversion function");
+                }
+            }
         }
         from.node =
             expression_node(semantic_kind::constant, from, n.first_token());

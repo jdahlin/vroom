@@ -151,7 +151,10 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
     }
     expression_meaning m;
     unevaluated++;
+    bool saved_atomic = atomic_object_operand;
+    atomic_object_operand = true;
     analysis_result r = expression(operand, m);
+    atomic_object_operand = saved_atomic;
     unevaluated--;
     if (r != analysis_result::well_formed)
         return r;
@@ -497,7 +500,39 @@ void semantic_analysis::collect_written_bindings(
     if (n.is(syntax_kind::type_id)) {
         size_t unsupported_before = unsupported.size();
         qualified_type t;
-        analysis_result r = type_id(n, t);
+        /* [impl.clang] a pack of an enclosing instantiation, expanded with
+           one of the template's own: it stands for itself in the pattern,
+           which clang mangles _SUBSTPACK_ */
+        owned_array<entity_index> packs;
+        owned_array<entity> saved;
+        for (token_index k = n.first_token(); k < n.end_token(); k++) {
+            if (tokens[k].kind != token_kind::identifier)
+                continue;
+            entity_index pack = find_pack(tokens.identifier(k));
+            if (!pack || pack_depends(pack))
+                continue;
+            if (!substituted_pack_type) {
+                entity_index e =
+                    entity_table.make(entity_kind::typedef_name, 0, 0);
+                substituted_pack_type =
+                    type_table.of_entity(type_kind::template_parameter, e);
+            }
+            packs.append(pack);
+            saved.append(entity_table[pack]);
+            entity_table[pack].kind = entity_kind::typedef_name;
+            entity_table[pack].type =
+                qualified_type::make(substituted_pack_type, cv_none);
+        }
+        analysis_result r = analysis_result::well_formed;
+        {
+            bool ellipsis = is_operator(tokens[n.end_token() - 1],
+                                        preprocessing_op_or_punc::ELLIPSIS);
+            expansion_scope expanding_pattern(*this, !packs.empty() || ellipsis,
+                                              0, true);
+            r = type_id(n, t);
+        }
+        for (size_t k = packs.size(); k-- > 0;)
+            entity_table[packs[k]] = saved[k];
         unsupported.resize(unsupported_before);
         if (r == analysis_result::well_formed) {
             written_binding b;
@@ -537,7 +572,12 @@ void semantic_analysis::collect_written_bindings(
             continue;
         }
         entity_index pack = find_pack(id);
-        if (!pack || !pack_depends(pack))
+        /* (sizeof...(P) is mangled by P's position whatever P is) */
+        bool measured =
+            t >= 2 &&
+            tokens[t - 2].kind == token_kind::operator_or_punctuator &&
+            is_operator(tokens[t - 2], preprocessing_op_or_punc::ELLIPSIS);
+        if (!pack || (!pack_depends(pack) && !measured))
             continue;
         for (uint32_t i = 0; i < entity_table[pack].member_count; i++) {
             entity_index a = pack_elements[entity_table[pack].value + i];

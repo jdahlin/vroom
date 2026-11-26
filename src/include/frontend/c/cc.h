@@ -313,6 +313,10 @@ enum {
     AST_NODE_VA_ARG,        /* a: va_list expr */
     AST_NODE_ZERO,          /* implicit zero initialization */
     AST_NODE_COMPLEX, /* a + b i: a _Complex value from its parts (a, b of the element type) */
+    /* an in-memory result, which a language may require to be built where
+       it ends up (C++'s classes that are not trivially copyable) */
+    AST_NODE_RESULT_OBJECT, /* lvalue: the object the function's result is returned in; its function is not inlined */
+    AST_NODE_CALL_INTO, /* a: lvalue, b: AST_NODE_CALL: the call's result written there, never copied there */
     /* statements */
     AST_NODE_BLOCK,      /* b: list, c: count */
     AST_NODE_EXPRESSION, /* a */

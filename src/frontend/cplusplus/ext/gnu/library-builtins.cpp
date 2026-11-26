@@ -1593,16 +1593,25 @@ semantic_analysis::bit_count_arguments(SyntaxRef n, entity_index called,
                           "clzg and ctzg, a fallback",
                           "ext.gnu");
     qualified_type first = semantics[nodes[0]].type;
-    fundamental_type f = fundamental_of(first);
-    if (f == fundamental_type::none)
-        return not_supported_builtin(n, "ext.gnu", called,
-                                     "of an operand that is not an integer");
-    if (!fundamental_type_is_integral(f) ||
-        fundamental_type_is_signed(tokens.files.behavior, f))
-        return ill_formed(n,
-                          "1st argument must be a scalar unsigned integer "
-                          "type",
-                          "ext.gnu");
+    const struct type &fr = type_table[first.unqualified()];
+    if (fr.kind == type_kind::bit_int) {
+        if (fr.fundamental != fundamental_type::unsigned_int)
+            return ill_formed(n,
+                              "1st argument must be a scalar unsigned integer "
+                              "type",
+                              "ext.gnu");
+    } else {
+        fundamental_type f = fundamental_of(first);
+        if (f == fundamental_type::none)
+            return not_supported_builtin(
+                n, "ext.gnu", called, "of an operand that is not an integer");
+        if (!fundamental_type_is_integral(f) ||
+            fundamental_type_is_signed(tokens.files.behavior, f))
+            return ill_formed(n,
+                              "1st argument must be a scalar unsigned integer "
+                              "type",
+                              "ext.gnu");
+    }
     if (nodes.size() == 2) {
         fundamental_type g = fundamental_of(semantics[nodes[1]].type);
         if (g == fundamental_type::none)

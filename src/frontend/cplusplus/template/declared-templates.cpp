@@ -341,10 +341,12 @@ analysis_result semantic_analysis::template_head_parameters(
                                      "template-head and a declaration");
     /* a member alias template of a class of namespace scope
        (member_template_declaration) is the one member template here */
+    entity_index top = current_scope;
+    while (top && entity_table[top].kind == entity_kind::class_type)
+        top = entity_table[top].enclosing;
     bool member_alias =
         entity_table[current_scope].kind == entity_kind::class_type &&
-        is_namespace(entity_table[current_scope].enclosing) &&
-        n[1].is(syntax_kind::alias_declaration);
+        is_namespace(top) && n[1].is(syntax_kind::alias_declaration);
     /* ... and a member class template (member_template_declaration) */
     bool member_class =
         entity_table[current_scope].kind == entity_kind::class_type &&
@@ -352,8 +354,7 @@ analysis_result semantic_analysis::template_head_parameters(
     /* ... and a member deduction guide ([temp.deduct.guide]) */
     bool member_guide =
         entity_table[current_scope].kind == entity_kind::class_type &&
-        is_namespace(entity_table[current_scope].enclosing) &&
-        n[1].is(syntax_kind::deduction_guide);
+        is_namespace(top) && n[1].is(syntax_kind::deduction_guide);
     /* ... and the template-head of a member variable template's definition
        outside its class (define_template_member), in the scope that binds
        the class's parameters */
@@ -1352,7 +1353,8 @@ analysis_result semantic_analysis::template_id_arguments(
                    written type, analysed again with the elements when
                    the template is instantiated */
                 bool own_pattern = false;
-                if (!expansion_count(first, end, times, &own_pattern)) {
+                if (!expansion_count(first, end, times, &own_pattern) ||
+                    own_pattern) {
                     if (!own_pattern || a.is_token() || pack >= count ||
                         arguments.size() < pack)
                         return not_supported_because(

@@ -209,12 +209,13 @@ void c_lowering::guarded_initialization(const semantic_node &n,
 {
     entity_index e = n.a;
     entity_index function = enclosing_function(e);
-    if (!function || analysis.entity_table[function].inline_) {
-        /* [abi:guards]: the guard and the variable are COMDAT with the
-           inline function, which C's code generator does not make yet */
-        fail("a guarded local static in an inline function", n.at);
+    if (!function) {
+        fail("a guarded local static outside a function", n.at);
         return;
     }
+    bool weak_guard =
+        analysis.entity_table[function].inline_ &&
+        analysis.entity_table[function].linkage_of_name != linkage::internal;
     bool constant = !n.b || constant_initializer(n.b);
     if (!constant && node(n.b).kind == semantic_kind::initializer_list &&
         record(analysis.entity_table[e].type).kind == type_kind::array) {
@@ -251,16 +252,45 @@ void c_lowering::guarded_initialization(const semantic_node &n,
         ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
     ast_qualified_type i64p = pointer_to(i64);
     ast_qualified_type int_type = ast_builder_type_basic(AST_TYPE_INT);
-    uint32_t guard =
-        ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),
-                           guard_name.size(), i64, AST_STORAGE_STATIC, 0, 1);
+    uint32_t guard = 0;
+    uint32_t per_thread = 0;
+    if (analysis.entity_table[e].c11_thread_local)
+        per_thread = AST_SYMBOL_FLAG_THREAD;
+    if (weak_guard) {
+        guard = ast_builder_symbol(
+            c, AST_SYMBOL_VARIABLE, guard_name.data(), guard_name.size(), i64,
+            AST_STORAGE_NONE,
+            AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
+                AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED | per_thread,
+            0);
+        ast_builder_toplevel(c, guard);
+    } else {
+        guard = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),
+                                   guard_name.size(), i64, AST_STORAGE_STATIC,
+                                   per_thread, 1);
+        ast_builder_symbol_flags_add(c, guard, AST_SYMBOL_FLAG_DEFINED);
+    }
     ast_builder_symbol_assembler_name(c, guard, written.data(), written.size());
-    ast_builder_symbol_flags_add(c, guard, AST_SYMBOL_FLAG_DEFINED);
     ast_builder_symbol_keep(c, guard);
     auto guard_address = [&]() {
         return address_of(c_variable(c, guard, i64), i64p);
     };
     owned_array<uint32_t> inner;
+    if (analysis.entity_table[e].c11_thread_local) {
+        /* [stmt.dcl]/3, [impl.clang]: one thread's object, so no
+           concurrent initialization: a thread-local guard byte, set once
+           the object is made (a trivially destroyed one) */
+        static_initialization(e, n.b, inner, n.at);
+        if (failure.what)
+            return;
+        inner.append(c_statement(c, assign(i64, c_variable(c, guard, i64),
+                                           ast_builder_integer(c, i64, 1))));
+        uint32_t unmade =
+            make(AST_NODE_BINARY, int_type, c_variable(c, guard, i64),
+                 ast_builder_integer(c, i64, 0), 0, LEX_TOKEN_EQUAL_EQUAL, 0);
+        out.append(if_statement(unmade, block(inner), 0));
+        return;
+    }
     if (!constant)
         static_initialization(e, n.b, inner, n.at);
     if (destructor)
@@ -330,6 +360,40 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
     in_function = false;
     if (failure.what || statements.empty())
         return false;
+    if (x.inline_ && x.linkage_of_name != linkage::internal) {
+        /* [basic.start.dynamic]/1, [abi:guards]: guard an inline variable's
+           dynamic initialization with weak _ZGV<mangled without _Z> */
+        owned_buffer name;
+        if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), 0) ||
+            name.size() < 2)
+            return fail("an entity whose symbol is not mangled", init.at);
+        owned_buffer guard_name;
+        vbuffer_string_append(guard_name.get(), "_ZGV");
+        vbuffer_append(guard_name.get(), name.data() + 2, name.size() - 2);
+        ast_qualified_type guard_type =
+            ast_builder_type_basic(AST_TYPE_LONG_LONG);
+        uint32_t guard = ast_builder_symbol(
+            c, AST_SYMBOL_VARIABLE, guard_name.data(), guard_name.size(),
+            guard_type, AST_STORAGE_NONE,
+            AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
+                AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED,
+            0);
+        ast_builder_symbol_keep(c, guard);
+        ast_builder_toplevel(c, guard);
+        owned_array<uint32_t> guarded;
+        guarded.append(
+            c_statement(c, assign(guard_type, c_variable(c, guard, guard_type),
+                                  ast_builder_integer(c, guard_type, 1))));
+        for (uint32_t st : statements)
+            guarded.append(st);
+        uint32_t test = make(
+            AST_NODE_BINARY, ast_builder_type_basic(AST_TYPE_INT),
+            c_variable(c, guard, guard_type),
+            ast_builder_integer(c, guard_type, 0), 0, LEX_TOKEN_EQUAL_EQUAL, 0);
+        uint32_t body = if_statement(test, block(guarded), 0);
+        statements.clear();
+        statements.append(body);
+    }
     ast_builder_symbol_body(c, f, block(statements));
     ast_builder_symbol_flags_add(
         c, f, AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED);

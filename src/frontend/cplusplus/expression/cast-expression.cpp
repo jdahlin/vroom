@@ -319,6 +319,19 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
     }
     if (target.kind == type_kind::pointer_to_member)
         return member_pointer_cast(at, to, m, kinds);
+    if (target.kind == type_kind::bit_int) {
+        if (!by_static)
+            return no_cast(at, kinds);
+        VTRY(r, operand_value(at, m));
+        if (!is_integral(m.type))
+            return not_supported_because(
+                at, "expr.cast", "a cast to _BitInt from a non-integer");
+        m.type = qualified_type::make(to.unqualified(), cv_none);
+        m.category = value_category::prvalue;
+        m.evaluation = constness::not_constant;
+        converted(m, conversion_kind::integral);
+        return analysis_result::well_formed;
+    }
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer)
         return not_supported_because(at, "expr.cast",

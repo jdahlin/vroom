@@ -395,6 +395,11 @@ void ast_builder_toplevel(cc *c, uint32_t s)
 
 /* ---- nodes ---- */
 
+bool ast_builder_node_is_call(cc *c, uint32_t n)
+{
+    return c->nodes[n].op == AST_NODE_CALL;
+}
+
 uint32_t ast_builder_node(cc *c, int op, ast_qualified_type t, uint32_t a,
                           uint32_t b, uint32_t c_, uint16_t aux, uint8_t flags)
 {

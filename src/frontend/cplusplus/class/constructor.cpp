@@ -98,10 +98,14 @@ analysis_result semantic_analysis::member_template_declaration(
                 if (x.is(standard_keyword::friend_))
                     return friend_function_template(c, n, inner);
     }
+    /* [temp.mem]/2: a local class shall not have member templates; a nested
+       class of a namespace-scope class may */
+    entity_index top = entity_table[c].enclosing;
+    while (top && entity_table[top].kind == entity_kind::class_type)
+        top = entity_table[top].enclosing;
     /* [temp.alias]/1: a member alias template, of a class of namespace
        scope: an alias template declared in the class's scope */
-    if (inner.is(syntax_kind::alias_declaration) &&
-        is_namespace(entity_table[c].enclosing)) {
+    if (inner.is(syntax_kind::alias_declaration) && is_namespace(top)) {
         entity_index saved = current_scope;
         current_scope = c;
         analysis_result r = alias_template_definition(n, inner);
@@ -122,11 +126,6 @@ analysis_result semantic_analysis::member_template_declaration(
             return r;
         }
     }
-    /* [temp.mem]/2: a local class shall not have member templates; a nested
-       class of a namespace-scope class may */
-    entity_index top = entity_table[c].enclosing;
-    while (top && entity_table[top].kind == entity_kind::class_type)
-        top = entity_table[top].enclosing;
     /* [temp.deduct.guide]: a deduction guide for a member class template */
     if (inner.is(syntax_kind::deduction_guide) && is_namespace(top)) {
         entity_index saved = current_scope;
@@ -1264,10 +1263,19 @@ analysis_result semantic_analysis::construct(
         declares_move_constructor(c))
         moved = true;
     if (!arguments.empty() && x.implicit_copy_deleted && !moved &&
-        !x.defaulted_move_constructor && copy_argument_candidate(c, arguments))
+        !x.defaulted_move_constructor &&
+        copy_argument_candidate(c, arguments)) {
+        if (arguments.size() == 1 &&
+            arguments[0].category != value_category::prvalue &&
+            arguments[0].type.unqualified() == type.unqualified())
+            return ill_formed(at,
+                              "the implicitly-declared copy constructor is "
+                              "defined as deleted",
+                              "class.copy.ctor");
         return not_supported_because(
             at, "class.copy.ctor",
             "a copy using a deleted implicit copy constructor");
+    }
     if (arguments.empty() && trivial_defaulted_default_constructor(c)) {
         /* [dcl.init]/8.2: value-initialization of a class with a trivial
            defaulted default constructor zero-initializes the object */
@@ -1860,12 +1868,28 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
             } else if (written.list) {
                 SyntaxElement init = written.list;
                 if (init.is(syntax_kind::initializer_list)) {
-                    if (has_pack_expansion(init))
-                        return not_supported_because(
-                            item, "temp.variadic",
-                            "a pack expansion inside the expression-list of a "
-                            "member initializer");
-                    if (record.kind != type_kind::class_type)
+                    if (has_pack_expansion(init)) {
+                        owned_array<expression_meaning> expanded;
+                        VTRY(re, expression_list_meanings(init, expanded));
+                        if (expanded.empty() &&
+                            !entity_table[e].base_subobject) {
+                            expression_meaning zero;
+                            zero.type = qualified_type::make(type.unqualified(),
+                                                             cv_none);
+                            zero.evaluation = constness::constant;
+                            value.node = expression_node(
+                                semantic_kind::zero, zero, first_token(item));
+                        } else if (expanded.size() == 1 &&
+                                   !entity_table[e].base_subobject) {
+                            r = initialize_with(item, expanded[0], type, true,
+                                                false, value);
+                        } else {
+                            return not_supported_because(
+                                item, "temp.variadic",
+                                "a pack expansion inside the expression-list "
+                                "of a member initializer");
+                        }
+                    } else if (record.kind != type_kind::class_type) {
                         return ill_formed(
                             item,
                             "if the entity being initialized does "
@@ -1874,13 +1898,14 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                             "initializer shall be a single "
                             "expression",
                             "dcl.init");
-                    return not_supported_because(
-                        item, "dcl.init",
-                        "a parenthesized list of several expressions for a "
-                        "class member");
-                }
-                if (entity_table[e].base_subobject &&
-                    entity_table[e].field == UINT32_MAX) {
+                    } else {
+                        return not_supported_because(
+                            item, "dcl.init",
+                            "a parenthesized list of several expressions for a "
+                            "class member");
+                    }
+                } else if (entity_table[e].base_subobject &&
+                           entity_table[e].field == UINT32_MAX) {
                     /* an empty base ([class.derived]/4: no field) copied
                        from an expression (json's basic_json(const
                        basic_json &other) : json_base_class_t(other)): its
@@ -1893,15 +1918,16 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                              statement_node(semantic_kind::expression_statement,
                                             id, value.node));
                     continue;
-                }
-                if (entity_table[e].base_subobject)
+                } else if (entity_table[e].base_subobject) {
                     /* a base copied from an expression: [conv.ptr]/3's
                    conversion of the source */
                     return not_supported_because(
                         item, "class.base.init",
                         "a base class initialized from a single expression "
                         "that is not a constructor call");
-                r = initialize_from(item, init, type, true, false, value);
+                } else {
+                    r = initialize_from(item, init, type, true, false, value);
+                }
             } else {
                 return not_supported_because(
                     item, "class.base.init",
@@ -2322,13 +2348,15 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         const struct type &ar = type_table[t.unqualified()];
         if (ar.kind != type_kind::array)
             continue;
-        bool one_dim_known =
-            ar.bound_known && ar.bound > 0 &&
-            type_table[ar.operand.unqualified()].kind == type_kind::class_type;
-        if (one_dim_known)
+        bool all_dims_known = true;
+        while (type_table[t.unqualified()].kind == type_kind::array) {
+            const struct type &dim = type_table[t.unqualified()];
+            if (!dim.bound_known || dim.bound == 0)
+                all_dims_known = false;
+            t = dim.operand;
+        }
+        if (all_dims_known)
             continue;
-        while (type_table[t.unqualified()].kind == type_kind::array)
-            t = type_table[t.unqualified()].operand;
         const struct type &r = type_table[t.unqualified()];
         if (r.kind == type_kind::class_type &&
             (entity_table[r.entity].first_constructor || destroys(r.entity)))
@@ -2510,7 +2538,9 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                 "a union initialized through a member initializer where "
                 "another member has no default constructor");
         if (construction && !default_ok &&
-            (!x.first_constructor || x.defaulted_default_constructor) &&
+            ((!x.first_constructor && !x.constructor_templates &&
+              !x.constructor_template) ||
+             x.defaulted_default_constructor) &&
             default_constructed(c, k)) {
             /* C++03 has no deleted functions: the implicit default
                constructor's definition is ill-formed, reported at the
@@ -3239,7 +3269,13 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
         entity_table[entity_table[c].destructor].implicit)
         implicit.append(entity_table[c].destructor);
     for (entity_index f : implicit) {
-        VTRY(r, define_defaulted_special_member(c, f, n));
+        entity_index saved_deferred = needs_deferred_by;
+        if (!entity_table[f].member_definition_needed)
+            needs_deferred_by = f;
+        analysis_result r = define_defaulted_special_member(c, f, n);
+        needs_deferred_by = saved_deferred;
+        if (r != analysis_result::well_formed)
+            return r;
     }
     return implicit_assignment_definitions(c, n);
 }

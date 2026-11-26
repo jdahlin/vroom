@@ -784,6 +784,7 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
             break;
         }
         __attribute__((fallthrough));
+    case AST_NODE_CALL_INTO:
     case AST_NODE_BINARY:
     case AST_NODE_LOGICAL_AND:
     case AST_NODE_LOGICAL_OR:

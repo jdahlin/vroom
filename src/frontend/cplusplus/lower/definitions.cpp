@@ -60,7 +60,11 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     }
     live.clear();
     named_return = 0;
-    if (passed_indirectly(f.operand)) {
+    returned_in_place = qualified_type();
+    if (built_in_place(f.operand)) {
+        returned_in_place = f.operand;
+        /* (the inliners do not follow the result object) */
+        ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_NOINLINE);
         bool mixed = false;
         entity_index found = 0;
         find_named_return(body.a, found, mixed);
@@ -191,7 +195,11 @@ bool c_lowering::function_definition(entity_index e)
     if (x.virtual_ && x.special == special_member::destructor &&
         !deleting_destructor(e, body.at, true))
         return false;
-    if (x.special == special_member::none || x.inline_)
+    /* (an explicit instantiation's is called from other units, as one not
+       inline) */
+    if (x.special == special_member::none ||
+        (x.inline_ &&
+         analysis.explicitly_instantiated(e) != instantiation_kind::definition))
         return true;
     /* [abi:mangling-special-ctor-dtor]: the complete object variant, which
        for a class without virtual bases does what the base object one does
@@ -283,12 +291,6 @@ bool c_lowering::variable_definition(entity_index e)
             return fail("a _Thread_local variable initialized or destroyed "
                         "at run time",
                         node(x.definition).at);
-        if (x.inline_ && (!constant || destructor))
-            /* [basic.start.dynamic]/1: partially-ordered, under a guard in
-               a COMDAT group ([abi:guards]) */
-            return fail("an inline variable with dynamic initialization or a "
-                        "destructor",
-                        node(x.definition).at);
         if (!constant) {
             /* [basic.start.static]/2: zero-initialized, then initialized
                by dynamic_initialization */
@@ -332,11 +334,31 @@ bool c_lowering::translation_unit()
             continue;
         if (x.automatic || enclosing_function(d.entity))
             continue;
+        if (x.enclosing &&
+            analysis.entity_table[x.enclosing].kind == entity_kind::none)
+            continue;
         /* a function with a placeholder return type never defined: its
            name is in no expression ([dcl.spec.auto]/11), so it needs no
            symbol (clang emits none) */
-        if (x.kind == entity_kind::function && x.placeholder_return &&
-            !x.defined)
+        bool undeduced = x.placeholder_return;
+        if (x.kind == entity_kind::function && !x.defined && !undeduced) {
+            qualified_type rt =
+                analysis.type_table[x.type.unqualified()].operand;
+            while (rt.unqualified()) {
+                const struct type &r = analysis.type_table[rt.unqualified()];
+                if (r.kind == type_kind::placeholder) {
+                    undeduced = true;
+                    break;
+                }
+                if (r.kind == type_kind::pointer ||
+                    r.kind == type_kind::lvalue_reference ||
+                    r.kind == type_kind::rvalue_reference)
+                    rt = r.operand;
+                else
+                    break;
+            }
+        }
+        if (x.kind == entity_kind::function && !x.defined && undeduced)
             continue;
         /* a deleted function: no symbol ([dcl.fct.def.delete]) */
         if (x.kind == entity_kind::function && x.deleted)
@@ -347,8 +369,7 @@ bool c_lowering::translation_unit()
            [impl.clang] a specialization for a closure unique to the
            translation unit: its symbol made at its first use, which
            numbers the closure (itanium_mangler) */
-        if ((x.kind == entity_kind::function && !x.defined) ||
-            x.instantiation) {
+        if (!x.defined || x.instantiation) {
             owned_buffer probe;
             analysis.number_closures = false;
             bool mangled = itanium_symbol_name(analysis, tokens.pp, d.entity,
@@ -371,6 +392,9 @@ bool c_lowering::translation_unit()
         /* a deleted function has no code ([dcl.fct.def.delete]) */
         if (!x.defined || x.automatic || enclosing_function(d.entity) ||
             x.deleted)
+            continue;
+        if (x.enclosing &&
+            analysis.entity_table[x.enclosing].kind == entity_kind::none)
             continue;
         /* [temp.explicit]/11: an explicit instantiation declaration's
            specialization is defined in another translation unit (clang

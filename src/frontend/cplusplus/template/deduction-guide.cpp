@@ -181,14 +181,16 @@ void semantic_analysis::implicit_deduction_guides(uint32_t ct)
         uint32_t saved_cv = function_cv;
         owned_array<parameter_meaning> saved_params =
             static_cast<owned_array<parameter_meaning> &&>(function_parameters);
-        analysis_result r = implicit_guide_member(ct, mem);
+        {
+            diagnostics_suppressed_if hush(diagnostics, true);
+            (void)implicit_guide_member(ct, mem);
+        }
         current_scope = saved_scope;
         defining_class = saved_class;
         function_cv = saved_cv;
         function_parameters =
             static_cast<owned_array<parameter_meaning> &&>(saved_params);
-        if (r != analysis_result::well_formed)
-            unsupported.resize(unsupported_before);
+        unsupported.resize(unsupported_before);
     }
 }
 
@@ -256,6 +258,34 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
     defining_class = 0;
     function_cv = 0;
     function_parameters.clear();
+    for (SyntaxElement m :
+         c.definition.class_specifier().member_specification().elements()) {
+        if (AliasDeclaration ad = m.alias_declaration()) {
+            size_t u = unsupported.size();
+            (void)alias_declaration(ad);
+            unsupported.resize(u);
+        } else if (m.is(syntax_kind::member_declaration) && m.size() >= 2 &&
+                   m[0].is(syntax_kind::decl_specifier_seq) &&
+                   syntax_parser.keyword_of(tokens[m[0].first_token()]) ==
+                       standard_keyword::typedef_ &&
+                   m[1].is(syntax_kind::member_declarator_list) &&
+                   m[1].size() == 1 && m[1][0].is_token() &&
+                   tokens[m[1][0].token()].kind == token_kind::identifier) {
+            size_t u = unsupported.size();
+            specified ds;
+            if (decl_specifier_seq(m[0].index(), ds, false) ==
+                    analysis_result::well_formed &&
+                ds.typedef_ && ds.type.unqualified()) {
+                uint32_t td_name = tokens.identifier(m[1][0].token());
+                entity_index td = entity_table.make(entity_kind::typedef_name,
+                                                    td_name, scope);
+                entity_table[td].type = ds.type;
+                entity_table[td].defined = true;
+                entity_table.bind(scope, td_name, td);
+            }
+            unsupported.resize(u);
+        }
+    }
     VTRY(typed, function(ctor.parameters().index(), type));
     if (index != function_templates.size()) {
         index = static_cast<uint32_t>(function_templates.size());
@@ -292,7 +322,12 @@ semantic_analysis::implicit_guide_type(const function_template &ft,
     type = entity_table[c].type;
     function_cv = 0;
     function_parameters.clear();
-    return function(ft.declarator, type);
+    entity_index saved_scope = current_scope;
+    if (!ft.guide_of_template)
+        current_scope = c;
+    analysis_result res = function(ft.declarator, type);
+    current_scope = saved_scope;
+    return res;
 }
 
 } // namespace cplusplus

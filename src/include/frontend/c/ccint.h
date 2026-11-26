@@ -458,6 +458,10 @@ enum {
     CC_BUILTIN_FAST_SQRT, /* internal hardware sqrt, full fast-math only */
     CC_BUILTIN_FAST_ROOT4, /* internal double sqrt(sqrt(x)), full fast-math only */
     CC_BUILTIN_COMPLEX,
+    /* the address of the object an in-memory result is returned in (the
+       hidden pointer the caller passed): the C++ front end constructs a
+       returned object there; its function is not inlined */
+    CC_BUILTIN_RESULT_ADDRESS,
     CC_BUILTIN_COUNT
 };
 

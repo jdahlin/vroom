@@ -462,8 +462,16 @@ uint32_t c_lowering::conversion(const semantic_node &n)
                 return 0;
             uint32_t second = read_again(r);
             uint32_t third = read_again(r);
-            if (node(n.a).kind == semantic_kind::address)
-                return virtual_base_address(first, second, k, v, t);
+            if (node(n.a).kind == semantic_kind::address) {
+                if (!r.symbol)
+                    return virtual_base_address(first, second, k, v, t);
+                /* (first sets the temporary: before either read, the
+                   operands of an address being unsequenced) */
+                uint32_t moved = virtual_base_address(second, third, k, v, t);
+                if (!moved)
+                    return 0;
+                return comma(AST_QUALIFIED_TYPE_UNQUALIFIED(t), first, moved);
+            }
             uint32_t null = cast(
                 ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0),
                 t, AST_CAST_NULL_POINTER);

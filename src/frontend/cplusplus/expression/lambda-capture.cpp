@@ -603,13 +603,16 @@ analysis_result semantic_analysis::captured_entity(token_index t,
     if (entity_table[e].usable != constness::not_constant && !forced_odr_use) {
         if (entity_table[e].usable != constness::constant ||
             (variable_type.kind != type_kind::fundamental &&
-             variable_type.kind != type_kind::enumeration))
+             variable_type.kind != type_kind::enumeration)) {
+            if (l.default_capture != capture_default::none)
+                return capture_variable(l, t, e, m);
             /* (a pointer's or class object's reads, and a variable whose
                value is not known, are not tracked: whether it is odr-used
                is not analysed) */
             return not_supported_because(current_declaration, "basic.def.odr",
                                          "a possible odr-use of a constant "
                                          "variable that is not tracked");
+        }
         plain = true;
         deferred = true;
         return analysis_result::well_formed;

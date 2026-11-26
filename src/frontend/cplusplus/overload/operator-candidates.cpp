@@ -380,6 +380,10 @@ analysis_result semantic_analysis::overloaded_operator(
     default:
         break;
     }
+    if (op == preprocessing_op_or_punc::EQUAL &&
+        type_table[operands[0].type.unqualified()].kind !=
+            type_kind::class_type)
+        return analysis_result::well_formed;
     if (converts && !logical && !unary_prefix && !incdec &&
         (operands.size() != 2 || (member_only && !subscript) ||
          op == preprocessing_op_or_punc::SPACESHIP))
@@ -495,15 +499,31 @@ analysis_result semantic_analysis::overloaded_operator(
             function_candidates(members, true, candidates);
             return analysis_result::well_formed;
         }
+        owned_array<entity_index> declared;
+        collected_names = &declared;
         lookup_result found =
             lookup_unqualified(name, lookup_filter::non_members);
+        collected_names = nullptr;
+        /* [namespace.udir]/6: functions of several namespaces are one
+           overload set */
+        bool several = found.unknown && !found.ambiguous &&
+                       !found.unknown_entity && !declared.empty();
+        for (entity_index d : declared)
+            several = several &&
+                      entity_table[d].kind == entity_kind::function &&
+                      is_namespace(entity_table[d].enclosing);
+        bool apart = false;
+        for (entity_index d : declared)
+            apart = apart || entity_table[d].enclosing !=
+                                 entity_table[declared[0]].enclosing;
+        several = several && apart;
         /* [temp.over]/1: operator function templates by that name, whose
            specializations deduced from the operands are candidates too */
         owned_array<entity_index> held_names;
         if (found.unknown && !found.ambiguous &&
             function_template_of(found.unknown_entity))
             held_names.append(found.unknown_entity);
-        else if (found.unknown || found.ambiguous) {
+        else if ((found.unknown && !several) || found.ambiguous) {
             analysis_result refused = not_supported_because(
                 n, "over.match.oper",
                 "an operator whose non-member lookup is unknown or ambiguous");
@@ -512,7 +532,15 @@ analysis_result semantic_analysis::overloaded_operator(
             return refused;
         }
         owned_array<entity_index> set;
-        if (found.entity) {
+        if (several) {
+            for (entity_index d : declared) {
+                bool present = false;
+                for (entity_index have : set)
+                    present = present || have == d;
+                if (!present)
+                    set.append(d);
+            }
+        } else if (found.entity) {
             const entity &x = entity_table[found.entity];
             if (x.kind != entity_kind::function || !is_namespace(x.enclosing) ||
                 !is_namespace(found.found_in))
@@ -681,7 +709,7 @@ analysis_result semantic_analysis::overloaded_operator(
         if (t == analysis_result::well_formed && none)
             candidates.clear();
     }
-    if (candidates.empty()) {
+    auto builtin_via_conversion = [&]() -> analysis_result {
         bool unary_builtin = false;
         if (converts && (unary_prefix || incdec)) {
             switch (op) {
@@ -778,7 +806,14 @@ analysis_result semantic_analysis::overloaded_operator(
             }
             VTRY(br, builtin_binary(n, at, op, lhs, rhs, m));
             handled = true;
+            return analysis_result::well_formed;
         }
+        return analysis_result::ill_formed;
+    };
+    if (candidates.empty()) {
+        analysis_result br = builtin_via_conversion();
+        if (br != analysis_result::ill_formed)
+            return br;
         return analysis_result::well_formed;
     }
     if (converts && candidates.empty())
@@ -858,11 +893,36 @@ analysis_result semantic_analysis::overloaded_operator(
                ostreambuf_iterator, whose operator=(_CharT) takes no
                iterator): the built-in copy (class_assignment) */
             if (implicit_viable && !declares_move &&
+                !copy_assignment_deleted(c) &&
                 !entity_table[c].defaulted_copy_assignment &&
                 operands.size() == 2 &&
                 operands[1].type.unqualified() ==
                     operands[0].type.unqualified() &&
-                assigned_bitwise(c)) {
+                !(operands[0].type.cv() & cv_const) && assigned_bitwise(c)) {
+                /* [class.copy.assign]/2, [over.ics.rank]/3.2: the implicit
+                   copy assignment operator C& operator=(const C&) has an
+                   identity conversion for a right operand of type C; any
+                   declared operator= whose parameter's unqualified
+                   non-reference type is not C requires a derived-to-base or
+                   user-defined conversion and is strictly worse */
+                bool same_type_candidate = false;
+                for (const overload_candidate &k : candidates) {
+                    const entity &ke = entity_table[k.function];
+                    const struct type &ft = type_table[ke.type.unqualified()];
+                    if (ft.kind != type_kind::function ||
+                        ft.parameter_count != 1) {
+                        same_type_candidate = true;
+                        break;
+                    }
+                    const qualified_type *params =
+                        type_table.parameters(ke.type.unqualified());
+                    if (stripped(params[0]) == operands[0].type.unqualified()) {
+                        same_type_candidate = true;
+                        break;
+                    }
+                }
+                if (!same_type_candidate)
+                    return analysis_result::well_formed;
                 owned_array<expression_meaning> trial;
                 for (const expression_meaning &e : operands)
                     trial.append(e);
@@ -878,6 +938,32 @@ analysis_result semantic_analysis::overloaded_operator(
                 unsupported.resize(unsupported_before);
                 if (t == analysis_result::well_formed && none)
                     return analysis_result::well_formed;
+            }
+            if (implicit_viable && operands.size() == 2 &&
+                (type_table[operands[1].type.unqualified()].entity == 0 ||
+                 other_class)) {
+                /* [over.ics.rank]/2: the implicit C& operator=(const C&) (and
+                   C&&) requires a user-defined conversion for a right operand
+                   of an unrelated type; a non-const member operator= with a
+                   standard conversion sequence for the right operand is
+                   strictly better and the implicit operator cannot win */
+                for (const overload_candidate &k : candidates) {
+                    if (!k.function)
+                        continue;
+                    const entity &ke = entity_table[k.function];
+                    const struct type &ft = type_table[ke.type.unqualified()];
+                    if (ft.kind != type_kind::function ||
+                        ft.parameter_count != 1 || (ke.member_cv & cv_const))
+                        continue;
+                    const qualified_type *params =
+                        type_table.parameters(ke.type.unqualified());
+                    conversion_sequence cs = implicit_conversion_sequence(
+                        operands[1], params[0], true);
+                    if (cs.kind == conversion_sequence::form::standard) {
+                        implicit_viable = false;
+                        break;
+                    }
+                }
             }
             if (implicit_viable) {
                 /* (/7: one deleted for a const or reference member is a
@@ -912,7 +998,7 @@ analysis_result semantic_analysis::overloaded_operator(
     size_t chosen = 0;
     bool none_viable = false;
     r = best_viable_function(n, candidates, nullptr, arguments, chosen,
-                             &none_viable);
+                             &none_viable, true, &argument_syntax);
     if (r == analysis_result::well_formed && deleted_copy) {
         /* the deleted copy assignment operator is viable for the left
            operand and the class's own type on the right: with no other
@@ -931,11 +1017,15 @@ analysis_result semantic_analysis::overloaded_operator(
                 n, "class.copy.assign",
                 "a deleted copy assignment against another viable operator=");
     }
-    if (r == analysis_result::well_formed && none_viable && converts)
+    if (r == analysis_result::well_formed && none_viable && converts) {
         /* a built-in candidate may be viable through the conversion */
+        analysis_result br = builtin_via_conversion();
+        if (br != analysis_result::ill_formed)
+            return br;
         return not_supported_because(n, "over.built",
                                      "no viable operator function while a "
                                      "conversion may allow a built-in one");
+    }
     if (r == analysis_result::well_formed && !none_viable && converts &&
         !unary_prefix) {
         /* [over.ics.rank]/2: a viable operator function that binds every

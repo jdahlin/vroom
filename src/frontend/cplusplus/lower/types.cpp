@@ -128,6 +128,34 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     case type_kind::fundamental:
         made = fundamental(r.fundamental, at);
         break;
+    case type_kind::bit_int: {
+        bool is_unsigned = r.fundamental == fundamental_type::unsigned_int;
+        if (r.bound <= 8) {
+            if (is_unsigned)
+                made = ast_builder_type_basic(AST_TYPE_UNSIGNED_CHAR);
+            else
+                made = ast_builder_type_basic(AST_TYPE_SIGNED_CHAR);
+        } else if (r.bound <= 16) {
+            if (is_unsigned)
+                made = ast_builder_type_basic(AST_TYPE_UNSIGNED_SHORT);
+            else
+                made = ast_builder_type_basic(AST_TYPE_SHORT);
+        } else if (r.bound <= 32) {
+            if (is_unsigned)
+                made = ast_builder_type_basic(AST_TYPE_UNSIGNED_INT);
+            else
+                made = ast_builder_type_basic(AST_TYPE_INT);
+        } else if (r.bound <= 64) {
+            if (is_unsigned)
+                made = ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
+            else
+                made = ast_builder_type_basic(AST_TYPE_LONG_LONG);
+        } else {
+            fail("a _BitInt wider than 64 bits", at);
+            return ast_builder_type_basic(AST_TYPE_INT);
+        }
+        break;
+    }
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
@@ -511,6 +539,42 @@ bool c_lowering::passed_indirectly(qualified_type t) const
     return r.kind == type_kind::class_type &&
            analysis.entity_table[r.entity].kind == entity_kind::class_type &&
            !analysis.trivial_class(r.entity);
+}
+
+/* [class.copy.elision]/1, [expr.prim]: a prvalue is built where it is
+   used, which a class sees that points into itself: one passed by address,
+   or a trivially copyable one that holds a pointer and is returned in
+   memory (more than 16 bytes, so no homogeneous aggregate either) */
+bool c_lowering::built_in_place(qualified_type t) const
+{
+    if (passed_indirectly(t))
+        return true;
+    const struct type &r = record(t);
+    return r.kind == type_kind::class_type &&
+           analysis.entity_table[r.entity].kind == entity_kind::class_type &&
+           analysis.entity_table[r.entity].size > 16 && holds_address(r.entity);
+}
+
+bool c_lowering::holds_address(entity_index c_) const
+{
+    const entity &x = analysis.entity_table[c_];
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m =
+            analysis.entity_table[analysis.class_members[x.first_member + i]];
+        qualified_type t = m.type;
+        while (record(t).kind == type_kind::array)
+            t = record(t).operand;
+        const struct type &r = record(t);
+        if (r.kind == type_kind::pointer ||
+            r.kind == type_kind::lvalue_reference ||
+            r.kind == type_kind::rvalue_reference)
+            return true;
+        if (r.kind == type_kind::class_type &&
+            analysis.entity_table[r.entity].kind == entity_kind::class_type &&
+            holds_address(r.entity))
+            return true;
+    }
+    return false;
 }
 
 /* [abi:calls]: "If the parameter type is non-trivial for the purposes of

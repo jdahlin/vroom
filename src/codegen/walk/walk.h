@@ -39,6 +39,9 @@ typedef struct walk_argument {
     uint32_t align;
     uint64_t size;
     int64_t slot;
+    /* an in-memory result: the frame slot holding the address it is written
+       at (AST_NODE_CALL_INTO), 0 for slot itself */
+    int64_t destination;
 } walk_argument; /* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
 /* ---------------- walker state (one per ecx) ---------------- */
 

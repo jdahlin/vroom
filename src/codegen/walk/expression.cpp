@@ -563,6 +563,15 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
     case AST_NODE_DEREFERENCE:
         return walk_lvalue_from_value(e, walk_value_emit(e, x->a),
                                       T(c, N(x->a)->ty)->base);
+    case AST_NODE_RESULT_OBJECT: {
+        codegen_lvalue at = {.kind = CODEGEN_LVALUE_FRAME,
+                             .align = 8,
+                             .offset = e->walk_state->return_record.slot};
+        int r = WALK_LOWER(treg)(e);
+
+        WALK_LOWER(load)(e, r, &at, 8, false);
+        return walk_lvalue_from_value(e, walk_value_from_register(r), x->ty);
+    }
     case AST_NODE_MEMBER: {
         const field *f = &c->tags[x->b].f[x->c];
         const node *b = N(x->a);
@@ -2920,6 +2929,9 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
     codegen_value mv;
     uint32_t na =
         x->c; /* the arguments passed (a fortified call drops the object size) */
+    /* (this call's, not one of its arguments') */
+    int64_t into = e->call_destination;
+    e->call_destination = 0;
 
     /* Keep common calls on the stack; large calls scale with their arity. */
     if (x->c > sizeof argbuf / sizeof *argbuf &&
@@ -2982,7 +2994,7 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
             if (args != argbuf)
                 free(args);
             return mv;
-        } else if (walk_call_can_inline(e, s, n)) {
+        } else if (!into && walk_call_can_inline(e, s, n)) {
             if (args != argbuf)
                 free(args);
             return walk_call_inline(e, n, s);
@@ -3055,6 +3067,7 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
         WALK_LOWER(classify)(e, f->base, &r, false);
         r.slot =
             walk_slot_temporary(e, (r.size + 7) & ~(uint64_t)7 ?: 8, r.align);
+        r.destination = into;
     }
     if (!ref) {
         fn = walk_value_emit(e, x->a);
@@ -3948,6 +3961,15 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
         WALK_LOWER(longjmp)(e, r);
         return codegen_value_constant(0);
     }
+    case CC_BUILTIN_RESULT_ADDRESS: {
+        codegen_lvalue at = {.kind = CODEGEN_LVALUE_FRAME,
+                             .align = 8,
+                             .offset = e->walk_state->return_record.slot};
+        int r = WALK_LOWER(treg)(e);
+
+        WALK_LOWER(load)(e, r, &at, 8, false);
+        return codegen_value_register(r);
+    }
     case CC_BUILTIN_RETURN_ADDRESS:
     case CC_BUILTIN_FRAME_ADDRESS: {
         codegen_value v = walk_value_emit(e, arg[0]);
@@ -4723,6 +4745,35 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
         codegen_lvalue l = walk_lvalue_emit(e, n);
         return walk_lvalue_load(e, &l, x->ty);
     }
+    case AST_NODE_CALL_INTO: {
+        codegen_lvalue to = walk_lvalue_emit(e, x->a);
+        int r = WALK_LOWER(laddr)(e, &to);
+        codegen_lvalue at = {.kind = CODEGEN_LVALUE_FRAME,
+                             .align = 8,
+                             .offset = walk_slot_temporary(e, 8, 8)};
+        ast_qualified_type rt = N(x->b)->ty;
+
+        WALK_LOWER(store)(e, r, &at, 8);
+        WALK_LOWER(tfree)(e, r);
+        if (walk_type_is_in_memory(e, rt) && !CODEGEN_IS_WIN64(c)) {
+            e->call_destination = at.offset;
+            codegen_value done = walk_value_emit(e, x->b);
+
+            walk_value_free(e, &done);
+        } else {
+            /* a result in registers (or Windows' convention): copied */
+            codegen_value from = walk_value_emit(e, x->b);
+            int rs = walk_value_to_register(e, &from);
+            int rd = WALK_LOWER(treg)(e);
+
+            WALK_LOWER(load)(e, rd, &at, 8, false);
+            WALK_LOWER(copy)(e, rd, rs, codegen_type_size(c, rt));
+            WALK_LOWER(tfree)(e, rs);
+            WALK_LOWER(tfree)(e, rd);
+        }
+        return codegen_value_constant(0);
+    }
+    case AST_NODE_RESULT_OBJECT:
     case AST_NODE_STRING:
     case AST_NODE_MEMBER:
     case AST_NODE_DEREFERENCE: {

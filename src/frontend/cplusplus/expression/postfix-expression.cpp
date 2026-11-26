@@ -408,7 +408,25 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
     /* [dcl.type.simple]/1: nested-name-specifier(opt) type-name */
     entity_index class_named = 0;
     uint32_t named_cv = 0;
+    uint32_t deduced_ct = 0;
     if ((parenthesized || braced) &&
+        n[0].is(syntax_kind::simple_type_specifier) && n[0].size() == 2 &&
+        n[0][0].is(syntax_kind::nested_name_specifier) && n[0][1].is_token() &&
+        tokens[n[0][1].token()].kind == token_kind::identifier) {
+        nominated_scope qscope;
+        if (nested_name_specifier(n[0][0], qscope, false) ==
+                analysis_result::well_formed &&
+            !qscope.dependent) {
+            entity_index scope = qscope.entity;
+            if (qscope.global)
+                scope = 0;
+            lookup_result qf = lookup_qualified(
+                scope, tokens.identifier(n[0][1].token()), lookup_filter::any);
+            if (!qf.entity && !qf.ambiguous)
+                deduced_ct = class_template_of(qf.unknown_entity);
+        }
+    }
+    if ((parenthesized || braced) && !deduced_ct &&
         n[0].is(syntax_kind::simple_type_specifier)) {
         VTRY(r, qualified_type_name(n[0], named, named_cv));
         if (type_table[named].kind == type_kind::class_type &&
@@ -496,15 +514,19 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             VTRY(r, simple_type(n, k, named));
         }
     }
-    if ((parenthesized || braced) && n[0].is_token() &&
-        tokens[n[0].token()].kind == token_kind::identifier && !class_named &&
-        !named) {
+    if ((parenthesized || braced) &&
+        (deduced_ct || (n[0].is_token() &&
+                        tokens[n[0].token()].kind == token_kind::identifier &&
+                        !class_named && !named))) {
         /* [dcl.type.class.deduct]/1: a template-name of a class template
            alone is a placeholder for a deduced class type, which
            [expr.type.conv]/1 allows as the simple-type-specifier */
-        lookup_result x = lookup_unqualified(tokens.identifier(n[0].token()),
-                                             lookup_filter::any);
-        uint32_t ct = class_template_of(x.unknown_entity);
+        uint32_t ct = deduced_ct;
+        if (!ct) {
+            lookup_result x = lookup_unqualified(
+                tokens.identifier(n[0].token()), lookup_filter::any);
+            ct = class_template_of(x.unknown_entity);
+        }
         if (ct && n.size() <= 4) {
             entity_index deduced = 0;
             /* a lambda-expression among the arguments is one closure for
@@ -841,14 +863,52 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
         owned_array<overload_candidate> candidates;
         owned_array<uint32_t> first_arguments;
         owned_array<template_argument> all;
-        VTRY(added, template_candidates(n, group, arguments.data(),
-                                        static_cast<uint32_t>(arguments.size()),
-                                        candidates, &first_arguments, &all,
-                                        nullptr, 0));
-        if (!candidates.empty()) {
-            size_t chosen = 0;
-            VTRY(best, best_viable_function(n, candidates, nullptr, arguments,
-                                            chosen));
+        owned_array<expression_meaning> call_args;
+        bool used_braced = false;
+        if (SyntaxElement list = parts.braced_list()) {
+            expression_meaning braced_arg;
+            if (braced_deduction_elements(list, braced_arg) ==
+                    analysis_result::well_formed &&
+                braced_arg.braced_known) {
+                VTRY(b_added,
+                     template_candidates(n, group, &braced_arg, 1, candidates,
+                                         &first_arguments, &all, nullptr, 0));
+                if (!candidates.empty()) {
+                    call_args.append(braced_arg);
+                    used_braced = true;
+                }
+            }
+        }
+        size_t chosen = 0;
+        bool chosen_ok = false;
+        if (used_braced) {
+            owned_array<SyntaxElement> lists;
+            lists.append(parts.braced_list());
+            bool none_viable = false;
+            VTRY(best,
+                 best_viable_function(n, candidates, nullptr, call_args, chosen,
+                                      &none_viable, false, &lists));
+            if (none_viable) {
+                candidates.clear();
+                first_arguments.clear();
+                all.clear();
+                used_braced = false;
+            } else {
+                chosen_ok = true;
+            }
+        }
+        if (!used_braced) {
+            VTRY(added, template_candidates(
+                            n, group, arguments.data(),
+                            static_cast<uint32_t>(arguments.size()), candidates,
+                            &first_arguments, &all, nullptr, 0));
+            if (!candidates.empty()) {
+                VTRY(best, best_viable_function(n, candidates, nullptr,
+                                                arguments, chosen));
+                chosen_ok = true;
+            }
+        }
+        if (chosen_ok) {
             /* (the arguments are analysed again by the initialization) */
             expressions.resize(expressions_before);
             name_uses.resize(uses_before);
@@ -926,7 +986,13 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             function_parameters.clear();
             qualified_type ctor_type = qualified_type::make(
                 type_table.fundamental(fundamental_type::void_), cv_none);
-            analysis_result fr = function(ctor.parameters().index(), ctor_type);
+            size_t unsup_before = unsupported.size();
+            analysis_result fr = analysis_result::well_formed;
+            {
+                diagnostics_suppressed_if hush(diagnostics, true);
+                fr = function(ctor.parameters().index(), ctor_type);
+            }
+            unsupported.resize(unsup_before);
             current_scope = saved_scope;
             defining_class = saved_class;
             function_cv = saved_cv;
@@ -1355,12 +1421,12 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         operands.append(f);
         for (size_t i = 0; i < arguments.size(); i++) {
             SyntaxElement a = arguments[i];
-            if (a.is(syntax_kind::braced_init_list))
-                return not_supported_because(
-                    n, "over.ics.list",
-                    "a braced argument to an overloaded call operator");
             expression_meaning e;
-            if (i < expanded.size() && expanded.size() == arguments.size()) {
+            if (a.is(syntax_kind::braced_init_list)) {
+                /* [over.ics.list]: left to overload resolution and call_with
+                   via operand_syntax */
+            } else if (i < expanded.size() &&
+                       expanded.size() == arguments.size()) {
                 /* [temp.variadic]/5: an element of a pack expansion,
                    analysed above */
                 e = expanded[i];
@@ -1580,11 +1646,6 @@ analysis_result semantic_analysis::member_callee(
     if (id.is(syntax_kind::simple_template_id)) {
         owned_array<bool> expansion;
         VTRY(r, written_arguments_of(id, written, expansion));
-        for (bool e : expansion)
-            if (e)
-                return not_supported_because(id.index(), "temp.variadic",
-                                             "a pack expansion in explicit "
-                                             "arguments of a member template");
         written_at = id.index();
     }
     return analysis_result::well_formed;
@@ -1799,9 +1860,9 @@ uint32_t semantic_analysis::explicit_argument_position(uint32_t ft,
                                                        uint32_t i) const
 {
     const function_template &f = function_templates[ft - 1];
-    /* the template parameter pack, wherever it is: explicit arguments from
+    /* the first template parameter pack, wherever it is: explicit arguments from
        its position on are its elements */
-    for (uint32_t k = f.parameter_count; k-- > 0;)
+    for (uint32_t k = 0; k < f.parameter_count; k++)
         if (template_parameter_is_pack(f.first_parameter + k)) {
             if (i >= k)
                 return k;
@@ -1917,6 +1978,8 @@ analysis_result semantic_analysis::template_candidates(
         entity_index e = 0;
         const struct function_template ft = function_templates[g - 1];
         if (r == analysis_result::well_formed && !failed) {
+            scoped_value<bool> collecting(collecting_candidates,
+                                          !target_function);
             unevaluated++;
             r = instantiate(n, ft.entity, d.data(),
                             static_cast<uint32_t>(d.size()), e);
@@ -2007,10 +2070,11 @@ analysis_result semantic_analysis::template_call(
     /* (arguments analysed already: a pack expansion's, call) */
     bool given = !early.empty();
     for (const expression_meaning &e : early) {
-        if (e.entity && entity_table[e.entity].kind == entity_kind::function)
+        if (e.overload_name)
             return not_supported_because(n, "temp.deduct.call",
-                                         "a function as an argument analysed "
-                                         "before the call (pack expansion)");
+                                         "an overloaded function as an "
+                                         "argument analysed before the call "
+                                         "(pack expansion)");
         types.append(e.type);
     }
     for (SyntaxElement a : arguments) {
