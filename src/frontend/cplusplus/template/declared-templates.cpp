@@ -1353,7 +1353,8 @@ analysis_result semantic_analysis::template_id_arguments(
                    written type, analysed again with the elements when
                    the template is instantiated */
                 bool own_pattern = false;
-                if (!expansion_count(first, end, times, &own_pattern)) {
+                if (!expansion_count(first, end, times, &own_pattern) ||
+                    own_pattern) {
                     if (!own_pattern || a.is_token() || pack >= count ||
                         arguments.size() < pack)
                         return not_supported_because(

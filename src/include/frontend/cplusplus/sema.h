@@ -6224,6 +6224,13 @@ class semantic_analysis
                                  const entity_index *elements, uint32_t count);
     /* the pack an identifier names from the current scope, or 0 */
     entity_index find_pack(uint32_t name) const;
+
+  public:
+    /* the type that stands for an enclosing instantiation's pack in a
+       written pattern (collect_written_bindings); 0 until one is made */
+    type_index substituted_pack_type = 0;
+
+  private:
     /* [temp.variadic]/5: the number of elements of the packs the pattern
        [first, end) names (false: none, packs of different lengths, or a
        pack expansion within it); own set when it names none but a pack of
