@@ -900,9 +900,13 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
                       base_step(into.entity, from.entity, ambiguous);
         }
         if (!related && !same && (kinds & cast_static) &&
-            (kinds == cast_static || may_bind_temporary))
+            (kinds == cast_static ||
+             (may_bind_temporary &&
+              implicit_conversion_sequence(m, to, true).kind !=
+                  conversion_sequence::form::bad)))
             /* [expr.static.cast]/4: "T t(E);" may bind the reference to a
-               temporary of the converted value */
+               temporary of the converted value; a C-style cast with no such
+               conversion is a reinterpret_cast ([expr.cast]/4) */
             return not_supported_because(
                 at, "expr.static.cast",
                 "a static_cast to a reference of an unrelated type");
