@@ -15,9 +15,15 @@ struct S {
     enum { m2 };
 };
 
+int local_first()
+{
+    enum { local };
+    return f(local);
+}
+
 int main()
 {
     S s;
-    return f(namespace_value) + f(namespace_object) + f(S::m1) + f(s.u) +
+    return local_first() - 1 + f(namespace_value) + f(namespace_object) + f(S::m1) + f(s.u) +
            f(S::m2) - 5;
 }

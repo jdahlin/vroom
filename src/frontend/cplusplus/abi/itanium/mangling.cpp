@@ -3662,8 +3662,7 @@ bool itanium_mangler::closure_numbered(entity_index c) const
 /* [impl.clang]: the name of a closure type, or of an unnamed local class or
    enumeration, that is unique to the translation unit: the <source-name>
    $_N, N its number among those of its function (or of namespace scope,
-   which a generic lambda's of a function counts too) in the order their
-   names are first mangled (as clang's code generator mangles them) */
+   which counts others of functions too) in the order their names are first mangled (as clang's code generator mangles them) */
 bool itanium_mangler::translation_unit_number(entity_index c)
 {
     const entities &table = analysis.entity_table;
@@ -3678,11 +3677,13 @@ bool itanium_mangler::translation_unit_number(entity_index c)
             break;
         }
         /* ([impl.clang] a generic lambda's closure of a function takes
-           a number of the translation unit's too) */
+           a number of the translation unit's too, and an unnamed class or
+           enumeration of namespace scope counts every one before it) */
         if (enclosing_function(table, k) == context ||
-            (!context && table[k].lambda &&
-             table[table[k].call_operator].kind ==
-                 entity_kind::template_entity))
+            (!context &&
+             (!table[c].lambda ||
+              (table[k].lambda && table[table[k].call_operator].kind ==
+                                      entity_kind::template_entity))))
             n++;
     }
     if (!seen)

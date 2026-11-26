@@ -647,7 +647,9 @@ analysis_result semantic_analysis::overloaded_operator(
         for (entity_index e : set)
             overload_set(e, others);
         /* [temp.dep.candidate]/1: of the functions declared after the
-           template, only argument-dependent lookup's are candidates */
+           template, only argument-dependent lookup's are candidates, and
+           only for a dependent call: one of an associated namespace that
+           unqualified lookup also searched is not told apart */
         if (found.past_horizon) {
             owned_array<entity_index> associated_classes, associated_spaces;
             if (!associated_namespaces(types, associated_classes,
@@ -659,13 +661,18 @@ analysis_result semantic_analysis::overloaded_operator(
             size_t kept = 0;
             for (entity_index e : others) {
                 uint32_t d = entity_table[e].first_declaration;
-                bool visible =
-                    !d || entity_table.declaration(d).node.first_token() <=
-                              lookup_horizon;
-                for (entity_index space : associated_spaces)
-                    visible = visible || space == entity_table[e].enclosing;
-                if (visible)
+                if (entity_table[e].enclosing != found.found_in || !d ||
+                    entity_table.declaration(d).node.first_token() <=
+                        lookup_horizon) {
                     others[kept++] = e;
+                    continue;
+                }
+                for (entity_index space : associated_spaces)
+                    if (space == found.found_in)
+                        return not_supported_because(
+                            n, "temp.dep.candidate",
+                            "an operator declared after the template in an "
+                            "associated namespace");
             }
             others.resize(kept);
         }

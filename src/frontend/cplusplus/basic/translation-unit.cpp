@@ -124,8 +124,8 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
             return true;
         /* [basic.link]/4: an unnamed enumeration of namespace scope with
            no typedef name for linkage purposes has no name another
-           translation unit could write */
-        if (!x.name && !x.linkage_name && !x.lambda &&
+           translation unit could write (for a template argument) */
+        if (arguments && !x.name && !x.linkage_name && !x.lambda &&
             (!x.enclosing ||
              entity_table[x.enclosing].kind == entity_kind::namespace_entity))
             return true;
