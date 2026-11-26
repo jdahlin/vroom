@@ -378,7 +378,12 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
             "an implicit class assignment that calls an operator function");
     /* [class.copy.assign]/7.2: a const non-static data member of a class
        (or of a subobject's class) defines the implicit operator deleted */
-    if (copy_assignment_deleted(c) || bytewise_const_member(c)) {
+    /* [over.ics.rank]/3.2.3: an rvalue is assigned by a defaulted move
+       assignment operator, whatever became of the copy */
+    bool by_move = right.category != value_category::lvalue &&
+                   !(right.type.cv() & cv_const) &&
+                   entity_table[c].defaulted_move_assignment;
+    if ((!by_move && copy_assignment_deleted(c)) || bytewise_const_member(c)) {
         /* [impl.clang] -fms-compatibility keeps the copy assignment
            operator beside a user-declared move constructor */
         if (tokens.files.behavior.microsoft_compatibility)
