@@ -177,9 +177,22 @@ analysis_result semantic_analysis::variable_template_id(SyntaxRef n,
         if (!x.ambiguous)
             return concept_id(n, ct, m);
     uint32_t vt = variable_template_of(named);
-    if (!vt && !x.ambiguous)
-        if (uint32_t ft = function_template_of(x.unknown_entity))
+    if (!vt && !x.ambiguous) {
+        uint32_t ft = function_template_of(x.unknown_entity);
+        /* a static member template of the enclosing class named without
+           its class (Highway's &CallClosure<Closure>) */
+        entity_index of = 0;
+        if (!ft && x.unknown_entity)
+            of = entity_table[x.unknown_entity].enclosing;
+        if (of && entity_table[of].kind == entity_kind::class_type) {
+            uint32_t found = function_template_of(x.unknown_entity, true);
+            if (found && !entity_table[function_templates[found - 1].entity]
+                              .nonstatic_member)
+                ft = found;
+        }
+        if (ft)
             return function_template_id_value(n, ft, m);
+    }
     if (!vt || x.ambiguous)
         return not_supported_because(
             n, "temp.names",
