@@ -2773,12 +2773,6 @@ constness semantic_analysis::evaluate_binding(constant_evaluation &state,
        own lifetimes, not modelled) */
     uint32_t object = 0;
     constness c;
-    /* (in a function's invocation, whose temporaries' lifetimes are not
-       modelled, only a function pointer, which a table of them is built
-       from) */
-    if (semantics[bound].category == value_category::prvalue && state.frame &&
-        evaluated_class(semantics[bound].type))
-        return CONST_UNKNOWN;
     if (semantics[bound].category == value_category::prvalue &&
         !evaluated_class(semantics[bound].type)) {
         /* a scalar prvalue: the temporary holds its value */
