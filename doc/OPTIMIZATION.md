@@ -128,7 +128,9 @@ What a function gets, in order (the rows of `codegen/vir/pass-table.c`):
   accesses it cannot prove separate stays scalar; so does a loop that is only
   a search (a maximum and its index).  Loops over 2-byte elements become
   eight lanes (`i16x8`) when the stored values need only add, subtract, and,
-  or and xor, at forward unit strides.
+  or and xor, at forward unit strides.  An index `off + i` of 32-bit
+  unsigned values counts as linear, behind a run-time test that it does not
+  wrap in the vector iterations.
 - **Loop constants** (`codegen/vir/loop-constants.c`): in an innermost loop
   without calls, up to six constants that cost instructions each round (a
   symbol's address, a floating-point constant, a compare's bound that is not

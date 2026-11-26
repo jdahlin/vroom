@@ -339,6 +339,20 @@ static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
             r.is_unsigned = 0;
         } else if (allinv) {
             virbuild_vectorize_info_opaque_set(S, q, &r);
+        } else if (VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == 2 &&
+                   !(in.flags & VIR_INSN_FLAG_MS) && in.type == VIR_TYPE_I64 &&
+                   V->insns[w[0]].insn.type == VIR_TYPE_I32 &&
+                   o[0]->kind == VIRBUILD_VECTORIZE_KIND_LIN &&
+                   o[0]->step > 0 && o[0]->step <= (1 << 20) && S->nwrap < 8) {
+            /* p[off + i] with unsigned off or i: linear while off + i stays below 2^32, which
+               is tested before the vector loop.  Its term is itself, so that no other access
+               is taken to be at a known distance */
+            S->wrap[S->nwrap].value = w[0];
+            S->wrap[S->nwrap++].step = o[0]->step;
+            r = VCC_LITERAL(virbuild_vectorize_info,
+                            .kind = VIRBUILD_VECTORIZE_KIND_LIN, .is_exact = 1,
+                            .step = o[0]->step, .term_value = q,
+                            .term_factor = 1);
         } else if (S->lg == 1 && VIR_INSN_FLAG_WIDTH_LOG2(in.flags) >= 1 &&
                    virbuild_vectorize_info_is_lane(o[0])) {
             r.kind = VIRBUILD_VECTORIZE_KIND_VEC; /* (the low half is kept) */
@@ -1298,6 +1312,40 @@ static uint32_t virbuild_vectorize_address_make(virbuild_vectorize_state *S,
                S, S->vector_body_block, VIR_TYPE_PTR, s, 0, 0);
 }
 
+/*
+ * Whether the u32 index v, which goes up by step, passes 2^32 - 1 within the vector
+ * iterations (nv of them, from v's value at the first); 0 when v cannot be made there.
+ */
+static uint32_t virbuild_vectorize_index_wraps(virbuild_vectorize_state *S,
+                                               uint32_t v, int64_t step,
+                                               uint32_t nv)
+{
+    codegen_context *e = S->context;
+    uint32_t first =
+        virbuild_vectorize_scalar_make(S, v, VIRBUILD_VECTORIZE_MODE_T0);
+
+    if (!first)
+        return 0;
+    uint32_t block = S->vector_header_block;
+    uint32_t base = virbuild_vectorize_insn_append(
+        S, block, VIR_OP_EXT, VIR_TYPE_I64, 2, first, 0, 0);
+    uint32_t reach = virbuild_vectorize_insn_append(
+        S, block, VIR_OP_MUL, VIR_TYPE_I64, 0, nv,
+        virbuild_constant_integer(e, VIR_TYPE_I64, step), 0);
+    uint32_t last = virbuild_vectorize_insn_append(
+        S, block, VIR_OP_ADD, VIR_TYPE_I64, 0, base, reach, 0);
+    /* (more iterations than indexes: the product itself could wrap) */
+    uint32_t many = virbuild_vectorize_insn_append(
+        S, block, VIR_OP_ICMP, VIR_TYPE_I32, 8, nv,
+        virbuild_constant_integer(e, VIR_TYPE_I64, 0xffffffffll), 0);
+    uint32_t past = virbuild_vectorize_insn_append(
+        S, block, VIR_OP_ICMP, VIR_TYPE_I32, 8, last,
+        virbuild_constant_integer(e, VIR_TYPE_I64, 0x100000000ll), 0);
+
+    return virbuild_vectorize_insn_append(S, block, VIR_OP_OR, VIR_TYPE_I32, 0,
+                                          many, past, 0);
+}
+
 /* [lo, hi): the bytes access x (virbuild_vectorize_range_pair_add's index) touches in the vector iterations; span = 4 * nv */
 static bool virbuild_vectorize_range_compute(virbuild_vectorize_state *S,
                                              uint32_t x, uint32_t span,
@@ -1585,7 +1633,7 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 
     S->nfold = S->ncarry = S->gather_count = S->access_count =
         S->invariant_load_count = S->reduction_count = S->nind = S->nstep =
-            S->nchk = S->npin = S->none = 0,
+            S->nchk = S->nwrap = S->npin = S->none = 0,
     S->pos = 0, S->why = NULL;
     /* the lanes: the width of the loop's first store (of its first load when it stores nothing) */
     S->lg = 0;
@@ -1829,7 +1877,7 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
                                                         VIRBUILD_BLOCK_NONE);
     S->join_block = virbuild_vectorize_block_new(S, S->preheader_block,
                                                  S->vector_exit_block);
-    if (S->nchk) { /* (J's predecessors are the last in V->pr) */
+    if (S->nchk || S->nwrap) { /* (J's predecessors are the last in V->pr) */
         VIRBUILD_ARRAY_GROW(V->predecessors, V->predecessor_count,
                             V->predecessor_capacity, 1);
         V->predecessors[V->predecessor_count++] = S->vector_header_block,
@@ -2240,11 +2288,25 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
     virbuild_vectorize_block_terminate(S, S->vector_exit_block, VIR_OP_BR,
                                        S->join_block, 0, 0);
     virbuild_vectorize_block_terminate(S, S->join_block, VIR_OP_BR, H, 0, 0);
-    if (S->nchk) { /* the pairs that may be one memory: any two ranges that meet, and the loop stays scalar */
-        uint32_t span = virbuild_vectorize_insn_append(
-                     S, S->vector_header_block, VIR_OP_SHL, VIR_TYPE_I64, 0, nv,
-                     virbuild_constant_integer(e, VIR_TYPE_I64, S->lg), 0),
-                 any = 0;
+    if (S->nchk ||
+        S->nwrap) { /* an index that would wrap, or a pair of ranges that meet: the loop stays scalar */
+        uint32_t span = 0, any = 0;
+
+        for (uint32_t i = 0; i < S->nwrap; i++) {
+            uint32_t m = virbuild_vectorize_index_wraps(S, S->wrap[i].value,
+                                                        S->wrap[i].step, nv);
+
+            if (!m)
+                return false;
+            any = any ? virbuild_vectorize_insn_append(
+                            S, S->vector_header_block, VIR_OP_OR, VIR_TYPE_I32,
+                            0, any, m, 0)
+                      : m;
+        }
+        if (S->nchk)
+            span = virbuild_vectorize_insn_append(
+                S, S->vector_header_block, VIR_OP_SHL, VIR_TYPE_I64, 0, nv,
+                virbuild_constant_integer(e, VIR_TYPE_I64, S->lg), 0);
 
         for (uint32_t i = 0; i < S->nchk; i++) {
             uint32_t l0, h0, l1, h1, m;

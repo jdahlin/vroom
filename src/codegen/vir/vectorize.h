@@ -87,6 +87,12 @@ typedef struct virbuild_vectorize_state {
     uint32_t
         nchk; /* pairs whose ranges must not meet (run time): an access's index, or 64 + an invariant load's */
     struct {
+        uint32_t value;
+        int64_t step;
+    } wrap[8];
+    uint32_t
+        nwrap; /* u32 indexes taken as linear: the vector loop runs when none wraps in it */
+    struct {
         uint32_t a, par;
         bool rev;
     } pin[32];
