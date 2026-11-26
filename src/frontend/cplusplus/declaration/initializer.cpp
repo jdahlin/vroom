@@ -2671,13 +2671,15 @@ analysis_result semantic_analysis::designated_list_initialization(
        some modes: not followed for an aggregate with base classes */
     const struct type &listed = type_table[type.unqualified()];
     if (listed.kind == type_kind::class_type &&
+        !entity_table[listed.entity].name &&
+        !entity_table[listed.entity].linkage_name &&
         entity_table[listed.entity].base_count) {
         for (size_t i = 0; i < clauses.size(); i++)
             if (!designations.of[i].count)
                 return not_supported_because(
                     list, "dcl.init.aggr",
                     "designated and other clauses mixed for an aggregate "
-                    "with base classes");
+                    "with base classes and no name");
     }
     owned_array<designated_item> items;
     for (size_t i = 0; i < clauses.size(); i++) {
