@@ -1378,6 +1378,17 @@ analysis_result semantic_analysis::construct(
                 at, "class.copy.ctor",
                 "a copy or move with no chosen constructor of a class that "
                 "does not copy its bytes");
+        if (written_arguments && !written_arguments->empty() &&
+            (*written_arguments)[0].is(syntax_kind::braced_init_list)) {
+            /* [over.ics.list]/7, [dcl.init.list]/3: T x({a, b}): the
+               parameter is copy-list-initialized from the list, and the
+               trivial constructor's copy of that temporary is elided into
+               the object */
+            qualified_type temporary =
+                qualified_type::make(type.unqualified(), cv_none);
+            return list_initialization((*written_arguments)[0], temporary,
+                                       false, result);
+        }
         bool ambiguous = false;
         entity_index from = type_table[arguments[0].type.unqualified()].entity;
         if (from != c) {
