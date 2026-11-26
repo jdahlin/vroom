@@ -298,6 +298,9 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
         object = semantics[f.node].a;
         chosen = semantics[f.node].b;
         overload_set(chosen, set);
+        for (entity_index fn : set)
+            if (contains_placeholder(entity_table[fn].type))
+                deduce_member_body_now(fn);
     } else {
         /* "where begin and end are looked up in the associated namespaces
            ([basic.lookup.argdep]).  [Note 1: Ordinary unqualified lookup
