@@ -14,12 +14,10 @@ A new row needs no new test code.
   bench/vcc-x86intrinsics.py [-j N] [-O 02] [--cxx] [--bin-dir DIR] [-v] [PAT]
 """
 import argparse
-import base64
 import concurrent.futures
 import os
 import platform
 import re
-import struct
 import subprocess
 import sys
 import tempfile
@@ -187,35 +185,13 @@ def stencil_rows(bin_dir):
         body = text.split('#ifdef %s\n' % name)[1].split('#endif')[0]
         return body.splitlines()
 
+    def numbers(line):
+        return [int(x) for x in re.findall(r'\d+', line)]
+
     features = [line.strip(' ",') for line in section('X86_STENCIL_FEATURES')]
-    counts = [int(x) for x in section('X86_STENCIL_LAYOUT')[0].split(',')]
-    packed = base64.b64decode(''.join(
-        line.strip('"') for line in section('X86_STENCIL_PACKED')))
-    data = bytearray()
-    at = 0
-    while at < len(packed):
-        token = packed[at]
-        if token < 128:
-            data += packed[at + 1:at + 2 + token]
-            at += 2 + token
-            continue
-        distance = packed[at + 1] | packed[at + 2] << 8
-        for _ in range(token - 128 + 4):
-            data.append(data[-distance])
-        at += 3
-    start = 0
-
-    def records(count, layout):
-        nonlocal start
-        size = struct.calcsize(layout)
-        found = [struct.unpack_from(layout, data, start + i * size)
-                 for i in range(count)]
-        start += count * size
-        return found
-
-    rows = records(counts[0], '<BBHI')
-    groups = records(counts[1], '<4I5H2x')
-    ranges = records(counts[2], '<IH2x')
+    rows = [numbers(line) for line in section('X86_STENCIL_ROWS')]
+    groups = [numbers(line) for line in section('X86_STENCIL_GROUPS')]
+    ranges = [numbers(line) for line in section('X86_STENCIL_KEYS')]
     made = []
     for (name, signature), (feature, mask, count, first) in zip(listed, rows):
         keys = []

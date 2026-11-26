@@ -15,7 +15,6 @@ has a stencil per value.  The outputs are checked in (clang runs only here):
     src/arch/x64/codegen/x86-stencils.inc        features, variants, code
 """
 
-import base64
 import concurrent.futures
 import glob
 import importlib.util
@@ -342,47 +341,6 @@ def variants_with(builtin, work):
     return codes
 
 
-def compress(data):
-    """LZ: a byte below 128 is followed by that many literals and one; from
-    128 it is a copy of (byte - 128 + 4) bytes from the distance in the next
-    two, little endian"""
-    out, literals = bytearray(), bytearray()
-    seen = {}
-
-    def flush():
-        for i in range(0, len(literals), 128):
-            part = literals[i:i + 128]
-            out.append(len(part) - 1)
-            out.extend(part)
-        literals.clear()
-
-    at = 0
-    while at < len(data):
-        best, distance = 0, 0
-        for earlier in reversed(seen.get(data[at:at + 4], ())[-64:]):
-            if at - earlier > 0xffff:
-                break
-            n = 4
-            while (n < 131 and at + n < len(data)
-                   and data[earlier + n] == data[at + n]):
-                n += 1
-            if at + n <= len(data) and n > best:
-                best, distance = n, at - earlier
-        step = 1
-        if best >= 4 and data[at:at + 4] in seen:
-            flush()
-            out.append(128 + best - 4)
-            out.extend(struct.pack('<H', distance))
-            step = best
-        else:
-            literals.append(data[at])
-        for k in range(at, min(at + step, len(data) - 3)):
-            seen.setdefault(data[k:k + 4], []).append(k)
-        at += step
-    flush()
-    return bytes(out)
-
-
 def groups_of(codes):
     """[(keys, template, constants' bytes, fixups, stored)]: the variants of
     one length, as one code and, per variant, the bytes that differ from it
@@ -576,42 +534,38 @@ def main():
         first = len(groups)
         for ranges, template, pool, fixed, columns, stored in groups_of(codes):
             offset = place(template)
-            groups.append(struct.pack(
-                '<4I5H2x', offset, place(columns),
-                run(tuple(fixed), fixups, fixup_runs),
-                run(tuple(map(tuple, ranges)), keys, key_runs),
-                len(template) - pool, pool, stored, len(fixed) - stored,
-                len(ranges)))
-        rows.append(struct.pack('<BBHI', feature, mask, len(groups) - first,
-                                first))
+            groups.append(
+                f'{{{offset},{place(columns)},'
+                f'{run(tuple(fixed), fixups, fixup_runs)},'
+                f'{run(tuple(map(tuple, ranges)), keys, key_runs)},'
+                f'{len(template) - pool},{pool},{stored},'
+                f'{len(fixed) - stored},{len(ranges)}}},')
+        rows.append(f'{{{feature},{mask},{len(groups) - first},{first}}},')
 
     def section(name, lines):
         return [f'#ifdef {name}', *lines, '#endif']
 
-    data = b''.join([
-        *rows, *groups,
-        *(struct.pack('<IH2x', k, n) for k, n in keys),
-        *(struct.pack('<I', f) for f in fixups), blob])
-    packed = base64.b64encode(compress(data)).decode()
     table = [
         GENERATED,
-        "/* The tables of arch/x64/codegen/simd.cpp, in its structures' layout",
-        '   (little endian): the rows in the names\' order, the groups (a',
-        "   builtin's variants of one length), the key ranges, the fixups and",
-        '   the code; LZ compressed (compress() of the generator), base64. */',
+        '/* Rows in the names\' order: {features, constant operands as a mask,',
+        '   groups, first group}.  A group (a builtin\'s variants of one length):',
+        '   {code, per-variant bytes, first fixup, first key range, code length,',
+        '   bytes of constants before the code, stored bytes per variant,',
+        '   patched bytes, key ranges}; a key is the constants, a byte each. */',
         *section('X86_STENCIL_FEATURES', [f'"{f}",' for f in features]),
-        *section('X86_STENCIL_LAYOUT', [
-            f'{len(rows)}, {len(groups)}, {len(keys)}, {len(fixups)}, '
-            f'{len(blob)}']),
-        *section('X86_STENCIL_PACKED',
-                 [f'"{packed[i:i + 76]}"' for i in range(0, len(packed), 76)]),
+        *section('X86_STENCIL_ROWS', rows),
+        *section('X86_STENCIL_GROUPS', groups),
+        *section('X86_STENCIL_KEYS', [f'{{{k}u,{n}}},' for k, n in keys]),
+        *section('X86_STENCIL_FIXUPS', [f'{f}u,' for f in fixups]),
+        *section('X86_STENCIL_BYTES',
+                 [''.join(f'{b},' for b in blob[i:i + 24])
+                  for i in range(0, len(blob), 24)]),
     ]
     for name, reason in skipped:
         names.append(f'/* {name}: {reason} */')
     NAMES.write_text('\n'.join(names) + '\n')
     CODE.write_text('\n'.join(table) + '\n')
-    print(f'{len(made)} stencils, {len(groups)} groups, {len(data)} bytes '
-          f'packed to {len(packed)}, '
+    print(f'{len(made)} stencils, {len(groups)} groups, {len(blob)} bytes, '
           f'{len(skipped)} skipped')
 
 
