@@ -484,6 +484,9 @@ analysis_result semantic_analysis::overloaded_operator(
                 owned_array<expression_meaning> rest;
                 for (size_t i = 1; i < count; i++)
                     rest.append(operand(i));
+                if (postfix)
+                    rest.append(
+                        integer_constant(fundamental_type::int_, 0, at));
                 size_t first = candidates.size();
                 VTRY(r, member_template_candidates(
                             n, templates, true, rest.data(),
@@ -625,10 +628,13 @@ analysis_result semantic_analysis::overloaded_operator(
             owned_array<expression_meaning> in_order;
             for (size_t i = 0; i < count; i++)
                 in_order.append(operand(i));
+            if (postfix)
+                in_order.append(
+                    integer_constant(fundamental_type::int_, 0, at));
             size_t first = candidates.size();
-            VTRY(r,
-                 template_candidates(n, group, in_order.data(),
-                                     static_cast<uint32_t>(count), candidates));
+            VTRY(r, template_candidates(n, group, in_order.data(),
+                                        static_cast<uint32_t>(in_order.size()),
+                                        candidates));
             size_t kept = first;
             for (size_t i = first; i < candidates.size(); i++) {
                 /* /3.2 for a specialization too (as below): libc++'s
