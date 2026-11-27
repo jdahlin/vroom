@@ -4753,6 +4753,9 @@ class semantic_analysis
                                  owned_array<SyntaxElement> &clauses,
                                  owned_array<uint32_t> *packs = nullptr,
                                  designation_set *designated = nullptr);
+    /* [over.ics.list]/5: no expression in list is without an implicit
+       conversion to the class target */
+    bool list_elements_convert(SyntaxRef list, qualified_type target);
     /* [over.ics.list]/5 and /8: whether the braced-init-list list can
        convert to the parameter type target (a class, an array): for
        std::initializer_list<X> and arrays of X with X an array, each
