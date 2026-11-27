@@ -38,6 +38,10 @@ struct cplusplus_compile_options {
     const char *const *embed_directories;
     int embed_directory_count;
     int preprocessed_input; /* the main file is a .i or .ii */
+    /* called once with -fcxx-prefix=, after the prefix is analysed and
+       before the main file is opened; may change path.  Or NULL */
+    void (*boundary)(void *context, const char **path);
+    void *boundary_context;
 };
 
 /* 0 if the translation unit compiled; 1 after an error, a diagnostic on

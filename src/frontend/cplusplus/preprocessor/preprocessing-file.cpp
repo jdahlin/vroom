@@ -145,14 +145,19 @@ bool preprocessor::start(const char *path)
         else
             execute_definitions(command_line);
     }
-    main_file = files.open(path);
-    if (!main_file)
-        return false;
-    struct stat st;
-    if (stat_file(path, &st) == 0)
-        entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
-    inclusions.append(
-        {main_file, -1, 0, 0, false, false, preprocessing_token()});
+    if (options.stop_before_main) {
+        /* the main file's place on the stack: include depths are the same */
+        source_files::entry &pending =
+            files.add_text("<main file pending>", "", 0, false);
+        inclusions.append(
+            {&pending, -1, 0, 0, false, false, preprocessing_token()});
+        main_pending = true;
+    } else {
+        inclusions.append(
+            {nullptr, -1, 0, 0, false, false, preprocessing_token()});
+        if (!enter_main(path))
+            return false;
+    }
     if (command_line_file)
         inclusions.append(
             {command_line_file, -1, 0, 0, false, false, preprocessing_token()});
@@ -169,6 +174,19 @@ bool preprocessor::start(const char *path)
     snprintf(time_of_day, sizeof time_of_day, "\"%02d:%02d:%02d\"",
              local.tm_hour, local.tm_min, local.tm_sec);
     started = true;
+    return true;
+}
+
+bool preprocessor::enter_main(const char *path)
+{
+    main_file = files.open(path);
+    if (!main_file)
+        return false;
+    struct stat st;
+    if (stat_file(path, &st) == 0)
+        entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
+    inclusions[0] = {main_file, -1, 0, 0, false, false, preprocessing_token()};
+    main_pending = false;
     return true;
 }
 
@@ -228,6 +246,8 @@ preprocessing_token preprocessor::read_file_token(bool header_name_permitted)
                 unread_file_token(t);
                 return t;
             }
+            if (main_pending && inclusions.size() == 1)
+                return t;
             source_files::entry *left = in.file;
             leave_file();
             if (!inclusions.empty())

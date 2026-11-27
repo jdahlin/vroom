@@ -1890,6 +1890,21 @@ class semantic_analysis
 
     /* [basic.link]: every declaration of the translation unit, in order */
     void translation_unit();
+    /* translation_unit() in parts: begin, the top-level declarations in
+       order, then end; tree_grew after the parser added to the tree */
+    void begin_translation_unit();
+    void analyse_declarations(const node_index *first, size_t count);
+    void end_translation_unit();
+    void tree_grew()
+    {
+        syntax_cx.nodes = tree.node_data();
+        syntax_cx.child_lists = tree.child_data();
+    }
+    /* what allocation_names_spelled answered while the tokens were not
+       all made, or none */
+    uint32_t allocation_names_answered = UINT32_MAX;
+    /* the operator new and delete tokens made so far */
+    uint32_t allocation_names_spelled();
     /* one declaration of a declaration-seq */
     analysis_result declaration(SyntaxRef n);
     /* for -fcxx-dump=type-claims: the value of each analysed prvalue that
@@ -7575,7 +7590,6 @@ class semantic_analysis
        more often, a function lookup misses may be the one a call would
        choose (allocation_names_spelled) */
     uint32_t allocation_declarations_analysed = 0;
-    uint32_t allocation_names_spelled();
     /* [expr.new]/11, [expr.delete]/9: the functions named kind found in
        class c (0: none; in_class) or else in the global scope;
        class_complete: at c's closing }, whose members (and its bases') are
@@ -7727,7 +7741,7 @@ class semantic_analysis
     token_stream &tokens;
     const parser &syntax_parser;
     diagnostic_consumer &diagnostics;
-    const SyntaxContext syntax_cx;
+    SyntaxContext syntax_cx;
     SyntaxScope syntax_scope{syntax_cx};
 };
 
