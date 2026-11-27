@@ -1245,9 +1245,15 @@ analysis_result semantic_analysis::overloaded_operator(
         /* [over.built]/14: a member operator[] binds the object better
            than the built-in subscript, which converts it, and beats it
            when its index converts no worse than to std::ptrdiff_t */
+        bool index = false;
+        if (arguments.size() == 2) {
+            const struct type &t = type_table[arguments[1].type.unqualified()];
+            index = is_integral(arguments[1].type) ||
+                    (t.kind == type_kind::enumeration &&
+                     !entity_table[t.entity].scoped);
+        }
         if (!beats_builtin && op == preprocessing_op_or_punc::LEFT_BRACKET &&
-            win.member && arguments.size() == 2 && ft.parameter_count == 1 &&
-            is_integral(arguments[1].type)) {
+            win.member && ft.parameter_count == 1 && index) {
             conversion_sequence seq =
                 implicit_conversion_sequence(arguments[1], params[0], false);
             conversion_sequence builtin = implicit_conversion_sequence(
