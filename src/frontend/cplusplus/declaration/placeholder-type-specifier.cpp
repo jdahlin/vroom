@@ -639,6 +639,9 @@ bool semantic_analysis::deduce_member_body_now(entity_index e)
                 static_cast<owned_array<entity_index> &&>(block_variables);
             block_variables = owned_array<entity_index>();
             entity_index outer_scope = current_scope;
+            /* [basic.def.odr]/4: the body is not the unevaluated operand
+               that needs its type: what it names is odr-used */
+            scoped_value<unsigned> evaluated(unevaluated, 0);
             instantiated_member_body(x.enclosing, body);
             current_declaration = outer_declaration;
             function_state = static_cast<function_context &&>(outer_function);
