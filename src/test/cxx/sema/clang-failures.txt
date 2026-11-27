@@ -655,8 +655,6 @@ verdict SemaCXX/ext-int-vector.cpp -std=gnu++17: ill-formed for us, accepted by 
 verdict SemaCXX/ext-int.cpp -std=gnu++17 -Wimplicit-int-conversion -Wno-unused -Wunevaluated-expression: ill-formed for us, accepted by clang: line 133 (1 declarations)
 verdict SemaCXX/imaginary-constants.cpp -std=c++14 -DCXX14=1: ill-formed for us, accepted by clang: line 13 (3 declarations)
 verdict SemaCXX/libstdcxx_common_type_hack.cpp -std=c++11 -D__GLIBCXX__=20100000L: ill-formed for us, accepted by clang: line 28 (1 declarations)
-verdict SemaCXX/linkage2.cpp -Wno-non-c-typedef-for-linkage -Wno-c++11-extensions -Wno-local-type-template-args -std=gnu++98: ill-formed for us, accepted by clang: line 119 (1 declarations)
-verdict SemaCXX/linkage2.cpp -Wno-non-c-typedef-for-linkage -std=gnu++11: ill-formed for us, accepted by clang: line 119 (1 declarations)
 verdict SemaCXX/ms-ctor-closure.cpp -std=c++23 -fms-extensions: ill-formed for us, accepted by clang: line 19 (1 declarations)
 verdict SemaCXX/ms_mutable_reference_member.cpp -std=gnu++17 -fms-compatibility: ill-formed for us, accepted by clang: line 3 (1 declarations)
 verdict SemaCXX/overload-resolution-deferred-templates.cpp -std=c++11: ill-formed for us, accepted by clang: line 235 (1 declarations)
