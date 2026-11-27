@@ -15,6 +15,7 @@ static void vx_target_block_begin(void *ctx, uint32_t b)
     x64_vir_context *L = (x64_vir_context *)ctx;
 
     L->map_block = b;
+    L->skip = 0;
     L->compare_condition = UINT32_MAX;
     L->memory_value = L->memory_skip = L->scaled_value = L->scaled_skip =
         L->big_endian_value = L->test_value = L->compare_memory_value = 0;
@@ -392,7 +393,7 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         .position = L.position, .rotation = L.rotations, .chase = L.chase,
         .path = layout + 4 * f->block_count, .block_label = L.label,
         .optimize = !e->unit->cleanups_disabled,
-        .rotate = e->unit->options->optimize.rotate_loops,
+        .rotate = e->unit->options->optimize.rotate_loops, .skip_at = &L.skip,
         .row = e->unit->options->debug ? x64_dbgrow : NULL, .row_e = e);
 
     for (int r = 0; r < 16; r++) {

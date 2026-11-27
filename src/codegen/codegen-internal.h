@@ -501,6 +501,9 @@ typedef struct codegen_context {
     /* AST_NODE_CALL_INTO: the frame slot of the address the next call
        writes its in-memory result at (0: none) */
     int64_t call_destination;
+    /* the call being lowered is a return statement's musttail call: the lowering's call op takes
+       it, and jumps or refuses */
+    bool musttail;
     cc *compile_context;
     /* records of the function being emitted */
     a64_record *records;
@@ -1077,6 +1080,12 @@ VPRIV unsigned em_unused_init(codegen_context *e, const node *decl, uint32_t fn,
                               unsigned budget);
 /* opt/locals.c: eligibility and bounded selection from the existing prepass. */
 /* opt/tail.c: exact direct forwarding wrappers; target capability/ABI checks follow. */
+/* musttail.cpp: what keeps every target from guaranteeing the tail call at the call node call, and
+   the error saying what keeps this one from it */
+VPRIV void codegen_musttail_check(codegen_context *e, uint32_t call,
+                                  uint32_t function);
+VPRIV __attribute__((noreturn)) void codegen_musttail_refuse(codegen_context *e,
+                                                             const char *why);
 VPRIV bool em_tail_caller_ok(codegen_context *e, uint32_t fn);
 VPRIV bool em_tail_target_ok(codegen_context *e, uint32_t s);
 VPRIV bool em_tail_candidate(codegen_context *e, uint32_t fn, uint32_t expr,

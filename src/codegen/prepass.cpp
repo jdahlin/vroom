@@ -802,6 +802,10 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
     case AST_NODE_CALL: {
         uint32_t ref, callee = codegen_call_direct_callee(c, x->a, &ref);
 
+        /* a musttail call is a jump out of its own function only */
+        if (x->aux == AST_CALL_MUSTTAIL)
+            P->E->symbol_flags[P->fn] |= CODEGEN_SYMBOL_NO_INLINE;
+
         if (callee && codegen_symbol_attributes(c, callee)->error_fn)
             P->E->symbol_flags[P->fn] |= CODEGEN_SYMBOL_MUST_FOLD;
         /* VIR: a function calling setjmp is not inlined (as LLVM): the caller's promoted

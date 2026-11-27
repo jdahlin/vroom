@@ -143,6 +143,7 @@ enum {
     X64_OP_CMPM, /* compare memory r1+(r3<<sh)+off with r2 (X64_REGISTER_NONE: immediate ref); cond reverses operands */
     X64_OP_PROBE, /* Windows: the stack pages rax bytes below rsp touched (callq ___chkstk_ms; it keeps every register) */
     X64_OP_FRAMEADDR, /* the Windows frame: r0 = rbp less its save area (print.c), the unwinder's establisher frame */
+    X64_OP_TAILCALL, /* musttail: the epilogue, then jmp ref (cond 1: jmp *%rax) */
     X64_OP_COUNT
 };
 

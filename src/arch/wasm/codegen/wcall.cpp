@@ -478,6 +478,11 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
     tbuf *sig = &e->w->sig;
     const char *sp;
     int k;
+
+    if (x->aux == AST_CALL_MUSTTAIL)
+        efatal(
+            e, x->loc,
+            "cannot guarantee the tail call 'musttail' requires: WebAssembly");
     uint32_t nfix = f->n;
     wlsig lg;
     bool

@@ -192,7 +192,12 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i,
                                    a[k].stack_offset);
         }
     }
-    if (!stk && a64_vir_call_is_sibling(L, b, i)) {
+    bool musttail =
+        in->op == VIR_OP_CALL && (in->flags & VIR_INSN_FLAG_CALL_MUSTTAIL);
+
+    if (musttail && stk) /* the direct emitter says why */
+        a64_vir_fail(L, VIRBUILD_FAILURE(musttail));
+    if (musttail || (!stk && a64_vir_call_is_sibling(L, b, i))) {
         a64_record *t;
 
         if (L->allocation->callee[1] &&

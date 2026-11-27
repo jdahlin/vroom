@@ -436,6 +436,7 @@ static void cc_compound_statement_item_parse(cc *c, uint32_t loc,
         attrs a = {0};
 
         cc_attribute_list_parse(c, &a);
+        cc_musttail_attribute_note(c, &a);
         if (cc_token_accept(c, LEX_TOKEN_SEMICOLON))
             return; /* __attribute__((fallthrough)); */
         if (cc_token_is_declaration_start(c, tok(c))) {
@@ -572,6 +573,7 @@ static uint32_t cc_labeled_statement_body_parse(cc *c, uint32_t loc)
         attrs a = {0};
 
         cc_attribute_list_parse(c, &a);
+        cc_musttail_attribute_note(c, &a);
         if (cc_token_accept(c, LEX_TOKEN_SEMICOLON))
             return cc_statement_new(c, AST_NODE_EXPRESSION, loc, 0, 0,
                                     0); /* fallthrough; */
@@ -789,6 +791,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
             attrs a = {0};
 
             cc_attribute_list_parse(c, &a);
+            cc_musttail_attribute_note(c, &a);
             return cc_statement_parse(c);
         }
         break;
@@ -1032,9 +1035,20 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
         ast_qualified_type rt = c->fn ? AST_TYPE(c, c->syms[c->fn].ty)->base
                                       : cc_type_basic(AST_TYPE_INT);
 
+        uint32_t musttail = c->musttail_loc;
+
+        c->musttail_loc = 0;
         next(c);
+        if (musttail && cc_token_is(c, LEX_TOKEN_SEMICOLON))
+            cc_musttail_return_check(c, 0, loc, musttail);
         if (!cc_token_is(c, LEX_TOKEN_SEMICOLON)) {
-            e = cc_conversion_decay(c, expr(c));
+            c->in_musttail = musttail != 0;
+            uint32_t operand = expr(c);
+
+            c->in_musttail = false;
+            if (musttail)
+                cc_musttail_return_check(c, operand, loc, musttail);
+            e = cc_conversion_decay(c, operand);
             if (!cc_type_is_void(c, rt) && !cc_type_is_void(c, AST_NODE(e)->ty))
                 e = cc_type_is_record(c, rt) && !cc_type_is_complex(c, rt)
                         ? e

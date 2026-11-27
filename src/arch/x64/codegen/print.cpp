@@ -512,6 +512,80 @@ static bool x64_record_uses_xmm(const record *i)
     return false;
 }
 
+/* the end of a frame, in two parts: the stack protector's check and the callee-saved registers
+   back, then the frame given up (not Windows' frame, x64w_epilogue) */
+static void x64_epilogue_restores_append(codegen_context *e, tbuf *b,
+                                         uint32_t s, bool cfi)
+{
+    x64_lowering_context *X = e->x64_context;
+
+    if (e->walk_state->stack_pointer_needed) {
+        x64_stack_guard_append(e, b);
+        vtext_format_append(
+            b, "\tcmpq\t%lld(%s), %%r11\n\tjne\t.Lspfail%u\n",
+            (long long)(e->walk_state->canary -
+                        (e->walk_state->frame_alignment > 16 ? 0 : X->wsave)),
+            e->walk_state->frame_alignment > 16 ? "%r12" : "%rbp", s);
+    }
+    for (int r = 0; r < 16; r++)
+        if (X->callee_save_slots[r]) {
+            x64_callee_save_access_append(e, b, r, true);
+            if (cfi)
+                vtext_format_append(b, "\t.cfi_same_value %%%s\n",
+                                    x64_register_names_64[r]);
+        }
+}
+
+static void x64_epilogue_leave_append(codegen_context *e, tbuf *b,
+                                      int64_t frame, bool cfi)
+{
+    x64_lowering_context *X = e->x64_context;
+
+    if (e->walk_state->frame_alignment > 16) {
+        vtext_string_append(b, "\tmovq\t-8(%rbp), %r12\n");
+        if (cfi)
+            vtext_string_append(b, "\t.cfi_same_value %r12\n");
+    }
+    if (X->stack_pointer_frame) {
+        if (frame)
+            vtext_format_append(b, "\taddq\t$%lld, %%rsp\n", (long long)frame);
+        if (cfi && frame)
+            vtext_string_append(b, "\t.cfi_def_cfa_offset 8\n");
+    } else if (!X->frame_free)
+        vtext_string_append(
+            b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa "
+                     "%rsp, 8\n"
+                   : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
+}
+
+/* musttail (X64_OP_TAILCALL): the epilogue in the body, then the jump; with unwind tables the
+   frame's rows are kept aside for what follows */
+static void x64_tail_call_append(codegen_context *e, tbuf *b, const record *i,
+                                 uint32_t s, int64_t frame, bool cfi)
+{
+    cc *c = e->compile_context;
+
+    if (cfi)
+        vtext_string_append(b, "\t.cfi_remember_state\n");
+    x64_epilogue_restores_append(e, b, s, cfi);
+    x64_epilogue_leave_append(e, b, frame, cfi);
+    if (i->condition) {
+        if (e->unit->options->xcf & 4) /* -mretpoline-external-thunk */
+            vtext_string_append(b, "\tjmp\t__x86_indirect_thunk_rax");
+        else
+            vtext_string_append(b, "\tjmpq\t*%rax");
+    } else {
+        vtext_string_append(b, "\tjmp\t");
+        codegen_reference_name_append(c, b, i->reference);
+        if (c->o->pic &&
+            (CODEGEN_REFERENCE_KIND(i->reference) == CODEGEN_REFERENCE_NAME ||
+             codegen_symbol_needs_got(c, i->reference)))
+            vtext_string_append(b, "@PLT");
+    }
+    if (cfi)
+        vtext_string_append(b, "\n\t.cfi_restore_state");
+}
+
 VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 {
     cc *c = e->compile_context;
@@ -965,6 +1039,9 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
             break;
         case X64_OP_TAIL:
             continue; /* argument uses stay in records; branch follows the epilogue */
+        case X64_OP_TAILCALL:
+            x64_tail_call_append(e, b, i, s, frame, cfi);
+            break;
         case X64_OP_CALL:
             if (CODEGEN_IS_WIN64(c) &&
                 codegen_symbol_needs_got(c, i->reference)) {
@@ -1377,21 +1454,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
         codegen_fatal_report(
             e, e->current_location,
             "internal error: unbalanced VIR outgoing arguments");
-    if (e->walk_state->stack_pointer_needed) {
-        x64_stack_guard_append(e, b);
-        vtext_format_append(
-            b, "\tcmpq\t%lld(%s), %%r11\n\tjne\t.Lspfail%u\n",
-            (long long)(e->walk_state->canary -
-                        (e->walk_state->frame_alignment > 16 ? 0 : X->wsave)),
-            e->walk_state->frame_alignment > 16 ? "%r12" : "%rbp", s);
-    }
-    for (int r = 0; r < 16; r++)
-        if (X->callee_save_slots[r]) {
-            x64_callee_save_access_append(e, b, r, true);
-            if (cfi)
-                vtext_format_append(b, "\t.cfi_same_value %%%s\n",
-                                    x64_register_names_64[r]);
-        }
+    x64_epilogue_restores_append(e, b, s, cfi);
     for (; dj < e->debug_row_count; dj++)
         if (dj + 1 == e->debug_row_count)
             vtext_format_append(b,
@@ -1429,25 +1492,12 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
                                    ? "\t.byte 0xf3, 0x0f, 0x01, 0xec # uiret\n"
                                    : "\t.byte 0x48, 0xcf # iretq\n");
     } else {
-        if (e->walk_state->frame_alignment > 16 && !X->winframe) {
-            vtext_string_append(b, "\tmovq\t-8(%rbp), %r12\n");
-            if (cfi)
-                vtext_string_append(b, "\t.cfi_same_value %r12\n");
-        }
         if (X->winframe) {
             if (!X->frame_free)
                 x64w_epilogue(e, b, wsaves, aftercall);
-        } else if (X->stack_pointer_frame) {
-            if (frame)
-                vtext_format_append(b, "\taddq\t$%lld, %%rsp\n",
-                                    (long long)frame);
-            if (cfi && frame)
-                vtext_string_append(b, "\t.cfi_def_cfa_offset 8\n");
-        } else if (!X->frame_free)
-            vtext_string_append(
-                b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa "
-                         "%rsp, 8\n"
-                       : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
+        } else {
+            x64_epilogue_leave_append(e, b, frame, cfi);
+        }
         if (tail) {
             vtext_string_append(b, "\tjmp\t");
             codegen_reference_name_append(c, b, tail);

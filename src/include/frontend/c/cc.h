@@ -288,8 +288,8 @@ enum {
     AST_NODE_VARIABLE, /* a: sym */
     AST_NODE_MEMBER,   /* a: base (lvalue struct), b: tag, c: field index */
     AST_NODE_INDEX,    /* a[b] (pointer + integer, already in that order) */
-    AST_NODE_CALL,     /* a: callee, b: list, c: count */
-    AST_NODE_BUILTIN,  /* aux: builtin id, b: list, c: count */
+    AST_NODE_CALL,    /* a: callee, b: list, c: count; aux: AST_CALL_MUSTTAIL */
+    AST_NODE_BUILTIN, /* aux: builtin id, b: list, c: count */
     AST_NODE_CAST, /* aux: cast kind, a: operand, b: an explicit cast's typedef (sym, in a body) or 0; c: folded FP emit value or 0 */
     AST_NODE_UNARY, /* aux: op (T_* kind), a: operand */
     AST_NODE_ADDRESS,
@@ -378,6 +378,9 @@ enum {
 /* AST_NODE_FLAG_OVERFLOW_REPORTED: a constant subexpression overflowed (-Winteger-overflow given once) */
 /* AST_NODE_FLAG_BOUNDS_CHECKED: a[CONST] already checked (-Warray-bounds) */
 /* AST_NODE_FLAG_FROM_MACRO: the operator came from a macro expansion (no style warnings) */ /* AST_NODE_FLAG_ERROR: stands in for an expression already diagnosed (no follow-on errors) */
+
+/* AST_NODE_CALL aux: a return statement's musttail call, a tail call or an error */
+enum { AST_CALL_MUSTTAIL = 1 };
 
 /* AST_NODE_COMMA result facts, attached by semantic lowering. NaNs are permitted. */
 enum { AST_NODE_COMMA_FP_NONNEGATIVE = 1 };

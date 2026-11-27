@@ -78,7 +78,7 @@ VPRIV bool em_tail_candidate(codegen_context *e, uint32_t fn, uint32_t expr,
         return false;
     ret = N(c->lists[body->b]);
     if (ret->op != AST_NODE_RETURN || ret->a != expr ||
-        N(expr)->op != AST_NODE_CALL)
+        N(expr)->op != AST_NODE_CALL || N(expr)->aux == AST_CALL_MUSTTAIL)
         return false;
     call = N(expr);
     if (call->c > maxargs ||

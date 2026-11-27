@@ -89,6 +89,10 @@ static const record_op_descriptor x64_op_descriptors[X64_OP_COUNT] = {
     [X64_OP_TAIL] = {.branch = RECORD_BRANCH_RETURN,
                      .flags = RECORD_EFFECT_BARRIER,
                      .implicit_used = X64_GENERAL_ARGUMENT_REGISTERS},
+    [X64_OP_TAILCALL] = {.branch = RECORD_BRANCH_RETURN,
+                         .flags = X_MEM | RECORD_EFFECT_FLOAT |
+                                  RECORD_EFFECT_BARRIER,
+                         .implicit_used = X64_CALL_USED_REGISTERS},
     [X64_OP_PUSH] = {.registers = X_U,
                      .flags = RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP,
                      .implicit_defined = X64_REGISTER_BIT(RSP),
@@ -373,6 +377,7 @@ VPRIV const uint8_t *x64_flow_table(void)
         [X64_OP_CALL] = RECORD_FLOW_NEXT,
         [X64_OP_CALLR] = RECORD_FLOW_NEXT,
         [X64_OP_TAIL] = RECORD_FLOW_STOP,
+        [X64_OP_TAILCALL] = RECORD_FLOW_STOP,
         [X64_OP_PUSH] = RECORD_FLOW_NEXT,
         [X64_OP_POP] = RECORD_FLOW_NEXT,
         [X64_OP_ADJSP] = RECORD_FLOW_NEXT,

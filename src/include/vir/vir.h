@@ -205,7 +205,7 @@ enum {
     VIR_INSN_FLAG_CALL_NORETURN = 1,
     VIR_INSN_FLAG_CALL_PURE = 2,
     VIR_INSN_FLAG_CALL_CONST = 4,
-    VIR_INSN_FLAG_CALL_TAIL = 8,
+    VIR_INSN_FLAG_CALL_MUSTTAIL = 8, /* lowered as a jump out of the function */
     VIR_INSN_FLAG_LIKELY = 1,
     VIR_INSN_FLAG_UNLIKELY = 2, /* brif */
     VIR_INSN_FLAG_NEGP = 1,

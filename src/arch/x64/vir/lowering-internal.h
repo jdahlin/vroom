@@ -35,6 +35,8 @@ typedef struct x64_vir_context {
         uses_ymm; /* 256- or 512-bit values: vzeroupper before calls and returns */
     bool
         ms; /* the Microsoft x64 convention (Windows): arguments by position, rcx rdx r8 r9 / xmm0-3, shadow space */
+    uint32_t
+        skip; /* an instruction not to lower (after a musttail call), 0 none */
     uint32_t memory_value, memory_skip, scaled_value, scaled_skip;
     int memory_base, memory_index, scaled_index;
     uint8_t memory_shift, scaled_shift;

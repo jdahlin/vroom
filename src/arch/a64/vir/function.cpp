@@ -372,12 +372,14 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
             !(e->unit->options->cfi && !CODEGEN_IS_DARWIN(c))) {
             memset(a64_vir_thread_state_instance.needs_fallthrough, 0,
                    f->insn_count);
-            for (uint32_t b = 0; L.tail && b < f->block_count; b++)
+            for (uint32_t b = 0; b < f->block_count; b++)
                 for (uint32_t i = f->blocks[b].first;
                      i < f->blocks[b].first + f->blocks[b].insn_count; i++)
                     if (f->insns[i].op == VIR_OP_CALL) {
                         a64_vir_thread_state_instance.needs_fallthrough[i] =
-                            a64_vir_call_is_sibling_candidate(&L, b, i);
+                            (f->insns[i].flags & VIR_INSN_FLAG_CALL_MUSTTAIL) ||
+                            (L.tail &&
+                             a64_vir_call_is_sibling_candidate(&L, b, i));
                     }
             ao.shrink = true;
             ao.no_frame = a64_vir_thread_state_instance.needs_fallthrough;

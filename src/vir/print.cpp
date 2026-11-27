@@ -353,6 +353,8 @@ static void vir_print_flags_append(vir_print_state *p, const vir_insn *in)
             vir_print_append(p, " pure");
         if (fl & VIR_INSN_FLAG_CALL_CONST)
             vir_print_append(p, " const");
+        if (op == VIR_OP_CALL && (fl & VIR_INSN_FLAG_CALL_MUSTTAIL))
+            vir_print_append(p, " musttail");
         break;
     case VIR_OP_BRIF:
         if (fl & VIR_INSN_FLAG_LIKELY)

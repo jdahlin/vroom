@@ -223,6 +223,23 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
     uint32_t callee, sig, rpc, o, v;
 
     bool sret = r && r->is_in_memory;
+    bool musttail = e->musttail;
+    uint16_t call_flags = 0;
+
+    /* (what the direct emitter refuses, or an argument in a copy in this
+       frame: it says so) */
+    if (musttail) {
+        e->musttail = false;
+        bool copies = sret;
+
+        for (int k = 0; k < n; k++)
+            copies = copies || a[k].is_in_memory;
+        if (copies) {
+            e->musttail = true;
+            virbuild_fail(e, VIRBUILD_FAILURE(musttail));
+        }
+        call_flags = VIR_INSN_FLAG_CALL_MUSTTAIL;
+    }
     if (CODEGEN_IS_X64(c) &&
         e->msabi !=
             CODEGEN_IS_WIN64(
@@ -238,7 +255,10 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
     }
     sig = virbuild_call_signature_make(e, a, n, variadic, rt, &rpc);
     /* exceptions: with cleanups live, an invoke (its normal and unwind block after the values) */
-    uint32_t unwind = virbuild_eh_unwind_block(e), successor_words = 0;
+    uint32_t unwind = VIRBUILD_BLOCK_NONE, successor_words = 0;
+
+    if (!musttail)
+        unwind = virbuild_eh_unwind_block(e);
 
     if (unwind != VIRBUILD_BLOCK_NONE)
         successor_words = 2;
@@ -302,8 +322,8 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
         V->current_block = normal;
         V->store_count = 0;
     } else
-        v = virbuild_insn_append(e, VIR_OP_CALL, result_type, 0, callee, sig,
-                                 o);
+        v = virbuild_insn_append(e, VIR_OP_CALL, result_type, call_flags,
+                                 callee, sig, o);
     virbuild_store_table_clear(e, true);
     if (r && !sret) {
         uint32_t values[2] = {v};

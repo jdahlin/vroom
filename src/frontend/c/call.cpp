@@ -263,7 +263,7 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
         const sym *y = &c->syms[AST_NODE(callee)->a];
         if ((y->flags & AST_SYMBOL_FLAG_GLOBAL) &&
             y->sc != AST_STORAGE_STATIC &&
-            !(y->attrs && c->attr[y->attrs].asmname) &&
+            !(y->attrs && c->attr[y->attrs].asmname) && !c->in_musttail &&
             !cc_library_builtin_is_disabled(
                 c->o, cc_identifier_string(y->name),
                 (size_t)cc_identifier_length(y->name))) {
@@ -388,7 +388,8 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
     AST_NODE(n)->flags |=
         aflags &
         AST_NODE_FLAG_ERROR; /* clang: a call with an invalid argument is invalid */
-    if (!c->o->no_builtin && !(aflags & AST_NODE_FLAG_ERROR) &&
+    if (!c->o->no_builtin && !c->in_musttail &&
+        !(aflags & AST_NODE_FLAG_ERROR) &&
         AST_NODE(callee)->op == AST_NODE_VARIABLE) {
         const sym *y = &c->syms[AST_NODE(callee)->a];
 

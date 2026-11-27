@@ -233,8 +233,10 @@ struct cc {
     const uint32_t *
         nenable; /* pp's "#pragma diagnostic warning|error" count (ext_off holds while 0) */
     int bcp; /* in __builtin_constant_p's argument: unevaluated, but its names are used */
-    attrs pend;    /* attributes before a block-scope declaration */
-    int in_struct; /* parsing a struct/union body */
+    attrs pend;            /* attributes before a block-scope declaration */
+    uint32_t musttail_loc; /* musttail before the return statement to come */
+    bool in_musttail;      /* its operand: calls are not turned into builtins */
+    int in_struct;         /* parsing a struct/union body */
     int in_tyname; /* parsing a type name (clang's DSC_type_specifier) */
     int undecl_ty; /* cc_declaration_specifiers_unknown_type_report: say clang's "use of undeclared identifier" (cc_compound_statement_item_parse's "size_t n = 1;") */
     bool has_pend;

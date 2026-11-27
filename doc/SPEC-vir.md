@@ -645,8 +645,12 @@ instr     = [ VALUE ":" TYPE "=" ] OP [ "." suffix ] [ operands ] { iflag } .
 operand   = VALUE | const [ ":" TYPE ] .
 const     = INT | FLOAT | SYM [ addend ] | SLOT [ addend ] | "&" BLOCK .
 iflag     = "nsw" | "nuw" | "exact" | "nz" | "volatile" | "align" INT | "tag" INT
-          | "noreturn" | "pure" | "const" | "likely" | "unlikely" .
+          | "noreturn" | "pure" | "const" | "musttail" | "likely" | "unlikely" .
 ```
+
+A `call musttail` (C's `musttail`) is lowered as the frame's end and a jump to the callee: nothing
+after it in its block runs. Its arguments are in registers and none points into the frame; a lowering
+that cannot jump rejects the function.
 
 11.4 Instruction syntax by group:
 
