@@ -502,6 +502,18 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             x64_vir_text_append(L, text);
             return;
         }
+        if (!vir_type_is_vector(i->type) &&
+            vir_type_size(L->function->insns[i->a].type) == 64) {
+            /* a compare of two zmm registers: its mask's bits */
+            char text[128];
+
+            snprintf(text, sizeof text,
+                     "\tv%s\t%%zmm%d, %%zmm%d, %%k1\n\tkmovw\t%%k1, %%%s\n",
+                     x64_x86_code_mnemonic(i->c), c - XMM0, a - XMM0,
+                     x64_register_names_32[d]);
+            x64_vir_text_append(L, text);
+            return;
+        }
         if (!vir_type_is_vector(i->type)) { /* movmsk: to a general register */
             char text[64];
 
@@ -1025,6 +1037,28 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             x64_vir_text_append(L, text);
         }
         return;
+    case VIR_OP_X86_DOT: { /* the accumulator is the destination */
+        char text[160];
+        int third = x64_vir_register_number(p[2]);
+        int into = d;
+
+        if (d != a && (d == c || d == third))
+            into = XMM0 + 15;
+        if (into != a) {
+            snprintf(text, sizeof text, "\tvmovdqa64\t%%zmm%d, %%zmm%d\n",
+                     a - XMM0, into - XMM0);
+            x64_vir_text_append(L, text);
+        }
+        snprintf(text, sizeof text, "\tvpdpbusd\t%%zmm%d, %%zmm%d, %%zmm%d\n",
+                 third - XMM0, c - XMM0, into - XMM0);
+        x64_vir_text_append(L, text);
+        if (into != d) {
+            snprintf(text, sizeof text, "\tvmovdqa64\t%%zmm%d, %%zmm%d\n",
+                     into - XMM0, d - XMM0);
+            x64_vir_text_append(L, text);
+        }
+        return;
+    }
     case VIR_OP_VBITSEL: {
         char text[300];
         snprintf(text, sizeof text,

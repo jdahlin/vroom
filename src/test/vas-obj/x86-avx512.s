@@ -222,3 +222,7 @@
 	vpsrlw	%xmm1, %zmm12, %zmm3
 	vpsrld	16(%rax), %zmm2, %zmm3
 	vpsrlq	%xmm1, %zmm2, %zmm3
+	vpcmpeqd	%zmm1, %zmm2, %k1
+	vpcmpgtd	%zmm9, %zmm10, %k1
+	kmovw	%k1, %eax
+	kmovw	%k1, %r13d

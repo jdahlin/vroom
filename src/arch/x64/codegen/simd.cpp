@@ -1403,6 +1403,34 @@ VPRIV int x64_x86_crossing_builtin(codegen_context *e, uint32_t n)
             if (!strcmp(name, bits[i]))
                 return 4 + i;
     }
+    /* (the width is the built function's; an intrinsic's own target names
+       only what its instruction needs) */
+    bool zmm =
+        x86_feature_has(cc_x86_features_get(c, e->walk_state->function_symbol),
+                        X86_FEATURE_AVX512BW);
+
+    if (zmm &&
+        x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX512VNNI) &&
+        !strcmp(name, "ia32_vpdpbusd512"))
+        return 8;
+    if (zmm && !strcmp(name, "ia32_cmpd512_mask") && x->c == 5) {
+        /* a, b, the predicate, the mask: only an unmasked one */
+        const uint32_t *argument = &c->lists[x->b];
+        cc_value predicate, mask;
+
+        if (cc_eval(c, argument[2], &predicate) &&
+            cc_eval(c, argument[3], &mask) &&
+            predicate.kind == CC_VALUE_INTEGER &&
+            mask.kind == CC_VALUE_INTEGER && (mask.i & 0xffff) == 0xffff) {
+            if (predicate.i == 6)
+                return 9;
+            if (predicate.i == 0)
+                return 10;
+            if (predicate.i == 1)
+                return 11;
+        }
+        return 0;
+    }
     if (!x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX2))
         return 0;
     if (!strcmp(name, "ia32_movmskps256"))

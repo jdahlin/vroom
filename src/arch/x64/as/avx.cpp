@@ -354,7 +354,8 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         BROADCAST,    /* the low element of an xmm register to every lane */
         MOVE_SHIFT,   /* shift by an immediate: the digit in `digit` */
         COUNT_SHIFT,  /* shift by the count in an xmm register */
-        FROM_MASK     /* a mask register's bits to a vector's lanes */
+        FROM_MASK,    /* a mask register's bits to a vector's lanes */
+        K_TO_GENERAL  /* a mask register to a 32-bit general register */
     };
     static const struct {
         const char *name;
@@ -429,9 +430,12 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         {"vpcmpeqw", TEST, 1, 0x75, 1, 0, 64},
         {"vpcmpgtb", TEST, 1, 0x64, 1, 0, 64},
         {"vpcmpgtw", TEST, 1, 0x65, 1, 0, 64},
+        {"vpcmpeqd", TEST, 1, 0x76, 1, 0, 64},
+        {"vpcmpgtd", TEST, 1, 0x66, 1, 0, 64},
         {"vpmovm2b", FROM_MASK, 2, 0x28, 2, 0, 64},
         {"vpmovm2w", FROM_MASK, 2, 0x28, 2, 1, 64},
         {"kmovq", K_STORE, 1, 0x91, 0, 1, 0},
+        {"kmovw", K_TO_GENERAL, 1, 0x93, 0, 0, 0},
         {"knotq", K_UNARY, 1, 0x44, 0, 1, 0},
         {"korq", K_BINARY, 1, 0x45, 0, 1, 0},
         {"kandq", K_BINARY, 1, 0x41, 0, 1, 0},
@@ -510,6 +514,14 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         if (form == FROM_MASK) {
             if (rm->kind != XK_REG || rm->cls != XR_MASK || rm->mask ||
                 dst->kind != XK_REG || dst->cls != XR_ZMM || dst->mask)
+                break;
+            f.reg = dst->reg;
+            f.rm = rm;
+            return x64_emit(a, &f);
+        }
+        if (form == K_TO_GENERAL) {
+            if (rm->kind != XK_REG || rm->cls != XR_MASK || rm->mask ||
+                dst->kind != XK_REG || dst->cls != XR_GPR)
                 break;
             f.reg = dst->reg;
             f.rm = rm;

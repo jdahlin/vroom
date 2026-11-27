@@ -937,6 +937,54 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
     int crossing = 0;
     if (CODEGEN_IS_X64(c))
         crossing = x64_x86_crossing_builtin(e, n);
+    if (crossing == 8) { /* vpdpbusd */
+        const uint32_t *argument = &c->lists[x->b];
+        int r[3];
+
+        for (unsigned i = 0; i < 3; i++) {
+            codegen_value v = walk_value_emit(e, argument[i]);
+
+            r[i] = walk_value_to_register(e, &v);
+        }
+        codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
+                            .align = 16,
+                            .offset = walk_slot_temporary(e, 64, 16)};
+        virbuild_vector_dot(e, r, &d);
+        for (unsigned i = 0; i < 3; i++)
+            WALK_LOWER(tfree)(e, r[i]);
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number =
+                               (uint8_t)WALK_LOWER(laddr)(e, &d));
+    }
+    if (crossing >= 9) { /* a compare of 16 dwords to a mask */
+        const uint32_t *argument = &c->lists[x->b];
+        uint32_t value[2];
+        const char *mnemonic = "pcmpgtd";
+
+        if (crossing == 10)
+            mnemonic = "pcmpeqd";
+        for (unsigned i = 0; i < 2; i++) {
+            codegen_value v = walk_value_emit(e, argument[i]);
+            int r = walk_value_to_register(e, &v);
+
+            value[i] = virbuild_vector_load(e, VIR_TYPE_I64X8, 8, r, 0);
+            WALK_LOWER(tfree)(e, r);
+        }
+        if (crossing == 11) { /* a < b as b > a */
+            uint32_t swap = value[0];
+
+            value[0] = value[1];
+            value[1] = swap;
+        }
+        int result = WALK_LOWER(treg)(e);
+
+        virbuild_register_write(
+            e, result,
+            virbuild_insn_append(e, VIR_OP_X86, VIR_TYPE_I32, 0, value[0],
+                                 value[1], x64_x86_operator_code(mnemonic)));
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)result);
+    }
     if (crossing >= 4) { /* pext and pdep of 4 or 8 bytes */
         const uint32_t *argument = &c->lists[x->b];
         uint32_t type = VIR_TYPE_I32, value[2];

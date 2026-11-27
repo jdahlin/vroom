@@ -360,6 +360,8 @@ VPRIV void virbuild_vector_permute(codegen_context *e, int ra, int rb,
 VPRIV void virbuild_vector_half(codegen_context *e, int ra, int at,
                                 const codegen_lvalue *d);
 /* AVX2: 256-bit values are VIR's i64x4 */
+VPRIV void virbuild_vector_dot(codegen_context *e, const int *r,
+                               const codegen_lvalue *d);
 VPRIV uint32_t virbuild_wide_type(codegen_context *e, uint64_t bytes);
 VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op,
                                   uint32_t code, uint32_t vt, int lane, int ra,

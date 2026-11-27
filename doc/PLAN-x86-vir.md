@@ -164,8 +164,10 @@ deleted in the commit that gives it a table row or a generic operation.
     (`vpcmpgtw`, `vpmovm2w`), so `min` and `max` become one instruction.
     Stockfish `-O3 -march=native` (depth 13, node count as clang's): 250 k
     nodes/second, from 76 k.  clang: 2157 k.
-  - Left: mask registers as values (the `_mask` intrinsics, dword compares),
-    three-operand instructions (`vpdpbusd`), the 64-byte ABI in VIR, shift
+  - XV5b (done): `vpdpbusd` (`x86dot`) and the unmasked 512-bit dword
+    compares greater, equal and less.  Native Stockfish: 1386 k.
+  - Left: mask registers as values (the `_mask` intrinsics), the other
+    three-operand instructions, the 64-byte ABI in VIR, shift
     operators and shuffles, EVEX rounding and broadcast.  Without VNNI
     Stockfish's `network.cpp` does not compile (a 64-byte argument).
 - **XV6** Delete the stencils and `tools/gen-x86stencils.py`, or keep them

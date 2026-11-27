@@ -1,6 +1,8 @@
 /* 512-bit values kept in registers: lane operators, byte and word compares
  * (through a mask register), AVX-512BW builtins on every 128-bit part, shifts,
- * splats, zeros, a loop with eight live vectors; results the same as clang's.
+ * splats, zeros, a loop with eight live vectors, vpdpbusd with the
+ * accumulator also an operand, dword compares to masks; results the same as
+ * clang's.
  * Does nothing on a CPU without AVX-512BW. */
 int printf(const char *, ...);
 #ifdef __x86_64__
@@ -26,14 +28,56 @@ F __m512i *loop(__m512i *acc, const __m512i *w, int k) {
   for (int i = 0; i < 8; i++) _mm512_store_si512(acc + i, r[i]);
   return acc;
 }
+__attribute__((noinline, target("avx512f,avx512bw"))) static unsigned
+masks(const __m512i *a, const __m512i *b)
+{
+    __m512i x = *a, y = *b;
+    unsigned greater = _mm512_cmpgt_epi32_mask(x, y);
+    unsigned equal = _mm512_cmpeq_epi32_mask(x, y);
+    unsigned less = _mm512_cmplt_epi32_mask(x, y);
+
+    return greater * 7 + equal * 31 + less * 127 +
+           _mm512_cmpgt_epi32_mask(x, _mm512_setzero_si512());
+}
+__attribute__((noinline, target("avx512f,avx512bw,avx512vnni"))) static void
+dots(__m512i *o, const __m512i *a, const __m512i *b, int n)
+{
+    __m512i sum = a[0], x = a[1], y = b[0], z = b[1];
+
+    for (int i = 0; i < n; i++) {
+        sum = _mm512_dpbusd_epi32(sum, x, y);
+        x = _mm512_dpbusd_epi32(y, x, z);
+        y = _mm512_dpbusd_epi32(z, z, y);
+        z = _mm512_dpbusd_epi32(sum, z, b[i % 4]);
+    }
+    o[0] = sum;
+    o[1] = x;
+    o[2] = y;
+    o[3] = z;
+    o[4] = _mm512_dpbusd_epi32(a[2], a[3], a[2]);
+}
+static int has_vnni(void)
+{
+    unsigned a, b, c, d;
+    __asm__("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(7), "c"(0));
+    return c >> 11 & 1;
+}
 static unsigned run(void) {
   static __m512i a[16], b[16], o[22]; unsigned h = 0;
   for (int t = 0; t < 200; t++) {
     unsigned char *p = (unsigned char *)a, *q = (unsigned char *)b;
     for (int i = 0; i < 1024; i++) { p[i] = (unsigned char)(i * 37 + t * 11 + (i >> 3)); q[i] = (unsigned char)(i * 91 + t * 5); if (i % 7 == 0) q[i] = p[i]; }
     ar(o, a, b, t % 20); loop(a, b, t % 9);
+    h = h * 31 + masks(a + (t % 8), b + (t % 8));
     for (unsigned i = 0; i < sizeof o; i++) h = h * 31 + ((unsigned char *)o)[i];
     for (unsigned i = 0; i < sizeof a; i++) h = h * 31 + ((unsigned char *)a)[i];
+  }
+  if (has_vnni()) {
+    static __m512i d[5];
+
+    dots(d, a, b, 13);
+    for (unsigned i = 0; i < sizeof d; i++)
+      h = h * 31 + ((unsigned char *)d)[i];
   }
   return h;
 }

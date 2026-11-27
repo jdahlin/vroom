@@ -89,6 +89,7 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
     case VIR_OP_F2S:
     case VIR_OP_VFCMP:
     case VIR_OP_VBITSEL:
+    case VIR_OP_X86_DOT:
     case VIR_OP_VS2F:
     case VIR_OP_FNEG:
     case VIR_OP_FABS:
