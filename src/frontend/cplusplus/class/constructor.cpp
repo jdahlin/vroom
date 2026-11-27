@@ -1992,6 +1992,21 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                                 complete_object(initialized[slot]);
                         continue;
                     }
+                    /* [class.copy.elision]/1.3: a prvalue of the member's
+                       class in braces (m{make()}) is the member itself, as
+                       one in parentheses below */
+                    const semantic_node &element = semantics[listed.node];
+                    if (!base &&
+                        element.kind != semantic_kind::initializer_list &&
+                        element.kind != semantic_kind::zero &&
+                        element.kind != semantic_kind::construct &&
+                        element.category == value_category::prvalue &&
+                        element.type.unqualified() == type.unqualified()) {
+                        set_slot(slot, id,
+                                 subobject_store(object, type, id, listed.node,
+                                                 true));
+                        continue;
+                    }
                     /* [dcl.init.list]/3.4: store the value of an aggregate
                        member. A base's tail padding can hold derived members. */
                     bool stored =
