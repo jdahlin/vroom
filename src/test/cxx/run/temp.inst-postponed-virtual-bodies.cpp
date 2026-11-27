@@ -1,7 +1,6 @@
 /* [temp.inst]/11: the virtual functions of a specialization whose member
    bodies wait for the end of the translation unit (one a std::unique_ptr
-   of it defined first: SkThreadPool). */
-#include <memory>
+   specialization defined while another class is: SkThreadPool). */
 
 extern "C" int printf(const char *, ...);
 
@@ -23,17 +22,16 @@ template <typename L> class Pool final : public F
 };
 } // namespace
 
-template <class T> T *make(int v) { return new T(v); }
+struct holder {
+    char storage[sizeof(Pool<int>)];
+};
 
-std::unique_ptr<F> pool()
-{
-    return std::unique_ptr<Pool<int>>(make<Pool<int>>(1));
-}
+template <class T> T *make(int v) { return new T(v); }
 
 int main()
 {
-    std::unique_ptr<F> p = pool();
+    F *p = make<Pool<int>>(1);
     p->borrow();
-    printf("%d\n", p->get());
+    printf("%d %d\n", p->get(), sizeof(holder) >= sizeof(void *));
     return 0;
 }
