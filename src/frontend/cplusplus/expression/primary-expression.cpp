@@ -139,47 +139,6 @@ bool semantic_analysis::imaginary_literal(token_index t) const
     return false;
 }
 
-/* [basic.fundamental]/12: the long double whose representation is high:low,
-   as a double; false when no normal double or zero holds it exactly.  The
-   evaluator keeps a long double only then. */
-static bool long_double_as_double(const implementation_defined_behavior &b,
-                                  uint64_t low, uint64_t high, double &out)
-{
-    if (b.long_double_fraction_bits == 52) {
-        out = floating_value(low);
-        return true;
-    }
-    /* the significand with its leading one at bit 63, and the biased
-       binary128/x87 exponent */
-    uint64_t significand = low;
-    uint64_t exponent = high & 0x7fff;
-    bool negative = (high >> 15) & 1;
-    if (b.long_double_fraction_bits == 112) {
-        exponent = (high >> 48) & 0x7fff;
-        negative = high >> 63;
-        uint64_t fraction_high = high & ((UINT64_C(1) << 48) - 1);
-        if (low & ((UINT64_C(1) << 49) - 1))
-            return false;
-        significand = (UINT64_C(1) << 63) | (fraction_high << 15) | (low >> 49);
-        if (!exponent && !fraction_high && !low)
-            significand = 0;
-    }
-    if (!exponent && !significand) {
-        out = 0.0;
-        if (negative)
-            out = -0.0;
-        return true;
-    }
-    int power = static_cast<int>(exponent) - 16383;
-    if (power < -1022 || power > 1023 || (significand & 0x7ff) ||
-        !(significand >> 63))
-        return false;
-    out = ldexp(static_cast<double>(significand >> 11), power - 52);
-    if (negative)
-        out = -out;
-    return true;
-}
-
 analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
 {
     const implementation_defined_behavior &b = tokens.files.behavior;
@@ -220,11 +179,9 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
             return analysis_result::well_formed;
         if (k.type == fundamental_type::long_double) {
             /* kept as a double, when a double holds it */
-            double d = 0;
-            if (long_double_as_double(b, v.floating_bits_low,
-                                      v.floating_bits_high, d)) {
+            if (v.long_double_in_double) {
                 m.evaluation = constness::constant;
-                m.value = floating_kept(d);
+                m.value = v.long_double_bits;
             }
             return analysis_result::well_formed;
         }
