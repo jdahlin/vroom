@@ -388,6 +388,16 @@ analysis_result semantic_analysis::friend_elaborated_class(entity_index c,
         bool considered = !is_namespace(found.found_in) ||
                           (x.enclosing == space && found.found_in == space &&
                            !entity_table.bound_by_using(space, name));
+        /* ... a base's injected-class-name is a member of those classes
+           ([class.pre]/2), whichever namespace the base is of */
+        for (entity_index k = c;
+             k && entity_table[k].kind == entity_kind::class_type;
+             k = entity_table[k].enclosing) {
+            bool ambiguous = false;
+            if (class_member_lookup(k, name, ambiguous) == found.entity &&
+                !ambiguous)
+                considered = true;
+        }
         if (x.kind == entity_kind::class_type && considered) {
             /* [dcl.type.elab]/3: "the union class-key shall be used to
                refer to a union, and either the class or struct class-key
