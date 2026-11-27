@@ -14,10 +14,10 @@
 #include "preir.h"
 #include "simplify.h"
 
-#define VIRBUILD_UNROLL_TRIPS 8
-#define VIRBUILD_UNROLL_SIZE 160 /* instructions after unrolling */
+#define VIRBUILD_UNROLL_TRIPS 16
+#define VIRBUILD_UNROLL_SIZE 640 /* instructions after unrolling */
 #define VIRBUILD_UNROLL_BLOCKS 8
-#define VIRBUILD_UNROLL_PARAMETERS 12
+#define VIRBUILD_UNROLL_PARAMETERS 24
 
 typedef struct virbuild_unroll_loop {
     uint32_t header, entry, exit;
