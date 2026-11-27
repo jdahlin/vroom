@@ -582,6 +582,15 @@ uint32_t ast_builder_x86_header_call(cc *c, const char *name, size_t length,
     return cc_x86_header_call_build(c, name, length, args, n, 0);
 }
 
+uint32_t ast_builder_abs_call(cc *c, const char *name, size_t length,
+                              uint32_t arg, bool builtin)
+{
+    if (!builtin && (c->o->no_builtin ||
+                     cc_library_builtin_is_disabled(c->o, name, length)))
+        return 0;
+    return cc_builtin_abs_build(c, name, length, arg, 0);
+}
+
 uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
                                     uint32_t b, const int32_t *indices,
                                     uint32_t count)

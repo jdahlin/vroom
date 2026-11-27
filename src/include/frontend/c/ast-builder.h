@@ -207,6 +207,11 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
    ...); 0 if it is not one */
 uint32_t ast_builder_x86_header_call(cc *c, const char *name, size_t length,
                                      const uint32_t *args, uint32_t n);
+/* abs, labs or llabs (name[0..length)) of an argument of its type, as an
+   expression; 0 if it is not one, and with -fno-builtin unless `builtin`
+   (the __builtin_ name was called) */
+uint32_t ast_builder_abs_call(cc *c, const char *name, size_t length,
+                              uint32_t arg, bool builtin);
 /* the C library function the builtin __builtin_NAME (name[0..length) is
    NAME) declares implicitly, as clang does: its prototype in the front
    end's builtin table letters (*clang_encoding false) or in clang's
