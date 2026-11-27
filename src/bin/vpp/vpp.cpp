@@ -311,8 +311,7 @@ struct vpp_fork_batch {
     int count, width;
 };
 
-static void vpp_fork_at_boundary(void *context, const char **main_file,
-                                 const char **output_file)
+static void vpp_fork_at_boundary(void *context, struct driver_files *files)
 {
     struct vpp_fork_batch *b = (struct vpp_fork_batch *)context;
     int running = 0, failed = 0, status;
@@ -326,8 +325,8 @@ static void vpp_fork_at_boundary(void *context, const char **main_file,
                 _exit(2);
             }
             if (!child) {
-                *main_file = b->mains[i];
-                *output_file = b->outputs[i];
+                files->main_file = b->mains[i];
+                files->output_file = b->outputs[i];
                 return;
             }
             running++;

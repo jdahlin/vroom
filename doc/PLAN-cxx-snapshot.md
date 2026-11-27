@@ -619,7 +619,13 @@ keeping the queues (`instantiate_so_far`): 37.2G to 33.1G at -O2, 35.6G to
 - Rejected: no symbol for a function only declared (CS8's first part):
   0.4 %, and objects change.
 
-### CS5. Key and validation.  Status: not started.
+### CS5. Key and validation.  Status: done for what vccd's worker needs (2026-11-27).
+The key is the job's arguments less main file, -o, -MF and -MT, the
+directory, and CPATH, *_INCLUDE_PATH, SOURCE_DATE_EPOCH and VCC_* of the
+environment; the compiler's identity is the server's own binary.  Every path
+the prefix asked about (found or not) is compared by device, inode, size and
+mtime before each fork.  Not done: refusing a prefix that expanded __DATE__ or
+__TIME__ (the main file's are set at the fork), the mtime-granularity rule.
 The recorded reads of 6.5 in the worker, the check, and the refusals (date,
 time, errors, open state).  Files: `preprocessor/include-directive.cpp`,
 `lexer/source-files.cpp` (two hooks), a new `src/driver/cxx-prefix.cpp`.
@@ -629,7 +635,15 @@ changed; the compiler rebuilt: each time the next compile equals a compile
 without a worker.  The cases come from `bench/stockfish/cache.py`'s list of
 what it does not cover.
 
-### CS6. The worker in vccd.  Status: not started.
+### CS6. The worker in vccd.  Status: done, Linux (2026-11-27).
+`src/server/cxx-prefix-worker.cpp`; opt-in per command line (-fcxx-prefix=).
+Eligible: -c of one .cpp/.cc/.cxx with -o, with or without -MD/-MMD, -MF,
+-MT; not -g, -MQ, -S, stdin.  Anything else, and any failure, is compiled as
+before.  `bench/stockfish/vccd-prefix.py`: objects, depfiles and diagnostics
+as one vpp's; header edited, shadowed, -D, errors, workers killed; also with
+vccd under ASan and TSan.  Not done: idle timeout and memory budget (at most
+4 workers), vccd's diagnostics store for a worker's warnings, a cancelled
+client, macOS.
 vccd starts a worker per key, sends jobs, waits in a blocking region
 (`vtask`), applies the budget and idle time of 6.7, ends workers at a
 generation whose validation fails, falls back per 6.4.  Files:

@@ -769,6 +769,9 @@ struct preprocessor_options {
     /* the end of the command line's includes is an end of the tokens: the
        main file is opened and entered by enter_main (-fcxx-prefix=) */
     bool stop_before_main = false;
+    /* told of every path stat_file asks about, found or not */
+    void (*probe)(void *context, const char *path) = nullptr;
+    void *probe_context = nullptr;
     /* for clang's -dM: keep definitions in the order made */
     bool keep_definition_order = false;
 };
@@ -1004,6 +1007,8 @@ class preprocessor
        file; false if it cannot be read */
     bool enter_main(const char *path);
     bool main_pending = false;
+    /* __DATE__ and __TIME__ of now */
+    void set_translation_time();
     /* stat of a path as spelled (source_files::directory) */
     int stat_file(const char *path, struct stat *st) const;
     bool find_header(const char *name, size_t length, bool angled,

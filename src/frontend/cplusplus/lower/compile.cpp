@@ -457,6 +457,8 @@ static int compile(const cplusplus_compile_options *o, pp *p,
         memcpy(options.command_line.extend(line.size()), line.data(),
                line.size());
         options.stop_before_main = true;
+        options.probe = o->probe;
+        options.probe_context = o->probe_context;
     }
     compile_search_path(o->search, options);
     for (int i = 0; i < o->embed_directory_count; i++)

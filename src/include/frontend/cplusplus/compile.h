@@ -42,6 +42,9 @@ struct cplusplus_compile_options {
        before the main file is opened; may change path.  Or NULL */
     void (*boundary)(void *context, const char **path);
     void *boundary_context;
+    /* told of every path the preprocessor asks about (the process's view) */
+    void (*probe)(void *context, const char *path);
+    void *probe_context;
 };
 
 /* 0 if the translation unit compiled; 1 after an error, a diagnostic on

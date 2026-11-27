@@ -132,6 +132,14 @@ VPRIV const char *vccd_request_input_find(const struct vccd_request *r);
 VPRIV bool vccd_request_is_compile(const struct vccd_request *r);
 VPRIV bool vccd_request_is_preprocess(const struct vccd_request *r);
 VPRIV bool vccd_request_is_version_banner(const struct vccd_request *r);
+/* cxx-prefix-worker.cpp: a C++ -c with -fcxx-prefix= compiled by a process
+   that has the prefix analysed; -1: not such a job, or the worker could not
+   (the caller compiles it itself) */
+VPRIV int vccd_cxx_prefix_compile(int argc, char **argv,
+                                  const driver_environment *env);
+VPRIV bool vccd_option_takes_value(const char *a);
+/* `vccd --cxx-prefix-worker`: the process itself; fd: its control socket */
+VPRIV int vccd_cxx_prefix_worker_main(int fd);
 VPRIV int vccd_compile_in_process(const struct vccd_request *r, const char *src,
                                   size_t len, bool final);
 VPRIV int vccd_probe_cc_answer(const struct vccd_request *r, int kind);

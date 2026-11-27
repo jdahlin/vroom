@@ -146,6 +146,8 @@ void pp_fatal_jump_set(pp *p, jmp_buf *jb);
 /* one more of those files, read by another front end (C++'s): path is
    copied */
 void pp_dependency_note(pp *p, const char *path, int system);
+/* the dependencies' first file, the main one, is path */
+void pp_dependency_main_set(pp *p, const char *path);
 /* the distinct files read so far, as spelled (for -MD dependency files) */
 size_t pp_file_names(const pp *p, const char **names, size_t max, int nosys);
 /* the next token; LEX_TOKEN_EOF at the end (and ever after) */

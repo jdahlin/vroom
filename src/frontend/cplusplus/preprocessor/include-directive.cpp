@@ -32,7 +32,10 @@ unsigned search_rank(include_search s)
 int preprocessor::stat_file(const char *path, struct stat *st) const
 {
     owned_buffer storage;
-    return stat(files.on_disk(path, storage), st);
+    const char *real = files.on_disk(path, storage);
+    if (options.probe)
+        options.probe(options.probe_context, real);
+    return stat(real, st);
 }
 
 void preprocessor::note_dependency(const char *path, bool system)

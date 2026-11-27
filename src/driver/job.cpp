@@ -220,15 +220,24 @@ static void driver_job_pp_options_finish(struct driver_job *job,
 struct driver_cxx_boundary {
     struct driver_job *job;
     const driver_environment *env;
+    pp *p;
 };
 
 static void driver_cxx_boundary_reached(void *context, const char **path)
 {
     struct driver_cxx_boundary *b = (struct driver_cxx_boundary *)context;
 
-    b->env->cxx_boundary(b->env->cxx_boundary_context, &b->job->main_file,
-                         &b->job->output_file);
-    *path = b->job->main_file;
+    struct driver_files f = {b->job->main_file, b->job->output_file,
+                             b->job->depfile, b->job->depfile_target};
+
+    b->env->cxx_boundary(b->env->cxx_boundary_context, &f);
+    if (strcmp(f.main_file, b->job->main_file))
+        pp_dependency_main_set(b->p, f.main_file);
+    b->job->main_file = f.main_file;
+    b->job->output_file = f.output_file;
+    b->job->depfile = f.depfile;
+    b->job->depfile_target = f.depfile_target;
+    *path = f.main_file;
 }
 #endif
 
@@ -266,8 +275,10 @@ static int driver_job_compile_cplusplus(struct driver_job *job, pp *p,
         o.preprocessed_input = (l > 2 && !strcmp(main + l - 2, ".i")) ||
                                (l > 3 && !strcmp(main + l - 3, ".ii"));
     }
-    struct driver_cxx_boundary boundary = {job, env};
-    if (env->cxx_boundary && !job->debug && !job->depfile) {
+    struct driver_cxx_boundary boundary = {job, env, p};
+    o.probe = env->cxx_probe;
+    o.probe_context = env->cxx_probe_context;
+    if (env->cxx_boundary && !job->debug) {
         o.boundary = driver_cxx_boundary_reached;
         o.boundary_context = &boundary;
     }

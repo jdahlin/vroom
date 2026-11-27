@@ -50,7 +50,9 @@ VPRIV int vccd_compile_in_process(const struct vccd_request *r, const char *src,
                                            : -1;
     vccd_diagnostics_job_begin(&j, r->cwd, r->argv[r->argc - 1],
                                dd && *dd && strcmp(dd, "0"));
-    st = driver_job_run(r->argc, r->argv, &e);
+    st = vccd_cxx_prefix_compile(r->argc, r->argv, &e);
+    if (st < 0)
+        st = driver_job_run(r->argc, r->argv, &e);
     vccd_diagnostics_job_end(&j, st == 0 || final);
     if (vccd_compile_capture_fd >= 0 &&
         (n = lseek(vccd_compile_capture_fd, 0, SEEK_CUR)) > 0) {

@@ -116,6 +116,21 @@ bool preprocessor::system_header_at(source_location location) const
     return e && e->system_header;
 }
 
+void preprocessor::set_translation_time()
+{
+    /* [cpp.predefined]/1: "The date of translation of the source file" */
+    time_t now = ::time(nullptr);
+    struct tm local;
+    localtime_r(&now, &local);
+    static constexpr const char *months[] = {"Jan", "Feb", "Mar", "Apr",
+                                             "May", "Jun", "Jul", "Aug",
+                                             "Sep", "Oct", "Nov", "Dec"};
+    snprintf(date, sizeof date, "\"%s %2d %d\"", months[local.tm_mon],
+             local.tm_mday, local.tm_year + 1900);
+    snprintf(time_of_day, sizeof time_of_day, "\"%02d:%02d:%02d\"",
+             local.tm_hour, local.tm_min, local.tm_sec);
+}
+
 bool preprocessor::start(const char *path)
 {
     define_dynamic_macros();
@@ -162,17 +177,7 @@ bool preprocessor::start(const char *path)
         inclusions.append(
             {command_line_file, -1, 0, 0, false, false, preprocessing_token()});
 
-    /* [cpp.predefined]/1: "The date of translation of the source file" */
-    time_t now = ::time(nullptr);
-    struct tm local;
-    localtime_r(&now, &local);
-    static constexpr const char *months[] = {"Jan", "Feb", "Mar", "Apr",
-                                             "May", "Jun", "Jul", "Aug",
-                                             "Sep", "Oct", "Nov", "Dec"};
-    snprintf(date, sizeof date, "\"%s %2d %d\"", months[local.tm_mon],
-             local.tm_mday, local.tm_year + 1900);
-    snprintf(time_of_day, sizeof time_of_day, "\"%02d:%02d:%02d\"",
-             local.tm_hour, local.tm_min, local.tm_sec);
+    set_translation_time();
     started = true;
     return true;
 }
@@ -186,6 +191,8 @@ bool preprocessor::enter_main(const char *path)
     if (stat_file(path, &st) == 0)
         entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
     inclusions[0] = {main_file, -1, 0, 0, false, false, preprocessing_token()};
+    if (main_pending) /* (a server's stop may be long ago) */
+        set_translation_time();
     main_pending = false;
     return true;
 }
