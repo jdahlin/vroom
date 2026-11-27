@@ -1104,8 +1104,12 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                template's, whose explicit instantiation is analysed after
                its point of instantiation ([temp.point]) */
             entity_index named = arguments[0].entity;
-            if (!named ||
-                !entity_table[entity_table[named].enclosing].parameter_scope)
+            /* (or a prvalue, whose class is made where it is) */
+            bool made =
+                !named && arguments[0].category == value_category::prvalue;
+            if (!made &&
+                (!named ||
+                 !entity_table[entity_table[named].enclosing].parameter_scope))
                 return not_supported_because(
                     n, "over.match.class.deduct",
                     "class template argument deduction from a specialization "
