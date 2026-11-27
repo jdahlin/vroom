@@ -1374,7 +1374,9 @@ entity_index semantic_analysis::evaluated_class(qualified_type t) const
 /* the value v of a class or array stored in the object at place: the
    elements one by one into those the object has, when it has them (a
    store is not a new object, whose elements would be above the
-   invocation's and go with it), else v as it is */
+   invocation's and go with it), else v as it is.  Elements the store has
+   to make, or takes from v, stay to the end of the evaluation: the object
+   may outlive the scope they were made in */
 void semantic_analysis::assign_value(constant_evaluation &state, uint32_t place,
                                      const constant_value &v)
 {
@@ -1389,9 +1391,10 @@ void semantic_analysis::assign_value(constant_evaluation &state, uint32_t place,
         place_value(state, place).member = v.member;
         const constant_value e = state.elements[v.first];
         state.elements[held.first] = constant_value();
-        if (is_object_value(e) || e.kind == constant_value_kind::array)
+        if (is_object_value(e) || e.kind == constant_value_kind::array) {
             state.elements[held.first] = copy_value(state, e, false);
-        else
+            state.element_floor = static_cast<uint32_t>(state.elements.size());
+        } else
             state.elements[held.first] = e;
         return;
     }
@@ -1400,6 +1403,9 @@ void semantic_analysis::assign_value(constant_evaluation &state, uint32_t place,
         held.kind != v.kind || held.count != v.count ||
         held.designator != v.designator || held.first == v.first) {
         place_value(state, place) = v;
+        if (held.first != v.first &&
+            (is_object_value(v) || v.kind == constant_value_kind::array))
+            state.element_floor = static_cast<uint32_t>(state.elements.size());
         return;
     }
     for (uint32_t i = 0; i < v.count; i++) {
