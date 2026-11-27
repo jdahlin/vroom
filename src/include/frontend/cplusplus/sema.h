@@ -4014,6 +4014,9 @@ class semantic_analysis
     entity_index skipped_member_body = 0;
     void defer_needs_of_instantiated_body(entity_index f);
     bool virtual_table_needed(entity_index c) const;
+    /* the node of the object the latest non-array new-expression
+       initializes: its construction needs no destructor */
+    uint32_t new_object_made = 0;
     owned_array<deferred_need> deferred_needs;
     void mark_needed(entity_index function);
     bool pass_deferred_needs();

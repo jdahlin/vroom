@@ -679,6 +679,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     object.evaluation = constness::not_constant;
     object.node =
         expression_node(semantic_kind::indirection, object, at, pointer.node);
+    if (!array)
+        new_object_made = object.node;
     initialized_value value;
     owned_array<expression_meaning> none;
     if (!init) {
