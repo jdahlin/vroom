@@ -1008,11 +1008,21 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
     owned_array<parameter_meaning> call_parameters;
     r = lambda_call_type(n, declarator, l, type, call_parameters);
     current_scope = outer;
-    for (const parameter_meaning &x : call_parameters)
-        if (r == analysis_result::well_formed && x.default_argument)
-            r = not_supported_because(n, "dcl.fct.default",
-                                      "a default argument in a generic "
-                                      "lambda's parameter");
+    /* [dcl.fct.default]/4: the trailing parameters with a default
+       argument */
+    uint32_t defaults = 0;
+    for (const parameter_meaning &x : call_parameters) {
+        if (!x.default_argument)
+            defaults = 0;
+        else
+            defaults++;
+    }
+    /* (as lambda_default_arguments: the mangled name of such a lambda in a
+       specialization is not clang's yet) */
+    if (r == analysis_result::well_formed && defaults && instantiation_depth)
+        r = not_supported_because(n, "dcl.fct.default",
+                                  "a lambda's default argument in a "
+                                  "template's specialization");
     expressions.resize(expressions_before);
     name_uses.resize(uses_before);
     if (r != analysis_result::well_formed)
@@ -1031,6 +1041,7 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
                      static_cast<uint32_t>(parameters.size()));
     record.definition = n;
     record.declarator = n;
+    record.default_arguments = defaults;
     entity_index t = record.entity;
     entity_table[t].type = type;
     entity_table[t].defined = true;
@@ -1140,13 +1151,13 @@ analysis_result semantic_analysis::lambda_specialization(
                                                l.enclosing_this);
         r = lambda_call_type(n, declarator, l, type, parameters);
     }
-    for (const parameter_meaning &x : parameters)
-        if (r == analysis_result::well_formed && x.default_argument)
-            r = not_supported_because(n, "dcl.fct.default",
-                                      "a default argument in a generic "
-                                      "lambda's parameter");
     if (r != analysis_result::well_formed || !body) {
         lambda_captures.resize(l.first_capture);
+        /* (the declaration's parameters, whose default arguments the
+           caller analyses for the specialization) */
+        if (!body)
+            function_parameters =
+                static_cast<owned_array<parameter_meaning> &&>(parameters);
         return r;
     }
     owned_array<capture_record> captures;
