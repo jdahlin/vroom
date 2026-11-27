@@ -163,8 +163,7 @@ bool semantic_analysis::unit_local(entity_index e) const
                 return true;
             /* a local class or closure type of a function that no other
                translation unit defines too */
-            if (x.enclosing &&
-                entity_table[x.enclosing].kind == entity_kind::function &&
+            if (enclosing_function(entity_table, k) &&
                 !visible_local_class(entity_table, k))
                 return true;
         }

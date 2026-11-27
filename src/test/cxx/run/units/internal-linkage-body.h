@@ -14,6 +14,8 @@ static auto glambda = [] { return UNIT * 31; };
 int Worker::work(int n)
 {
     struct L { enum { value = 5 }; };
+    if (n)
+        n += erased([n] { static int calls; return n + calls++; });
     return erased([n] { return n + 1; }) + Counter<L>::next();
 }
 #endif
