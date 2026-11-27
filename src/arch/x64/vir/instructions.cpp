@@ -606,6 +606,13 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         total = (total + 15) & ~15;
         if (musttail && (total || L->ms)) /* the direct emitter says why */
             x64_vir_fail(L, VIRBUILD_FAILURE(musttail));
+        /* a sibling call: nothing on the stack, and al free for the callee's
+           address (a variadic call through a pointer needs both) */
+        bool sibling =
+            !musttail && i->op == VIR_OP_CALL && !total && !L->ms &&
+            !(p[0] != VIR_REGISTER_NONE &&
+              VIR_SIGNATURE_IS_VARIADIC(L->function->extra[i->b])) &&
+            virbuild_call_is_sibling(e, L->function, L->ret32, L->tail, b, v);
         if (total)
             x64_record_emit(e, X64_OP_ADJSP)->immediate = -total;
         for (uint32_t k = 0; k < ng; k++) {
@@ -673,7 +680,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             }
         else if (VIR_SIGNATURE_IS_VARIADIC(L->function->extra[i->b]))
             x64_record_emit_move_immediate(e, RAX, nf);
-        if (musttail) {
+        if (musttail || sibling) {
             if (indirect)
                 x64_mov(e, RAX, R11);
             record *jump = x64_record_emit(e, X64_OP_TAILCALL);

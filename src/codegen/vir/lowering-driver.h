@@ -89,5 +89,14 @@ VPRIV void virbuild_lower_edge_block(const virbuild_lowering *d, uint32_t label,
 /* callee (a symbol's address) returns twice: setjmp and the like */
 VPRIV bool virbuild_call_returns_twice(codegen_context *e,
                                        const vir_insn *callee);
+/* why no call of f may be a sibling call (NULL: those in tail position can); d: one byte per
+   instruction, 1 where the instruction is already known to be an address in the frame */
+VPRIV const char *virbuild_tail_call_reason(codegen_context *e,
+                                            const vir_function *f, uint8_t *d);
+/* the call at i, in block b, is followed only by the return of its result (ret32: of a 32-bit
+   integer result's low half); tail: virbuild_tail_call_reason found nothing */
+VPRIV bool virbuild_call_is_sibling(codegen_context *e, const vir_function *f,
+                                    bool ret32, bool tail, uint32_t b,
+                                    uint32_t i);
 
 #endif

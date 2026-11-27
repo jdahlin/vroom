@@ -31,6 +31,7 @@ typedef struct x64_vir_context {
     unsigned dup;
     bool may_fall_through, scratch_register10;
     bool has_returns_twice;
+    bool tail, ret32; /* sibling calls: virbuild_call_is_sibling's */
     bool
         uses_ymm; /* 256- or 512-bit values: vzeroupper before calls and returns */
     bool

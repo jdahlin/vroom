@@ -3,143 +3,6 @@
 #include "common/attributes.h"
 #include "lowering-internal.h"
 
-/*
- * Why the function's calls cannot be sibling calls (NULL: those right before a ret can):
- * the callee must not see the frame, so no slot's address may leave the loads, stores
- * and copies that use it (as LLVM's TailCallElim: no escaping alloca).
- */
-VPRIV const char *a64_vir_tail_call_reason(a64_vir_context *L, uint8_t *d)
-{
-    const vir_function *f = L->function;
-    bool ch = true;
-
-    memset(d, 0, f->insn_count);
-    while (ch) {
-        ch = false;
-        for (uint32_t b = 0; b < f->block_count; b++)
-            for (uint32_t i = f->blocks[b].first;
-                 i < f->blocks[b].first + f->blocks[b].insn_count; i++) {
-                vir_insn x = f->insns[i];
-                vir_operand_iterator it;
-                uint32_t *p;
-
-                if (x.op == VIR_OP_ASM || x.op == VIR_OP_ASMGOTO ||
-                    x.op == VIR_OP_FRAMEADDR || x.op == VIR_OP_RETADDR ||
-                    x.op == VIR_OP_VA_START)
-                    return "asm or the frame's address";
-                if (vir_op_is_call(x.op) &&
-                    virbuild_call_returns_twice(L->context, &f->insns[x.a]))
-                    return "a call that returns twice";
-                vir_operand_iterator_init(&it, VUNCONST(vir_function *, f), &x,
-                                          false);
-                while ((p = vir_operand_iterator_next(&it))) {
-                    if (f->insns[*p].op != VIR_OP_SLOTADDR && !d[*p])
-                        continue;
-                    if (x.op == VIR_OP_PTRADD && it.pos == 0) {
-                        ch |= !d[i];
-                        d[i] = 1;
-                    } else if (!(((x.op == VIR_OP_LOAD ||
-                                   x.op == VIR_OP_STORE ||
-                                   x.op == VIR_OP_MEMSET) &&
-                                  it.pos == 0) ||
-                                 (x.op == VIR_OP_MEMCPY && it.pos <= 1))) {
-                        return "a slot's address escapes";
-                    }
-                }
-            }
-    }
-    return NULL;
-}
-
-/* from j in block k: past the instructions that only pass *res on (i2p, p2i; under ret32
- * trunc to i32 and ext.4: the low half is the result, the upper half unspecified), *res
- * following them; the first other instruction */
-static uint32_t a64_vir_pass_through_skip(const a64_vir_context *L,
-                                          const vir_block *k, uint32_t j,
-                                          uint32_t *res)
-{
-    const vir_function *f = L->function;
-
-    for (; j < k->first + k->insn_count && f->insns[j].a == *res; j++) {
-        const vir_insn *x = &f->insns[j];
-
-        if (!(x->op == VIR_OP_I2P || x->op == VIR_OP_P2I ||
-              (L->ret32 &&
-               ((x->op == VIR_OP_TRUNC && x->type == VIR_TYPE_I32) ||
-                (x->op == VIR_OP_EXT &&
-                 VIR_INSN_FLAG_WIDTH_LOG2(x->flags) == 2)))))
-            break;
-        *res = j;
-    }
-    return j;
-}
-
-/* v without the instructions that only pass a value on (a64_vir_pass_through_skip's): a reader may name the
- * value under them, since the lowering reads through i2p and p2i */
-static uint32_t a64_vir_pass_through_value(const a64_vir_context *L, uint32_t v)
-{
-    const vir_function *f = L->function;
-
-    for (;;) {
-        const vir_insn *x = &f->insns[v];
-
-        if (!(x->op == VIR_OP_I2P || x->op == VIR_OP_P2I ||
-              (L->ret32 &&
-               ((x->op == VIR_OP_TRUNC && x->type == VIR_TYPE_I32) ||
-                (x->op == VIR_OP_EXT &&
-                 VIR_INSN_FLAG_WIDTH_LOG2(x->flags) == 2)))))
-            return v;
-        v = x->a;
-    }
-}
-
-/* the call at i, in b, is a sibling call: what the ret after it returns is its result (or
- * nothing), also through brs to blocks of only what passes the result on */
-VPRIV bool a64_vir_call_is_sibling(a64_vir_context *L, uint32_t b, uint32_t i)
-{
-    const vir_function *f = L->function;
-    const vir_block *k = &f->blocks[b];
-    const vir_insn *r, *t = &f->insns[f->insns[i].a];
-    uint32_t res = i, j;
-
-    if (f->insns[i].op ==
-        VIR_OP_INVOKE) /* (its frame must stay for the landing pad) */
-        return false;
-    if (!L->tail || f->insns[i].type == VIR_TYPE_MULTI ||
-        (t->op == VIR_OP_SYMADDR &&
-         CODEGEN_REFERENCE_KIND(t->a) == CODEGEN_REFERENCE_SYMBOL &&
-         !em_tail_target_ok(L->context, codegen_symbol_canonical(
-                                            L->context->compile_context,
-                                            CODEGEN_REFERENCE_INDEX(t->a)))))
-        return false;
-    j = a64_vir_pass_through_skip(L, k, i + 1, &res);
-    for (int hop = 0;; hop++) {
-        uint32_t q;
-
-        if (j >= k->first + k->insn_count)
-            return false;
-        r = &f->insns[j];
-        if (r->op != VIR_OP_BR || hop == 4)
-            break;
-        k = &f->blocks[r->a];
-        for (q = 0; q < k->parameter_count &&
-                    a64_vir_pass_through_value(L, f->extra[r->c + q]) !=
-                        a64_vir_pass_through_value(L, res);
-             q++)
-            ;
-        if (q < k->parameter_count)
-            res = k->first + q; /* (else the ret may name the value itself) */
-        j = a64_vir_pass_through_skip(L, k, k->first + k->parameter_count,
-                                      &res);
-    }
-    if (r->op != VIR_OP_RET)
-        return false;
-    return !f->extra[r->c] ||
-           (f->extra[r->c] == 1 &&
-            a64_vir_pass_through_value(L, f->extra[r->c + 1]) ==
-                a64_vir_pass_through_value(L, res));
-}
-
 VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i,
                               const vir_insn *in)
 {
@@ -197,7 +60,9 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i,
 
     if (musttail && stk) /* the direct emitter says why */
         a64_vir_fail(L, VIRBUILD_FAILURE(musttail));
-    if (musttail || (!stk && a64_vir_call_is_sibling(L, b, i))) {
+    if (musttail ||
+        (!stk && virbuild_call_is_sibling(L->context, L->function, L->ret32,
+                                          L->tail, b, i))) {
         a64_record *t;
 
         if (L->allocation->callee[1] &&

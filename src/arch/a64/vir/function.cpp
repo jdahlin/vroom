@@ -364,9 +364,12 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
         L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID &&
                   codegen_type_is_integer(c, ft->base) &&
                   codegen_type_size(c, ft->base) == 4;
-        L.tail =
-            !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) &&
-            !a64_vir_tail_call_reason(&L, a64_vir_thread_state_instance.low32);
+        L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) &&
+                 em_tail_caller_ok(e, s) &&
+                 !virbuild_tail_call_reason(
+                     e, f,
+                     (uint8_t *)memset(a64_vir_thread_state_instance.low32, 0,
+                                       f->insn_count));
         if (e->unit->options->optimize.shrink_wrap &&
             !e->unit->cleanups_disabled &&
             !(e->unit->options->cfi && !CODEGEN_IS_DARWIN(c))) {
@@ -484,9 +487,10 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
               codegen_type_is_integer(c, ft->base) &&
               codegen_type_size(c, ft->base) == 4;
     L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) &&
-             !a64_vir_tail_call_reason(
-                 &L, a64_vir_thread_state_instance
-                         .low32); /* (lo32: scratch until it is filled) */
+             !virbuild_tail_call_reason(
+                 e, f,
+                 (uint8_t *)memset(a64_vir_thread_state_instance.low32, 0,
+                                   f->insn_count)); /* (scratch until filled) */
     vir_uses_count(f, L.uses);
     vir_demand_low32_compute(f, L.ret32, L.low32);
 

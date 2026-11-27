@@ -92,7 +92,8 @@ VPRIV bool a64_vir_call_is_sibling_candidate(a64_vir_context *L, uint32_t b,
 
     a64_vir_arguments_assign(CODEGEN_IS_DARWIN(L->context->compile_context),
                              &f->extra[f->insns[i].b], a, ng, &stk);
-    return !stk && a64_vir_call_is_sibling(L, b, i);
+    return !stk && virbuild_call_is_sibling(L->context, L->function, L->ret32,
+                                            L->tail, b, i);
 }
 
 /* instruction i of block b, its operands collected; res its result's register */
