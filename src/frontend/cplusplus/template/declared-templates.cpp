@@ -1016,6 +1016,7 @@ analysis_result semantic_analysis::template_parameter_scope(
 {
     index = static_cast<uint32_t>(function_templates.size());
     scope = entity_table.make(entity_kind::block_scope, 0, outer);
+    entity_table[scope].template_scope = true;
     first = static_cast<uint32_t>(template_parameter_entities.size());
     return declare_template_parameters(n, parameters, scope, index, reserved);
 }

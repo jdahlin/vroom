@@ -733,10 +733,10 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                         }
                     }
                 }
-                /* [over.match.ref]/1: a non-const lvalue reference to no
-                   class takes a conversion function yielding an lvalue
+                /* [over.match.ref]/1: a non-const lvalue reference to an
+                   object type takes a conversion function yielding an lvalue
                    alone */
-                if (functions && !c1 && !rvalue_reference && !binds_rvalues &&
+                if (functions && !rvalue_reference && !binds_rvalues &&
                     x.kind != type_kind::function &&
                     !conversion_may_yield_lvalue(c2, t1))
                     functions = false;

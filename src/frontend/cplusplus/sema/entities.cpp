@@ -84,6 +84,21 @@ bool entities::bound_by_using(entity_index scope, uint32_t name) const
     return false;
 }
 
+bool entities::bound_by_using_access(entity_index scope, uint32_t name,
+                                     uint8_t &access) const
+{
+    size_t mask = slots.size() - 1;
+    for (size_t i = scope_hash(scope, name) & mask; slots[i].entity;
+         i = (i + 1) & mask)
+        if (slots[i].scope == scope && slots[i].name == name) {
+            if (!slots[i].by_using_declaration)
+                return false;
+            access = slots[i].using_access;
+            return true;
+        }
+    return false;
+}
+
 void entities::grow()
 {
     owned_array<binding> old;
@@ -106,7 +121,7 @@ void entities::grow()
 
 /* the entity e is what the name refers to in the scope from now on */
 void entities::bind(entity_index scope, uint32_t name, entity_index e,
-                    bool by_using_declaration)
+                    bool by_using_declaration, uint8_t using_access)
 {
     size_t mask = slots.size() - 1;
     size_t i = scope_hash(scope, name) & mask;
@@ -114,12 +129,14 @@ void entities::bind(entity_index scope, uint32_t name, entity_index e,
         if (slots[i].scope == scope && slots[i].name == name) {
             slots[i].entity = e;
             slots[i].by_using_declaration = by_using_declaration;
+            slots[i].using_access = using_access;
             return;
         }
     slots[i].scope = scope;
     slots[i].name = name;
     slots[i].entity = e;
     slots[i].by_using_declaration = by_using_declaration;
+    slots[i].using_access = using_access;
     used++;
     if (used * 2 > slots.size())
         grow();

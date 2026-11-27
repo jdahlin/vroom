@@ -626,33 +626,20 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
             return not_supported_because(
                 n, "namespace.udecl",
                 "a using of a member of a class not found as a base");
-        /* [namespace.udecl]/19: "A synonym created by a using-declaration
-           has the usual accessibility for a member-declaration."  Access
-           is the entity's here: a declaration that makes a non-static
-           member function more accessible is recorded beside it
-           (using_accesses, which accessible asks); a name the derived
-           class declares too would be an overload or hide the base's */
+        /* [namespace.udecl]/18: "All instances of the name mentioned in a
+           using-declarator shall be accessible."
+           [namespace.udecl]/19: "A synonym created by a using-declaration
+           has the usual accessibility for a member-declaration." */
         if (kind == entity_kind::none)
             return not_supported_because(n, "namespace.udecl",
                                          "a using of a held name");
-        /* [class.qual]/2: T::T through an alias T names constructors, which
-           analysis does not follow: no member's access changes */
-        bool names_constructors =
-            tokens[t - 2].kind == token_kind::identifier &&
-            tokens.identifier(t - 2) == name;
-        /* (every function of the set the head begins) */
         for (entity_index o = e; o; o = entity_table[o].next_overload) {
-            const entity &x = entity_table[o];
-            if (x.access == declaration_access)
-                continue;
-            if (declaration_access > x.access || names_constructors ||
-                x.kind != entity_kind::function || !x.nonstatic_member ||
-                !accessible(o))
-                return not_supported_because(
-                    n, "namespace.udecl",
-                    "a using that makes a member less accessible, or changes "
-                    "the access of one that is no non-static member function");
-            using_accesses.append({o, c, declaration_access});
+            if (!accessible(o, c))
+                return ill_formed_at_token(
+                    t, "a using-declaration shall name an accessible member",
+                    "namespace.udecl");
+            if (entity_table[o].access != declaration_access)
+                using_accesses.append({o, c, declaration_access});
         }
         entity_index own = entity_table.find(c, name);
         if (own) {
@@ -691,7 +678,7 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
             used(t, e);
             return analysis_result::well_formed;
         }
-        entity_table.bind(c, name, e, true);
+        entity_table.bind(c, name, e, true, declaration_access);
         used(t, e);
         return analysis_result::well_formed;
     }

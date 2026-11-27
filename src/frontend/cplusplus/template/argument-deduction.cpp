@@ -201,13 +201,19 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                     return false;
                 }
             }
-            template_argument y_pack;
-            y_pack.kind = template_argument::kind_t::pack;
-            y_pack.value = static_cast<uint64_t>(pack_arguments.size());
-            y_pack.count = ar_count - ttp_fixed;
-            for (uint32_t i = ttp_fixed; i < ar_count; i++)
-                pack_arguments.append(
-                    specialization_template_argument(ar.entity, i));
+            owned_array<template_argument> flat;
+            for (uint32_t i = ttp_fixed; i < ar_count; i++) {
+                const template_argument &y =
+                    specialization_template_argument(ar.entity, i);
+                if (y.kind == template_argument::kind_t::pack) {
+                    for (uint32_t k = 0; k < y.count; k++)
+                        flat.append(pack_arguments[y.value + k]);
+                } else {
+                    flat.append(y);
+                }
+            }
+            template_argument y_pack =
+                make_pack(flat.data(), static_cast<uint32_t>(flat.size()));
             const template_argument x_pack =
                 specialization_template_argument(pr.entity, ttp_fixed);
             return deduce_pack_argument(x_pack, y_pack, deduced, set);

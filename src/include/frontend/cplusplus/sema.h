@@ -631,6 +631,7 @@ struct entity {
        scope */
     entity_index conflicts = 0;
     bool parameter_scope = false;
+    bool template_scope = false;
     /* [basic.link]: its declarations, in order, are a chain through
        `declarations`: the first and the last */
     uint32_t first_declaration = 0, last_declaration = 0;
@@ -1042,10 +1043,14 @@ class entities
        looks only among those */
     void give_c_linkage(entity_index e);
     void bind(entity_index scope, uint32_t name, entity_index e,
-              bool by_using_declaration = false);
+              bool by_using_declaration = false, uint8_t using_access = 0);
     /* whether the name is bound in the scope by a using-declaration
        ([namespace.udecl]) and not declared there */
     bool bound_by_using(entity_index scope, uint32_t name) const;
+    /* if bound by a using-declaration in scope, sets access to the
+       using-declaration's member access and returns true */
+    bool bound_by_using_access(entity_index scope, uint32_t name,
+                               uint8_t &access) const;
     /* another declaration of the entity ([basic.link]/1: "A name ... can
        be introduced by declarations in more than one place) */
     void add_declaration(entity_index e, SyntaxRef node);
@@ -1077,6 +1082,7 @@ class entities
         uint32_t name = 0;
         entity_index entity = 0;
         bool by_using_declaration = false;
+        uint8_t using_access = 0;
     };
     owned_array<binding> slots;
     size_t used = 0;
@@ -3989,6 +3995,8 @@ class semantic_analysis
     /* the next function body analysed is one of an instantiation not known
        to be used: its needs wait for its function's (analyse_function_body) */
     bool defer_next_body_needs = false;
+    bool skip_unneeded_member_body = false;
+    entity_index skipped_member_body = 0;
     void defer_needs_of_instantiated_body(entity_index f);
     bool virtual_table_needed(entity_index c) const;
     owned_array<deferred_need> deferred_needs;

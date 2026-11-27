@@ -1116,10 +1116,28 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
         type = entity_table[c].type.unqualified();
         return analysis_result::well_formed;
     }
-    if (count == 2 && e[at].is(syntax_kind::simple_template_id)) {
-        /* [dcl.type.elab]/1: class-key simple-template-id */
+    bool is_template_id =
+        (count == 2 && e[at].is(syntax_kind::simple_template_id)) ||
+        (count == 3 && e[at].nested_name_specifier() &&
+         e[at + 1].is(syntax_kind::simple_template_id)) ||
+        (count == 4 && e[at].nested_name_specifier() && e[at + 1].is_token() &&
+         leading_keyword(e[at + 1]) == standard_keyword::template_ &&
+         e[at + 2].is(syntax_kind::simple_template_id));
+    if (is_template_id) {
+        /* [dcl.type.elab]/1: class-key nested-name-specifier_opt template_opt
+           simple-template-id */
+        entity_index scope = 0;
+        bool qualified = false;
+        SyntaxElement id = e[at];
+        if (count >= 3) {
+            nominated_scope q;
+            VTRY(r, nested_name_specifier(e[at], q));
+            scope = q.entity;
+            qualified = true;
+            id = e[at + static_cast<uint32_t>(count - 2)];
+        }
         type_index t = 0;
-        VTRY(r, template_type(e[at], 0, false, t));
+        VTRY(r, template_type(id, scope, qualified, t));
         if (type_table[t].kind == type_kind::dependent)
             return not_supported_because(
                 n, "dcl.type.elab",
@@ -1153,6 +1171,9 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
        declared in the smallest namespace or block scope that contains the
        declaration": the scope a class it declares is declared in */
     entity_index target = current_scope;
+    while (entity_table[target].kind == entity_kind::block_scope &&
+           entity_table[target].template_scope)
+        target = entity_table[target].enclosing;
     if (is_namespace(target) && defining_class) {
         target = defining_class;
         while (!is_namespace(target) &&
@@ -1473,14 +1494,25 @@ bool semantic_analysis::accessible_here(entity_index member,
                                         entity_index object_class) const
 {
     const entity &x = entity_table[member];
-    if (!x.access)
+    uint8_t access = x.access;
+    entity_index naming_class = x.enclosing;
+    /* [namespace.udecl]/19: a synonym created by a member using-declaration
+       has the accessibility of the using-declaration in the naming class */
+    if (object_class && object_class != x.enclosing) {
+        uint8_t ua = 0;
+        if (entity_table.bound_by_using_access(object_class, x.name, ua)) {
+            access = ua;
+            naming_class = object_class;
+        }
+    }
+    if (!access)
         return true;
     /* [impl.clang] a class whose access clang does not check (access_unchecked) */
-    const entity &k = entity_table[x.enclosing];
+    const entity &k = entity_table[naming_class];
     if (k.kind == entity_kind::class_type &&
         (k.access_unchecked ||
          (k.instantiation &&
-          entity_table[specialized_template(x.enclosing)].access_unchecked)))
+          entity_table[specialized_template(naming_class)].access_unchecked)))
         return true;
     /* [temp.spec]/6: "The usual access checking rules do not apply
        to names in a declaration of an explicit instantiation or explicit
@@ -1501,12 +1533,12 @@ bool semantic_analysis::accessible_here(entity_index member,
        function" */
     /* the use is in a member of class k */
     auto as_member_of = [&](entity_index member_class) -> bool {
-        if (member_class == x.enclosing)
+        if (member_class == naming_class)
             return true;
-        if (x.access != 1)
+        if (access != 1)
             return false;
         bool ambiguous = false;
-        if (!base_step(member_class, x.enclosing, ambiguous))
+        if (!base_step(member_class, naming_class, ambiguous))
             return false;
         if (!object_class || !x.nonstatic_member ||
             object_class == member_class)
@@ -2531,12 +2563,10 @@ analysis_result semantic_analysis::member_declarator(
             return not_supported_because(
                 declaration, "class.static.data",
                 "a static data member of a local class");
-        const struct type &record = type_table[type.unqualified()];
-        if (record.kind == type_kind::lvalue_reference ||
-            record.kind == type_kind::rvalue_reference || abstract_class(type))
+        if (abstract_class(type))
             return not_supported_because(
                 declaration, "class.static.data",
-                "a static data member of reference or abstract class type");
+                "a static data member of abstract class type");
         e = entity_table.make(entity_kind::variable, name, c);
         entity_table[e].type = type;
         /* [class.static.data]/1: "A static data member is not part of the
@@ -3135,6 +3165,9 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         s.constexpr_ &&
         (record.kind == type_kind::class_type ||
          record.kind == type_kind::array || record.kind == type_kind::pointer);
+    const bool constexpr_reference =
+        s.constexpr_ && (record.kind == type_kind::lvalue_reference ||
+                         record.kind == type_kind::rvalue_reference);
     /* [expr.const]/3: until the initializer is analysed (and if analysis
        has no rules for it) whether a member that may be usable in constant
        expressions is one, and its value, are unknown: a later member's
@@ -3147,7 +3180,16 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         !((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration);
     if (dynamic_inline) {
         if (!deduced) {
+            qualified_type before = type;
             VTRY(r, initializer(init, type, value));
+            if (!(before == type)) {
+                /* [dcl.array]/7: an array of unknown bound completed by its
+                   initializer */
+                entity_table[e].type = type;
+                if (!declared_names.empty() &&
+                    declared_names.back().entity == e)
+                    declared_names.back().type = type;
+            }
         }
         entity &x = entity_table[e];
         x.definition = value.node;
@@ -3155,8 +3197,9 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         x.defined = true;
         return analysis_result::well_formed;
     }
-    if (!(cv & cv_const) || (cv & cv_volatile) ||
-        (!integral_or_enumeration && !constexpr_floating && !constexpr_class))
+    if (!constexpr_reference &&
+        (!(cv & cv_const) || (cv & cv_volatile) ||
+         (!integral_or_enumeration && !constexpr_floating && !constexpr_class)))
         return not_supported_because(
             declarator, "class.static.data",
             "an in-class initializer of a static data member of a non-const, "
@@ -3182,7 +3225,10 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         record.kind == type_kind::array && value.node &&
         value.evaluation == constness::constant &&
         semantics[value.node].kind != semantic_kind::initializer_list;
-    if (constexpr_class && value.node && !literal_array) {
+    if (constexpr_reference) {
+        if (value.evaluation == constness::unknown && value.node)
+            value.evaluation = evaluate_reference_binding(value.node);
+    } else if (constexpr_class && value.node && !literal_array) {
         uint32_t data = 0;
         constness c =
             evaluate_variable(type, value.node, semantics[value.node].at, data);
@@ -3228,6 +3274,23 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         x.value = value.value;
     }
     x.definition = value.node;
+    if (constexpr_reference && !(x.gnu_flags & gnu_weak)) {
+        uint32_t bound = value.node;
+        if (bound && semantics[bound].kind == semantic_kind::bind_reference)
+            bound = semantics[bound].a;
+        if (bound && semantics[bound].kind == semantic_kind::entity) {
+            entity_index referent = semantics[bound].a;
+            const entity &r2 = entity_table[referent];
+            if (((r2.kind == entity_kind::variable && !r2.automatic &&
+                  !r2.c11_thread_local) ||
+                 r2.kind == entity_kind::function) &&
+                type_table[r2.type.unqualified()].kind !=
+                    type_kind::lvalue_reference &&
+                type_table[r2.type.unqualified()].kind !=
+                    type_kind::rvalue_reference)
+                x.constant_referent = referent;
+        }
+    }
     if (s.constexpr_ || s.inline_) {
         /* [dcl.inline]/1 (C++17): "A function or static data member
            declared with the constexpr specifier is implicitly an inline

@@ -1071,7 +1071,8 @@ semantic_analysis::member_definition_name(const template_member_definition &o)
 void semantic_analysis::define_waiting_members(entity_index scope,
                                                token_index name, bool define)
 {
-    for (size_t i = 0; i < postponed_bodies.size(); i++) {
+    size_t count = postponed_bodies.size();
+    for (size_t i = 0; i < count; i++) {
         const postponed_body b = postponed_bodies[i];
         if (!b.c || !b.member_definition ||
             instantiations[b.instantiation].specialization != scope)
@@ -1354,8 +1355,14 @@ void semantic_analysis::instantiate_pending()
         for (size_t i = 0; i < postponed_bodies.size(); i++) {
             const postponed_body b = postponed_bodies[i];
             if (b.c && b.member_definition) {
-                if (!member_definition_wanted(b))
+                if (b.function) {
+                    if (!entity_table[b.function].member_definition_needed &&
+                        explicitly_instantiated(b.function) !=
+                            instantiation_kind::definition)
+                        continue;
+                } else if (!member_definition_wanted(b)) {
                     continue;
+                }
                 postponed_bodies[i].c = 0;
                 define_template_member(b.member_definition - 1, b.instantiation,
                                        true);

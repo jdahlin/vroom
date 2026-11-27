@@ -698,10 +698,27 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         /* [temp.inst]/4: a member nobody uses is not instantiated: what
            this definition's body needs waits for its function's use */
         defer_next_body_needs = true;
+        bool defer_unneeded =
+            recorded && x.specialization &&
+            entity_table[x.specialization].explicitly_instantiated !=
+                instantiation_kind::definition;
+        skip_unneeded_member_body = defer_unneeded;
+        skipped_member_body = 0;
         r = function_definition(o.definition);
         defer_next_body_needs = false;
+        skip_unneeded_member_body = false;
     }
     leave_instantiation(context);
+    if (skipped_member_body) {
+        postponed_body b = {};
+        b.c = x.specialization;
+        b.function = skipped_member_body;
+        b.member_definition = member + 1;
+        b.instantiation = index;
+        postponed_bodies.append(b);
+        skipped_member_body = 0;
+        return analysis_result::well_formed;
+    }
     /* the member defined: the class's function this definition declares
        (last_declared may be a name its body declared) */
     entity_index defined = 0;
