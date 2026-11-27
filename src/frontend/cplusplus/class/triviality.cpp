@@ -57,15 +57,6 @@ bool semantic_analysis::trivial_default_constructor(entity_index c,
     /* (3.1) */
     if (x.dynamic || x.virtual_base_count)
         return false;
-    /* a constructor template may be the default constructor; beside
-       X() = default it is not the one default-initialization selects
-       ([over.match.best]/2.4: "F1 is not a function template
-       specialization and F2 is") */
-    if ((x.constructor_template || x.constructor_templates) &&
-        !x.defaulted_default_constructor) {
-        known = false;
-        return false;
-    }
     /* not user-provided */
     bool user_declared = false;
     bool deleted_default = false;
@@ -85,8 +76,20 @@ bool semantic_analysis::trivial_default_constructor(entity_index c,
         /* a user-provided default constructor ([class.default.ctor]/1: one
            "for which each parameter that is not a function parameter pack
            has a default argument") */
-        if (f.parameter_count == entity_table[k].default_arguments)
+        if (f.parameter_count == entity_table[k].default_arguments &&
+            !entity_table[k].constraint_unsatisfied)
             return false;
+        /* (one whose requires-clause is not satisfied is none, but
+           without a template there is no other to be trivial) */
+    }
+    /* a constructor template may be the default constructor; beside
+       X() = default it is not the one default-initialization selects
+       ([over.match.best]/2.4: "F1 is not a function template
+       specialization and F2 is") */
+    if ((x.constructor_template || x.constructor_templates) &&
+        !x.defaulted_default_constructor) {
+        known = false;
+        return false;
     }
     /* /1: a user-declared constructor and no X() = default: there is no
        default constructor to be trivial */
