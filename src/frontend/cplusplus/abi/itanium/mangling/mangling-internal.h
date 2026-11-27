@@ -133,7 +133,7 @@ class itanium_mangler
   public:
     itanium_mangler(const semantic_analysis &analysis, const preprocessor &pp,
                     vbuffer *out, int variant)
-        : analysis(analysis), pp(pp), out(out), variant(variant)
+        : analysis(analysis), pp(pp), out(out), ctor_dtor_variant(variant)
     {
     }
 
@@ -250,7 +250,7 @@ class itanium_mangler
     const preprocessor &pp;
     vbuffer *out;
     /* a constructor's or destructor's: 1 complete, 2 base object */
-    int variant;
+    int ctor_dtor_variant;
     /* [abi:mangling-compression]: the substitution candidates seen so far,
        in order; a type is one candidate however it is spelled, since the
        type table has one record per type.  A namespace as a <prefix> is a
@@ -295,50 +295,71 @@ class itanium_mangler
         return pp.identifier_spelling(identifier - 1, length);
     }
     bool encoding(entity_index e);
-    bool specialization_encoding(entity_index e);
-    bool constraint_expression(entity_index t, SyntaxElement c);
-    bool integer_literal(token_index token);
-    bool enumerator_literal(entity_index e);
-    bool constraint_parameter(entity_index t, entity_index parameter);
+    bool encoding_of_specialization(entity_index e);
+    bool expression_of_constraint(entity_index t, SyntaxElement c);
+    bool expr_primary_of_integer_literal(token_index token);
+    bool expr_primary_of_enumerator(entity_index e);
+    bool template_param_of_constraint(entity_index t, entity_index parameter);
     uint64_t constraint_level(entity_index t) const;
-    bool type_constraint_concept(entity_index t, SyntaxElement q);
+    bool type_constraint(entity_index t, SyntaxElement q);
     /* while a type analysed in the parameter scope of a member template of
        a specialization is mangled: that template, whose own parameters the
        type's template parameter types are */
     entity_index leveled_template = 0;
-    bool constraint_template_args(entity_index t, SyntaxElement c);
+    bool template_args_of_constraint(entity_index t, SyntaxElement c);
     bool compound_requirement(entity_index t, SyntaxElement req);
-    bool constraint_namespace_member(entity_index t, SyntaxElement qualifier,
-                                     SyntaxElement id);
-    bool dependent_expression(SyntaxElement c);
-    bool dependent_fold(SyntaxElement fold);
-    bool structure_expression(uint32_t s);
-    bool named_variable(entity_index t, SyntaxElement name);
+    bool unresolved_name_of_constraint_member(entity_index t,
+                                              SyntaxElement qualifier,
+                                              SyntaxElement id);
+    bool expression_of_written(SyntaxElement c);
+    bool fold_of_written(SyntaxElement fold);
+    bool expression_of_structure(uint32_t s);
+    bool expr_primary_of_variable(entity_index t, SyntaxElement name);
     const semantic_analysis::written_binding *
-    written_object(SyntaxElement name) const;
+    written_object_binding(SyntaxElement name) const;
     /* the dependent_written type being mangled: its bindings
        (sema.h: written_bindings), and the element of the packs among them
        a fold's pattern is mangled for */
     uint32_t written_first = 0, written_count = 0;
     uint32_t pack_element = UINT32_MAX;
-    const semantic_analysis::written_binding *bound(SyntaxElement name) const;
-    bool type_operand(SyntaxElement a);
-    bool written_template_args(SyntaxElement id, bool &dependent);
-    bool written_expansion(SyntaxElement a, bool &expanded);
-    int unresolved_qualifier(SyntaxElement q);
-    bool operand_type(SyntaxElement a, qualified_type &t,
-                      fundamental_type &keyword_type);
-    /* (set by type_operand when a type it mangled is dependent) */
+    const semantic_analysis::written_binding *
+    written_binding(SyntaxElement name) const;
+    bool type_operand_of_written(SyntaxElement a);
+    bool template_args_of_written(SyntaxElement id, bool &dependent);
+    bool expansion_of_written(SyntaxElement a, bool &expanded);
+    int unresolved_qualifier_level(SyntaxElement q);
+    bool type_of_written_operand(SyntaxElement a, qualified_type &t,
+                                 fundamental_type &keyword_type);
+    /* (set by type_operand_of_written when a type it mangled is dependent) */
     bool operand_dependent = false;
     /* the part of the symbol being mangled, for refuse */
     const char *mangling_part = "the name";
     bool refuse(const char *what);
     void refuse_expression(SyntaxElement x);
-    bool dependent_expression_of(SyntaxElement c);
+    bool expression_of_written_forms(SyntaxElement c);
+    /* what a form of the written expression did: not that form, mangled,
+       or that form and not mangled */
+    enum class form : uint8_t { none, mangled, failed };
+    static form written_form(bool mangled)
+    {
+        if (mangled)
+            return form::mangled;
+        return form::failed;
+    }
+    form fold_of_written_expression(SyntaxElement expression);
+    form vendor_type_trait_of_written(SyntaxElement expression);
+    form sizeof_of_written(SyntaxElement expression);
+    form template_id_of_written(SyntaxElement expression);
+    form cast_of_written(SyntaxElement expression);
+    form prefix_operator_of_written(SyntaxElement expression);
+    form operator_of_written(SyntaxElement expression);
+    form unresolved_name_of_written(SyntaxElement expression);
+    form postfix_of_written(SyntaxElement expression);
+    form primary_of_written(SyntaxElement expression);
     /* an initializer-list's expressions, a pattern followed by ... as
        sp <expression> */
-    bool expression_list(SyntaxElement list);
-    /* (the dependent values being mangled, dependent_value) */
+    bool expression_list_of_written(SyntaxElement list);
+    /* (the dependent values being mangled, template_arg_of_dependent_value) */
     uint32_t dependent_value_depth = 0;
     bool punctuator(SyntaxElement c, preprocessing_op_or_punc op) const
     {
@@ -347,17 +368,18 @@ class itanium_mangler
     bool class_template_args(entity_index c);
     bool template_args(entity_index c, entity_index function = 0,
                        bool pack_brackets = true, uint32_t limit = UINT32_MAX);
-    bool dependent_value(entity_index d);
-    bool dependent_value_expr(entity_index d);
+    bool template_arg_of_dependent_value(entity_index d);
+    bool expression_of_dependent_value(entity_index d);
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
     bool template_arg_of(entity_index c, uint32_t i, uint32_t element);
     bool template_template_arg(entity_index t, uint32_t parameter);
     /* (the <template-param>s written so far; an alias template's
        specialization in a value-dependent argument was refused, and is to
-       be written as its type: parameter_type) */
+       be written as its type: non_type_parameter_type) */
     uint64_t template_params_written = 0;
     bool alias_value_refused = false, alias_value_trial = false;
-    bool parameter_type(entity_index c, uint32_t i, qualified_type declared);
+    bool non_type_parameter_type(entity_index c, uint32_t i,
+                                 qualified_type declared);
     void template_param(uint64_t position)
     {
         template_params_written++;
@@ -369,7 +391,7 @@ class itanium_mangler
     bool name(entity_index e);
     bool unscoped_name(entity_index e);
     bool unqualified_name(entity_index e, bool as_type = false);
-    bool unqualified_name_untagged(entity_index e, bool as_type);
+    bool unqualified_name_without_tags(entity_index e, bool as_type);
     bool source_name(uint32_t identifier);
     bool operator_name(const entity &x);
     bool ctor_dtor_name(special_member which, entity_index inherited = 0);
@@ -386,20 +408,35 @@ class itanium_mangler
                                 entity_index *local_class = nullptr) const;
     uint64_t local_class_ordinal(entity_index c, entity_index function) const;
     void local_class_discriminator(entity_index c, entity_index function);
-    bool function_scope(entity_index function);
+    bool local_name_scope(entity_index function);
     bool nested_name(entity_index e);
-    void member_qualifiers(const entity &x);
+    void member_cv_ref_qualifiers(const entity &x);
     bool prefix(entity_index scope);
     bool class_enum_type(qualified_type t);
-    bool std_of_char(qualified_type t, const char *name, size_t n) const;
-    const char *std_abbreviation(entity_index c) const;
-    bool dependent_member_name(entity_index e);
-    bool dependent_member_prefix(type_index q);
+    bool is_std_class_of_char(qualified_type t, const char *name,
+                              size_t n) const;
+    const char *std_substitution(entity_index c) const;
+    bool nested_name_of_dependent_member(entity_index e);
+    bool prefix_of_dependent_member(type_index q);
     void discriminator(uint64_t n);
     bool bare_function_type(qualified_type t);
     bool type(qualified_type t, entity_index member_class = 0);
+    bool type_alternative(qualified_type t, entity_index member_class);
+    static const char *type_kind_description(type_kind kind);
+    bool va_list_type(qualified_type t);
+    bool placeholder_type(const struct type &r);
+    bool pointer_to_member_type(qualified_type t);
+    bool bit_int_type(const struct type &r);
+    bool vector_type(const struct type &r);
+    bool type_transformation(const struct type &r);
+    bool type_of_written(qualified_type t, entity_index member_class);
+    bool typename_of_written(qualified_type t, SyntaxRef n);
+    bool make_integer_seq_of_written(qualified_type t);
     bool builtin_type(fundamental_type t);
-    bool qualified(qualified_type t);
+    bool cv_qualified_type(qualified_type t);
+    void cv_qualifiers(unsigned cv);
+    void ref_qualifier(int ref);
+    void abi_tags(entity_index e);
     bool function_type(qualified_type t);
     bool array_type(qualified_type t);
     bool substitution(qualified_type t, entity_index member_class = 0);

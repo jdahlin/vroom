@@ -37,8 +37,8 @@ bool itanium_mangler::class_template_args(entity_index c)
  * Told apart by a second mangling with each such alias as its type: where
  * that names no <template-param>, nothing else made the type dependent.
  */
-bool itanium_mangler::parameter_type(entity_index c, uint32_t i,
-                                     qualified_type declared)
+bool itanium_mangler::non_type_parameter_type(entity_index c, uint32_t i,
+                                              qualified_type declared)
 {
     size_t length = out->n;
     owned_array<candidate> saved;
@@ -127,7 +127,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
             text("Tn");
             const char *outer_part = mangling_part;
             mangling_part = "a non-type template parameter's type";
-            bool typed = parameter_type(c, i, declared);
+            bool typed = non_type_parameter_type(c, i, declared);
             mangling_part = outer_part;
             if (!typed)
                 return false;
@@ -148,7 +148,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
             if (pack || !q.size() || (!qualified && !q[0].is_identifier()))
                 return false;
             text("Tk");
-            if (!type_constraint_concept(function, q))
+            if (!type_constraint(function, q))
                 return false;
         }
         bool inner_pack = false;
@@ -305,7 +305,7 @@ bool itanium_mangler::template_template_arg(entity_index t, uint32_t parameter)
     return true;
 }
 
-bool itanium_mangler::dependent_value(entity_index d)
+bool itanium_mangler::template_arg_of_dependent_value(entity_index d)
 {
     struct depth_scope {
         uint32_t &depth;
@@ -346,7 +346,7 @@ bool itanium_mangler::dependent_value(entity_index d)
             }
         if (!pattern) {
             text("X");
-            done = dependent_expression(n);
+            done = expression_of_written(n);
             text("E");
         }
         written_first = saved_first;
@@ -354,7 +354,7 @@ bool itanium_mangler::dependent_value(entity_index d)
         return done;
     }
     text("X");
-    if (!dependent_value_expr(d))
+    if (!expression_of_dependent_value(d))
         return false;
     text("E");
     return true;
@@ -417,7 +417,8 @@ bool itanium_mangler::template_arg_of(entity_index c, uint32_t i,
         return true;
     }
     if (analysis.specialization_dependent_value(c, i, element))
-        return dependent_value(analysis.specialization_entity(c, i, element));
+        return template_arg_of_dependent_value(
+            analysis.specialization_entity(c, i, element));
     if (!analysis.specialization_value(c, i, v, negative, parameter, element))
         return type(analysis.specialization_argument(c, i, element));
     if (parameter) {

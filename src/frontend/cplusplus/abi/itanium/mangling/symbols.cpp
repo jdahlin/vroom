@@ -31,7 +31,7 @@ bool itanium_mangler::mangled_name(entity_index e)
     /* (a closure type's constructor or destructor has its class's name:
        none) */
     /* (a structured binding declaration's variable e: its bindings'
-       names, unqualified_name_untagged) */
+       names, unqualified_name_without_tags) */
     bool binding = x.kind == entity_kind::variable && x.binding_count;
     if (!x.name && x.special == special_member::none && !binding)
         return false;
@@ -81,7 +81,7 @@ bool itanium_mangler::encoding(entity_index e)
     const entity &x = analysis.entity_table[e];
     if ((x.kind == entity_kind::function || x.kind == entity_kind::variable) &&
         x.instantiation)
-        return specialization_encoding(e);
+        return encoding_of_specialization(e);
     /* [impl.clang] a function whose symbol is not mangled (C language
        linkage, main; mangled_name), named in an <expr-primary>'s L _Z
        <encoding> E: its unqualified name alone, no function type, in any
@@ -111,7 +111,7 @@ bool itanium_mangler::encoding(entity_index e)
             if (!pattern)
                 return false;
             text("Q");
-            return constraint_expression(pattern, part[1]);
+            return expression_of_constraint(pattern, part[1]);
         }
     }
     return true;
@@ -134,7 +134,7 @@ bool itanium_mangler::encoding(entity_index e)
  *     <template-args> ::= I <template-arg>+ E
  *     <template-arg> ::= <type>
  */
-bool itanium_mangler::specialization_encoding(entity_index e)
+bool itanium_mangler::encoding_of_specialization(entity_index e)
 {
     const entities &table = analysis.entity_table;
     /* (a specialization named within another's arguments: the enclosing
@@ -164,11 +164,11 @@ bool itanium_mangler::specialization_encoding(entity_index e)
         /* (a member of a local class: its function scope first, as
            name()'s) */
         local = local_function(e, &local_class);
-        if (member && local && !function_scope(local))
+        if (member && local && !local_name_scope(local))
             return false;
         text("N");
         if (member && x.nonstatic_member)
-            member_qualifiers(x);
+            member_cv_ref_qualifiers(x);
     }
     /* [abi:mangling-compression]: a template named before (a local type's
        function, itself the specialization being named, in a parameter of
@@ -207,7 +207,7 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     if (constraint && !table[scope].lambda) {
         out->n--;
         text("Q");
-        if (!constraint_expression(pattern_of, constraint))
+        if (!expression_of_constraint(pattern_of, constraint))
             return false;
         text("E");
     }
@@ -244,7 +244,7 @@ bool itanium_mangler::specialization_encoding(entity_index e)
         trailing = true;
     if (constraint && trailing) {
         text("Q");
-        return constraint_expression(pattern_of, constraint);
+        return expression_of_constraint(pattern_of, constraint);
     }
     return true;
 }

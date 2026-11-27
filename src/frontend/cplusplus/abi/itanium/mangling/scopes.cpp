@@ -112,7 +112,7 @@ void itanium_mangler::local_class_discriminator(entity_index c,
 
 /* [abi:mangling-scope]: Z <function encoding> E, the scope of a
    <local-name>; main's encoding is its name alone (local_name) */
-bool itanium_mangler::function_scope(entity_index function)
+bool itanium_mangler::local_name_scope(entity_index function)
 {
     const entity &f = analysis.entity_table[function];
     size_t length = 0;
@@ -149,7 +149,7 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
     const entity &x = table[e];
     if (x.kind != entity_kind::variable || x.automatic)
         return false;
-    if (!function_scope(function))
+    if (!local_name_scope(function))
         return false;
     if (!unqualified_name(e))
         return false;
@@ -292,7 +292,7 @@ bool itanium_mangler::closure_type_name(entity_index c)
             analysis.lambda_constraint(table[c].lambda, &trailing);
         if (constraint && !trailing) {
             text("Q");
-            if (!constraint_expression(call, constraint))
+            if (!expression_of_constraint(call, constraint))
                 return false;
         }
     }

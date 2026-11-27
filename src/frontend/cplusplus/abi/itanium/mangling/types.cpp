@@ -7,14 +7,6 @@ namespace cplusplus
 {
 
 /*
- * [abi:mangling.named]:
- *
- *     <class-enum-type> ::= <name>
- *
- * A class or an enumeration of namespace or class scope: its name, as an
- * entity's.  One of a block scope (a <local-name>) has no rule yet.
- */
-/*
  * [abi:mangle.name]:
  *
  *     <nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] <prefix> <unqualified-name> E
@@ -26,10 +18,10 @@ namespace cplusplus
  * each prefix is a candidate, the same one as the type it names (Q::a in
  * Q::a::b, as clang 23); the type as a whole is the one type() adds.
  */
-bool itanium_mangler::dependent_member_name(entity_index e)
+bool itanium_mangler::nested_name_of_dependent_member(entity_index e)
 {
     text("N");
-    if (!dependent_member_prefix(
+    if (!prefix_of_dependent_member(
             static_cast<type_index>(analysis.entity_table[e].value)))
         return false;
     if (!source_name(analysis.entity_table[e].name))
@@ -38,7 +30,7 @@ bool itanium_mangler::dependent_member_name(entity_index e)
     return true;
 }
 
-bool itanium_mangler::dependent_member_prefix(type_index q)
+bool itanium_mangler::prefix_of_dependent_member(type_index q)
 {
     qualified_type t = qualified_type::make(q, cv_none);
     const struct type &r = record(t);
@@ -88,7 +80,7 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
                 return false;
         }
     } else {
-        if (!dependent_member_prefix(static_cast<type_index>(prefix.value)))
+        if (!prefix_of_dependent_member(static_cast<type_index>(prefix.value)))
             return false;
         if (!source_name(prefix.name))
             return false;
@@ -97,6 +89,15 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
     return true;
 }
 
+/*
+ * [abi:mangling.named]:
+ *
+ *     <class-enum-type> ::= <name>
+ *
+ * A class or an enumeration of namespace or class scope: its name, as an
+ * entity's.  One of a block scope: its <local-name>'s scope first
+ * ([abi:mangling-scope]).
+ */
 bool itanium_mangler::class_enum_type(qualified_type t)
 {
     entity_index c = record(t).entity;
@@ -170,10 +171,10 @@ bool itanium_mangler::class_enum_type(qualified_type t)
                           ::= Si # std::basic_istream<char, std::char_traits<char> >
                           ::= So # std::basic_ostream<char, std::char_traits<char> >
                           ::= Sd # std::basic_iostream<char, std::char_traits<char> >
-           the whole specialization (std_abbreviation); another
+           the whole specialization (std_substitution); another
            basic_string is Sb and its arguments, another stream its
            name */
-        if (const char *whole = std_abbreviation(c)) {
+        if (const char *whole = std_substitution(c)) {
             text(whole);
             return true;
         }
@@ -186,7 +187,7 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         return unscoped_name(c) && class_template_args(c);
     if (local) {
         /* [abi:mangling-scope]: a local class, or one nested in it */
-        if (!function_scope(local))
+        if (!local_name_scope(local))
             return false;
         if (c == local_class) {
             if (!unqualified_name(c, true))
@@ -273,7 +274,10 @@ bool itanium_mangler::bare_function_type(qualified_type t)
  * P, R and O encode pointers and the two kinds of reference. C encodes
  * a complex pair, and Dp wraps a pack expansion. Substitutable types are
  * entered after their components, in the order they are encoded
- * ([abi:mangling-compression]).
+ * ([abi:mangling-compression]).  First the forms that are no candidate
+ * (a builtin type) or that are their own (the vendor's va_list types),
+ * then <substitution>, then the alternatives that are candidates
+ * (type_alternative).
  */
 bool itanium_mangler::type(qualified_type t, entity_index member_class)
 {
@@ -306,306 +310,375 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
                     member_class);
     }
     if (r.kind == type_kind::fundamental && !t.cv() &&
-        r.fundamental == fundamental_type::builtin_va_list) {
-        /* [impl.clang] AAPCS64's std::__va_list (C++ ABI for the Arm 64-bit
-           Architecture, 4.2.2), a <substitution> candidate as a
-           <class-enum-type> */
-        if (substitution(t))
-            return true;
-        text("St9__va_list");
-        add_candidate(t);
-        return true;
-    }
-    if (r.kind == type_kind::fundamental && !t.cv() &&
-        r.fundamental == fundamental_type::builtin_va_list_tag) {
-        /* [impl.clang] x86-64 System V's struct __va_list_tag, a
-           <source-name> (a va_list parameter is P13__va_list_tag) and a
-           <substitution> candidate as a <class-enum-type> */
-        if (substitution(t))
-            return true;
-        text("13__va_list_tag");
-        add_candidate(t);
-        return true;
-    }
+        (r.fundamental == fundamental_type::builtin_va_list ||
+         r.fundamental == fundamental_type::builtin_va_list_tag))
+        return va_list_type(t);
+    /* [abi:mangling-type] <type> ::= <builtin-type> */
     if (r.kind == type_kind::fundamental && !t.cv())
         return builtin_type(r.fundamental);
-    if (r.kind == type_kind::placeholder && !t.cv()) {
-        /* [abi:mangling-builtin]: a template's declared return type
-           auto or decltype(auto), a builtin type:
-
-               <builtin-type> ::= Da
-                              ::= Dc
-
-           Constrained by a concept C ([dcl.spec.auto]/1), Dk (DK of
-           decltype(auto)) then C's <name>, as clang (the ABI's
-           <type-constraint>, later than the version fetched) */
-        static const char *const codes[2][2] = {{"Da", "Dc"}, {"Dk", "DK"}};
-        entity_index constraint = r.entity >> 2;
-        text(codes[constraint != 0][(r.entity & 3) == 2]);
-        return !constraint || name(constraint);
-    }
+    if (r.kind == type_kind::placeholder && !t.cv())
+        return placeholder_type(r);
+    /* [abi:mangling-type] <type> ::= <substitution> */
     if (substitution(t, member_class))
         return true;
-    bool done = false;
-    if (t.cv() && r.kind != type_kind::array)
-        done = qualified(t);
-    else if (r.kind == type_kind::pointer) {
-        text("P");
-        done = type(r.operand);
-    } else if (r.kind == type_kind::lvalue_reference) {
-        text("R");
-        done = type(r.operand);
-    } else if (r.kind == type_kind::rvalue_reference) {
-        text("O");
-        done = type(r.operand);
-    } else if (r.kind == type_kind::pointer_to_member) {
-        /* [abi:mangle.pointer-to-member-type]: "Pointer-to-member types
-           encode the class and member types":
+    bool qualified = t.cv() && r.kind != type_kind::array;
+    if (!qualified && r.kind == type_kind::dependent &&
+        analysis.entity_table[r.entity].kind == entity_kind::dependent_written)
+        return type_of_written(t, member_class);
+    if (!qualified && r.kind == type_kind::template_parameter &&
+        leveled_template) {
+        entity_index own = analysis.constraint_own_type_parameter(
+            leveled_template, analysis.entity_table[r.entity].value);
+        if (!own || t.cv())
+            return refuse("a template parameter in a constraint's type");
+        return template_param_of_constraint(leveled_template, own);
+    }
+    if (!type_alternative(t, member_class))
+        return refuse(type_kind_description(r.kind));
+    add_candidate(t, member_class);
+    return true;
+}
 
-               <pointer-to-member-type> ::= M <class type> <member type>
-        */
-        text("M");
-        type_index cls = analysis.entity_table[r.entity].type.unqualified();
-        bool class_ok = false;
-        if (cls) {
-            class_ok = type(qualified_type::make(cls, cv_none));
-        } else if (encoding_template) {
-            bool subst = false;
-            uint64_t param_pos = analysis.entity_table[r.entity].value;
-            for (size_t i = 0; i < candidates.size(); i++) {
-                if (candidates[i].type.unqualified() &&
-                    !candidates[i].expansion && !candidates[i].type.cv() &&
-                    record(candidates[i].type).kind ==
-                        type_kind::template_parameter &&
-                    analysis.entity_table[record(candidates[i].type).entity]
-                            .value == param_pos) {
-                    type(candidates[i].type);
-                    subst = true;
-                    break;
-                }
-            }
-            if (!subst)
-                template_param(param_pos);
-            class_ok = true;
-        }
-        entity_index owner = 0;
-        if (record(r.operand).kind == type_kind::function)
-            owner = r.entity;
-        done = class_ok && type(r.operand, owner);
-    } else if (r.kind == type_kind::block_pointer) {
+/* (what kind of type the mangler has no rule for, for refuse) */
+const char *itanium_mangler::type_kind_description(type_kind kind)
+{
+    static const struct {
+        type_kind kind;
+        const char *text;
+    } kinds[] = {
+        {type_kind::class_type, "a class type"},
+        {type_kind::enumeration, "an enumeration type"},
+        {type_kind::dependent, "a dependent type"},
+        {type_kind::placeholder, "a placeholder type"},
+        {type_kind::function, "a function type"},
+        {type_kind::pointer_to_member, "a pointer-to-member type"},
+        {type_kind::pack_expansion, "a pack expansion type"},
+    };
+    const char *what = "a type of a kind it has no rule for";
+    for (const auto &k : kinds)
+        if (kind == k.kind)
+            what = k.text;
+    return what;
+}
+
+/* the <type> alternatives that are substitution candidates, the
+   candidate added by type(); false for a type with no rule */
+bool itanium_mangler::type_alternative(qualified_type t,
+                                       entity_index member_class)
+{
+    const struct type &r = record(t);
+    /* [abi:mangling-type] <type> ::= <qualified-type> */
+    if (t.cv() && r.kind != type_kind::array)
+        return cv_qualified_type(t);
+    switch (r.kind) {
+    /* [abi:mangling-type] <type> ::= P <type> */
+    case type_kind::pointer:
+        text("P");
+        return type(r.operand);
+    /* [abi:mangling-type] <type> ::= R <type> */
+    case type_kind::lvalue_reference:
+        text("R");
+        return type(r.operand);
+    /* [abi:mangling-type] <type> ::= O <type> */
+    case type_kind::rvalue_reference:
+        text("O");
+        return type(r.operand);
+    /* [abi:mangling-type] <type> ::= C <type>  # complex pair (C99) */
+    case type_kind::complex:
+        text("C");
+        return type(r.operand);
+    case type_kind::pointer_to_member:
+        return pointer_to_member_type(t);
+    case type_kind::block_pointer:
         /* [abi:mangling-type]'s vendor extended type qualifier, as clang
            mangles a block pointer ([ext:clang_blocks]) */
         text("U13block_pointer");
-        done = type(r.operand);
-    } else if (r.kind == type_kind::atomic) {
+        return type(r.operand);
+    case type_kind::atomic:
         /* [abi:mangling-type]'s vendor extended type qualifier, as clang
            mangles _Atomic(T) ([ext:clang_atomic]) */
         text("U7_Atomic");
-        done = type(r.operand);
-    } else if (r.kind == type_kind::complex) {
-        /* [abi:mangling-type]: <type> ::= C <type>  # complex pair (C99) */
-        text("C");
-        done = type(r.operand);
-    } else if (r.kind == type_kind::bit_int) {
-        /* [abi:mangling-builtin]:
-
-               <builtin-type> ::= DB <number> _
-                              ::= DB <instantiation-dependent expression> _
-
-           A dependent width here is a non-type template parameter.
-           Clang substitutes repeated _BitInt types, so keep them in
-           the substitution table for interoperation. */
-        if (r.fundamental == fundamental_type::unsigned_int)
-            text("DU");
-        else
-            text("DB");
-        if (r.entity)
-            template_param(analysis.entity_table[r.entity].value);
-        else
-            number(r.bound);
-        text("_");
-        done = true;
-    } else if (is_vector_kind(r.kind)) {
-        /* an ext_vector_type ([ext:clang_ext_vector_type]) as clang
-           mangles it: Dv, the element count (a dependent one: its
-           template parameter), _ and the element type */
-        text("Dv");
-        if (r.entity)
-            template_param(analysis.entity_table[r.entity].value);
-        else
-            number(r.bound);
-        text("_");
-        done = type(r.operand);
-    } else if (r.kind == type_kind::pack_expansion) {
+        return type(r.operand);
+    case type_kind::bit_int:
+        return bit_int_type(r);
+    case type_kind::pack_expansion:
         /* [abi:mangle.function-type]: a pack expansion,
 
                <type> ::= Dp <type>
         */
         text("Dp");
-        done = type(r.operand);
-    } else if (r.kind == type_kind::function)
-        done = function_type(t);
-    else if (r.kind == type_kind::array)
-        done = array_type(t);
-    else if (r.kind == type_kind::dependent &&
-             analysis.entity_table[r.entity].kind ==
-                 entity_kind::dependent_member)
-        done = dependent_member_name(r.entity);
-    else if (r.kind == type_kind::dependent &&
-             analysis.entity_table[r.entity].kind ==
-                 entity_kind::type_transformation) {
-        /* [abi:mangling-builtin]'s vendor extended type, as clang
-           mangles a type transformation of a dependent operand:
-
-               <builtin-type> ::= u <source-name> [<template-args>]
-
-           the keyword's name, its operand the one template-arg */
-        uint64_t operand = analysis.entity_table[r.entity].value;
-        text("u");
-        done = source_name(analysis.entity_table[r.entity].name);
-        if (done) {
-            text("I");
-            done = type(qualified_type::make(
-                static_cast<type_index>(operand & 0xffffffffu),
-                static_cast<uint32_t>(operand >> 32)));
-            text("E");
-        }
-    } else if (r.kind == type_kind::dependent &&
-               analysis.entity_table[r.entity].kind ==
-                   entity_kind::dependent_written) {
-        /* [abi:mangle.decltype]:
-
-               <decltype> ::= Dt <expression> E
-                          ::= DT <expression> E
-
-           Dt selects the declared type of an unparenthesized identifier
-           or member access. DT selects the expression form, including
-           a parenthesized identifier or member access. */
-        SyntaxRef n = SyntaxRef(node_index(
-            static_cast<uint32_t>(analysis.entity_table[r.entity].value)));
-        if (n.is(syntax_kind::typename_specifier)) {
-            /* typename Q::template X<args>: N <Q's prefix> X I <args> E E */
-            uint32_t wf = analysis.entity_table[r.entity].first_member;
-            uint32_t wc = analysis.entity_table[r.entity].member_count;
-            uint32_t first = wc;
-            for (uint32_t i = 0; i < wc; i++)
-                if (analysis.written_bindings[wf + i].cast ==
-                    n.index().index()) {
-                    first = i;
-                    break;
-                }
-            SyntaxElement id = n[n.size() - 1];
-            if (first == wc || !id[0].is_identifier())
-                return false;
-            const auto &q = analysis.written_bindings[wf + first];
-            text("N");
-            if (!dependent_member_prefix(q.type.unqualified()) ||
-                !source_name(analysis.token_identifier(id[0].token())))
-                return false;
-            text("I");
-            for (uint32_t i = first + 1; i < wc; i++) {
-                const auto &a = analysis.written_bindings[wf + i];
-                if (a.cast != n.index().index())
-                    break;
-                if (!type(a.type))
-                    return false;
-            }
-            text("EE");
-            add_candidate(t);
-            return true;
-        }
-        if (n.is(syntax_kind::simple_template_id)) {
-            /* [abi:mangling-type]: a template-id's <class-enum-type>
-               <template-args>; [impl.clang] __make_integer_seq<B, T, N>
-               of a dependent length keeps the builtin template's name
-               (builtin_make_integer_seq's bindings) */
-            const entity &w = analysis.entity_table[r.entity];
-            const semantic_analysis::written_binding *parts[3] = {};
-            for (uint32_t i = 0; i < w.member_count; i++) {
-                const auto &b = analysis.written_bindings[w.first_member + i];
-                if (b.cast == w.value && !b.identifier && b.element < 3)
-                    parts[b.element] = &b;
-            }
-            if (!parts[0] || !parts[1] || !parts[2] ||
-                !parts[0]->specialization)
-                return false;
-            /* (the builtin template's name a candidate as a template
-               prefix is; no entity: a scope of its own) */
-            if (!substitution(UINT32_MAX)) {
-                text("18__make_integer_seq");
-                candidate builtin;
-                builtin.scope = UINT32_MAX;
-                candidates.append(builtin);
-            }
-            text("I");
-            if (!template_template_arg(parts[0]->specialization, 0) ||
-                !type(parts[1]->type))
-                return false;
-            text("X");
-            template_param(parts[2]->pack_position - 1);
-            text("EE");
-            add_candidate(t);
-            return true;
-        }
-        if (n.size() != 4 || !encoding_template)
-            return false;
-        SyntaxElement operand = n[2];
-        bool member_access =
-            operand.is(syntax_kind::postfix_expression) &&
-            operand.size() == 3 &&
-            (punctuator(operand[1], preprocessing_op_or_punc::DOT) ||
-             punctuator(operand[1], preprocessing_op_or_punc::ARROW));
-        if (operand.is_token() || member_access)
-            text("Dt");
-        else
-            text("DT");
-        uint32_t saved_first = written_first, saved_count = written_count;
-        written_first = analysis.entity_table[r.entity].first_member;
-        written_count = analysis.entity_table[r.entity].member_count;
-        done = dependent_expression(operand);
-        pack_element = UINT32_MAX;
-        written_first = saved_first;
-        written_count = saved_count;
-        text("E");
-    } else if (r.kind == type_kind::class_type ||
-               r.kind == type_kind::enumeration ||
-               r.kind == type_kind::dependent)
-        done = class_enum_type(t);
-    else if (r.kind == type_kind::template_parameter && leveled_template) {
-        entity_index own = analysis.constraint_own_type_parameter(
-            leveled_template, analysis.entity_table[r.entity].value);
-        if (!own || t.cv())
-            return refuse("a template parameter in a constraint's type");
-        return constraint_parameter(leveled_template, own);
-    } else if (r.kind == type_kind::template_parameter) {
-        /* [abi:mangle.template-param]:
-               <template-param> ::= T_
-               <template-param> ::= T <parameter-2 non-negative number> _
-           the first parameter T_, the (n+2)-th T n _ */
+        return type(r.operand);
+    case type_kind::function:
+        /* [abi:mangling-type] <type> ::= <function-type> */
+        return function_type(t);
+    case type_kind::array:
+        /* [abi:mangling-type] <type> ::= <array-type> */
+        return array_type(t);
+    case type_kind::class_type:
+    case type_kind::enumeration:
+        /* [abi:mangling-type] <type> ::= <class-enum-type> */
+        return class_enum_type(t);
+    case type_kind::dependent:
+        if (analysis.entity_table[r.entity].kind ==
+            entity_kind::dependent_member)
+            return nested_name_of_dependent_member(r.entity);
+        if (analysis.entity_table[r.entity].kind ==
+            entity_kind::type_transformation)
+            return type_transformation(r);
+        return class_enum_type(t);
+    case type_kind::template_parameter:
+        /* [abi:mangling-type] <type> ::= <template-param> */
         template_param(analysis.entity_table[r.entity].value);
-        done = true;
+        return true;
+    default:
+        if (is_vector_kind(r.kind))
+            return vector_type(r);
+        return false;
     }
-    if (!done) {
-        /* (what kind of type, for refuse) */
-        static const struct {
-            type_kind kind;
-            const char *text;
-        } kinds[] = {
-            {type_kind::class_type, "a class type"},
-            {type_kind::enumeration, "an enumeration type"},
-            {type_kind::dependent, "a dependent type"},
-            {type_kind::placeholder, "a placeholder type"},
-            {type_kind::function, "a function type"},
-            {type_kind::pointer_to_member, "a pointer-to-member type"},
-            {type_kind::pack_expansion, "a pack expansion type"},
-        };
-        const char *what = "a type of a kind it has no rule for";
-        for (const auto &k : kinds)
-            if (r.kind == k.kind)
-                what = k.text;
-        return refuse(what);
+}
+
+/* [impl.clang] the vendor's va_list types, each a <substitution>
+   candidate as a <class-enum-type>: AAPCS64's std::__va_list (C++ ABI for
+   the Arm 64-bit Architecture, 4.2.2), and x86-64 System V's struct
+   __va_list_tag, a <source-name> (a va_list parameter is
+   P13__va_list_tag) */
+bool itanium_mangler::va_list_type(qualified_type t)
+{
+    if (substitution(t))
+        return true;
+    if (record(t).fundamental == fundamental_type::builtin_va_list)
+        text("St9__va_list");
+    else
+        text("13__va_list_tag");
+    add_candidate(t);
+    return true;
+}
+
+/* [abi:mangling-builtin]: a template's declared return type auto or
+   decltype(auto), a builtin type:
+
+       <builtin-type> ::= Da
+                      ::= Dc
+
+   Constrained by a concept C ([dcl.spec.auto]/1), Dk (DK of
+   decltype(auto)) then C's <name>, as clang (the ABI's <type-constraint>,
+   later than the version fetched) */
+bool itanium_mangler::placeholder_type(const struct type &r)
+{
+    static const char *const codes[2][2] = {{"Da", "Dc"}, {"Dk", "DK"}};
+    entity_index constraint = r.entity >> 2;
+    text(codes[constraint != 0][(r.entity & 3) == 2]);
+    return !constraint || name(constraint);
+}
+
+/* [abi:mangle.pointer-to-member-type]: "Pointer-to-member types encode the
+   class and member types":
+
+       <pointer-to-member-type> ::= M <class type> <member type>
+
+   a member function type is a candidate of its class (member_class) */
+bool itanium_mangler::pointer_to_member_type(qualified_type t)
+{
+    const struct type &r = record(t);
+    text("M");
+    type_index cls = analysis.entity_table[r.entity].type.unqualified();
+    bool class_ok = false;
+    if (cls) {
+        class_ok = type(qualified_type::make(cls, cv_none));
+    } else if (encoding_template) {
+        /* (a class that is a template parameter: its candidate, or its
+           <template-param>) */
+        bool subst = false;
+        uint64_t param_pos = analysis.entity_table[r.entity].value;
+        for (size_t i = 0; i < candidates.size(); i++) {
+            if (candidates[i].type.unqualified() && !candidates[i].expansion &&
+                !candidates[i].type.cv() &&
+                record(candidates[i].type).kind ==
+                    type_kind::template_parameter &&
+                analysis.entity_table[record(candidates[i].type).entity]
+                        .value == param_pos) {
+                type(candidates[i].type);
+                subst = true;
+                break;
+            }
+        }
+        if (!subst)
+            template_param(param_pos);
+        class_ok = true;
     }
+    entity_index owner = 0;
+    if (record(r.operand).kind == type_kind::function)
+        owner = r.entity;
+    return class_ok && type(r.operand, owner);
+}
+
+/* [abi:mangling-builtin]:
+
+       <builtin-type> ::= DB <number> _
+                      ::= DB <instantiation-dependent expression> _
+
+   A dependent width here is a non-type template parameter.  Clang
+   substitutes repeated _BitInt types, so they stay in the substitution
+   table for interoperation. */
+bool itanium_mangler::bit_int_type(const struct type &r)
+{
+    if (r.fundamental == fundamental_type::unsigned_int)
+        text("DU");
+    else
+        text("DB");
+    if (r.entity)
+        template_param(analysis.entity_table[r.entity].value);
+    else
+        number(r.bound);
+    text("_");
+    return true;
+}
+
+/* an ext_vector_type ([ext:clang_ext_vector_type]) as clang mangles it:
+   Dv, the element count (a dependent one: its template parameter), _ and
+   the element type */
+bool itanium_mangler::vector_type(const struct type &r)
+{
+    text("Dv");
+    if (r.entity)
+        template_param(analysis.entity_table[r.entity].value);
+    else
+        number(r.bound);
+    text("_");
+    return type(r.operand);
+}
+
+/* [abi:mangling-builtin]'s vendor extended type, as clang mangles a type
+   transformation of a dependent operand:
+
+       <builtin-type> ::= u <source-name> [<template-args>]
+
+   the keyword's name, its operand the one template-arg */
+bool itanium_mangler::type_transformation(const struct type &r)
+{
+    uint64_t operand = analysis.entity_table[r.entity].value;
+    text("u");
+    bool done = source_name(analysis.entity_table[r.entity].name);
+    if (done) {
+        text("I");
+        done = type(
+            qualified_type::make(static_cast<type_index>(operand & 0xffffffffu),
+                                 static_cast<uint32_t>(operand >> 32)));
+        text("E");
+    }
+    return done;
+}
+
+/*
+ * A dependent type known by how it is written (entity_kind::
+ * dependent_written): typename Q::template X<args>, __make_integer_seq's
+ * specialization, or a decltype, [abi:mangle.decltype]:
+ *
+ *     <decltype> ::= Dt <expression> E
+ *                ::= DT <expression> E
+ *
+ * Dt selects the declared type of an unparenthesized identifier or member
+ * access. DT selects the expression form, including a parenthesized
+ * identifier or member access.  The candidate its own.
+ */
+bool itanium_mangler::type_of_written(qualified_type t,
+                                      entity_index member_class)
+{
+    entity_index w = record(t).entity;
+    SyntaxRef n = SyntaxRef(
+        node_index(static_cast<uint32_t>(analysis.entity_table[w].value)));
+    if (n.is(syntax_kind::typename_specifier))
+        return typename_of_written(t, n);
+    if (n.is(syntax_kind::simple_template_id))
+        return make_integer_seq_of_written(t);
+    if (n.size() != 4 || !encoding_template)
+        return false;
+    SyntaxElement operand = n[2];
+    bool member_access =
+        operand.is(syntax_kind::postfix_expression) && operand.size() == 3 &&
+        (punctuator(operand[1], preprocessing_op_or_punc::DOT) ||
+         punctuator(operand[1], preprocessing_op_or_punc::ARROW));
+    if (operand.is_token() || member_access)
+        text("Dt");
+    else
+        text("DT");
+    uint32_t saved_first = written_first, saved_count = written_count;
+    written_first = analysis.entity_table[w].first_member;
+    written_count = analysis.entity_table[w].member_count;
+    bool done = expression_of_written(operand);
+    pack_element = UINT32_MAX;
+    written_first = saved_first;
+    written_count = saved_count;
+    text("E");
+    if (!done)
+        return refuse(type_kind_description(type_kind::dependent));
     add_candidate(t, member_class);
+    return true;
+}
+
+/* typename Q::template X<args>: N <Q's prefix> X I <args> E E */
+bool itanium_mangler::typename_of_written(qualified_type t, SyntaxRef n)
+{
+    entity_index w = record(t).entity;
+    uint32_t wf = analysis.entity_table[w].first_member;
+    uint32_t wc = analysis.entity_table[w].member_count;
+    uint32_t first = wc;
+    for (uint32_t i = 0; i < wc; i++)
+        if (analysis.written_bindings[wf + i].cast == n.index().index()) {
+            first = i;
+            break;
+        }
+    SyntaxElement id = n[n.size() - 1];
+    if (first == wc || !id[0].is_identifier())
+        return false;
+    const auto &q = analysis.written_bindings[wf + first];
+    text("N");
+    if (!prefix_of_dependent_member(q.type.unqualified()) ||
+        !source_name(analysis.token_identifier(id[0].token())))
+        return false;
+    text("I");
+    for (uint32_t i = first + 1; i < wc; i++) {
+        const auto &a = analysis.written_bindings[wf + i];
+        if (a.cast != n.index().index())
+            break;
+        if (!type(a.type))
+            return false;
+    }
+    text("EE");
+    add_candidate(t);
+    return true;
+}
+
+/* [abi:mangling-type]: a template-id's <class-enum-type> <template-args>;
+   [impl.clang] __make_integer_seq<B, T, N> of a dependent length keeps the
+   builtin template's name (builtin_make_integer_seq's bindings) */
+bool itanium_mangler::make_integer_seq_of_written(qualified_type t)
+{
+    const entity &w = analysis.entity_table[record(t).entity];
+    const semantic_analysis::written_binding *parts[3] = {};
+    for (uint32_t i = 0; i < w.member_count; i++) {
+        const auto &b = analysis.written_bindings[w.first_member + i];
+        if (b.cast == w.value && !b.identifier && b.element < 3)
+            parts[b.element] = &b;
+    }
+    if (!parts[0] || !parts[1] || !parts[2] || !parts[0]->specialization)
+        return false;
+    /* (the builtin template's name a candidate as a template prefix is; no
+       entity: a scope of its own) */
+    if (!substitution(UINT32_MAX)) {
+        text("18__make_integer_seq");
+        candidate builtin;
+        builtin.scope = UINT32_MAX;
+        candidates.append(builtin);
+    }
+    text("I");
+    if (!template_template_arg(parts[0]->specialization, 0) ||
+        !type(parts[1]->type))
+        return false;
+    text("X");
+    template_param(parts[2]->pack_position - 1);
+    text("EE");
+    add_candidate(t);
     return true;
 }
 
@@ -672,15 +745,39 @@ bool itanium_mangler::builtin_type(fundamental_type t)
  * type and the type without its qualifiers substitution candidates, not a
  * type with only some of them.
  */
-bool itanium_mangler::qualified(qualified_type t)
+bool itanium_mangler::cv_qualified_type(qualified_type t)
 {
-    if (t.cv() & cv_restrict)
-        text("r");
-    if (t.cv() & cv_volatile)
-        text("V");
-    if (t.cv() & cv_const)
-        text("K");
+    cv_qualifiers(t.cv());
     return type(qualified_type::make(t.unqualified(), cv_none));
+}
+
+/* [abi:mangle.qualified-type]:
+
+       <CV-qualifiers> ::= [r] [V] [K]
+
+   restrict, volatile, const, in that order */
+void itanium_mangler::cv_qualifiers(unsigned cv)
+{
+    if (cv & cv_restrict)
+        text("r");
+    if (cv & cv_volatile)
+        text("V");
+    if (cv & cv_const)
+        text("K");
+}
+
+/* [abi:mangle.qualified-type]:
+
+       <ref-qualifier> ::= R  # &
+                       ::= O  # &&
+
+   ref 1 &, 2 &&, 0 none */
+void itanium_mangler::ref_qualifier(int ref)
+{
+    if (ref == 1)
+        text("R");
+    else if (ref == 2)
+        text("O");
 }
 
 /*
@@ -695,10 +792,8 @@ bool itanium_mangler::qualified(qualified_type t)
 bool itanium_mangler::function_type(qualified_type t)
 {
     const struct type &function = record(t);
-    if (function.function_cv & cv_volatile)
-        text("V");
-    if (function.function_cv & cv_const)
-        text("K");
+    cv_qualifiers(function.function_cv & (cv_volatile | cv_const));
+    /* <exception-spec> ::= Do  # non-throwing */
     if (function.non_throwing)
         text("Do");
 
@@ -707,10 +802,7 @@ bool itanium_mangler::function_type(qualified_type t)
         return false;
     if (!bare_function_type(t))
         return false;
-    if (function.function_ref == 1)
-        text("R");
-    else if (function.function_ref == 2)
-        text("O");
+    ref_qualifier(function.function_ref);
     text("E");
     return true;
 }
@@ -735,7 +827,7 @@ bool itanium_mangler::array_type(qualified_type t)
        a non-type template parameter's name, or an expression of one (its
        structure) */
     if (array.entity && array.bound) {
-        if (!structure_expression(static_cast<uint32_t>(array.bound)))
+        if (!expression_of_structure(static_cast<uint32_t>(array.bound)))
             return false;
     } else if (array.entity)
         template_param(analysis.entity_table[array.entity].value);

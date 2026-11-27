@@ -9,8 +9,8 @@ namespace cplusplus
 
 /* whether t is ::std::NAME<char> (NAME of length n: char_traits,
    allocator), outside an inline namespace */
-bool itanium_mangler::std_of_char(qualified_type t, const char *name,
-                                  size_t n) const
+bool itanium_mangler::is_std_class_of_char(qualified_type t, const char *name,
+                                           size_t n) const
 {
     const struct type &r = record(t);
     if (t.cv() || r.kind != type_kind::class_type)
@@ -35,7 +35,7 @@ bool itanium_mangler::std_of_char(qualified_type t, const char *name,
 /* [abi:mangling-compression]'s abbreviation of class c, a specialization
    of ::std (no inline namespace) as a whole: Ss, Si, So or Sd; nullptr for
    another */
-const char *itanium_mangler::std_abbreviation(entity_index c) const
+const char *itanium_mangler::std_substitution(entity_index c) const
 {
     const entity &x = analysis.entity_table[c];
     if (x.kind != entity_kind::class_type || !x.instantiation || !x.name ||
@@ -64,11 +64,11 @@ const char *itanium_mangler::std_abbreviation(entity_index c) const
         const struct type &fr = record(first);
         if (first.cv() || fr.kind != type_kind::fundamental ||
             fr.fundamental != fundamental_type::char_ ||
-            !std_of_char(analysis.specialization_argument(c, 1), "char_traits",
-                         11) ||
+            !is_std_class_of_char(analysis.specialization_argument(c, 1),
+                                  "char_traits", 11) ||
             (w.arguments == 3 &&
-             !std_of_char(analysis.specialization_argument(c, 2), "allocator",
-                          9)))
+             !is_std_class_of_char(analysis.specialization_argument(c, 2),
+                                   "allocator", 9)))
             return nullptr;
         return w.code;
     }

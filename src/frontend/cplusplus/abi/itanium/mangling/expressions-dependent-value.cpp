@@ -20,7 +20,7 @@ namespace cplusplus
  * Q<args>::name as written, Q unqualified; clang makes the qualifier
  * level no candidate, its template-args' types are as anywhere.
  */
-bool itanium_mangler::dependent_value_expr(entity_index d)
+bool itanium_mangler::expression_of_dependent_value(entity_index d)
 {
     const entity &x = analysis.entity_table[d];
     if (!x.value)
@@ -32,8 +32,8 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
     for (const auto &b : dependent_value_operators)
         if (is(b.form)) {
             text(operator_written(b.op, 2));
-            return dependent_value_expr(x.enclosing) &&
-                   dependent_value_expr(x.name);
+            return expression_of_dependent_value(x.enclosing) &&
+                   expression_of_dependent_value(x.name);
         }
     if (is(form::sizeof_type)) {
         text("st");
@@ -63,7 +63,7 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
     }
     if (is(form::logical_not)) {
         text(itanium_operator::logical_not);
-        return dependent_value_expr(x.enclosing);
+        return expression_of_dependent_value(x.enclosing);
     }
     auto written_arguments = [&]() {
         text("I");

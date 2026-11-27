@@ -31,7 +31,8 @@ namespace cplusplus
  */
 /* [abi:expressions]' <expr-primary> of a variable the template's scope
    declares, written unqualified: L_Z <encoding> E; false for another name */
-bool itanium_mangler::named_variable(entity_index t, SyntaxElement name)
+bool itanium_mangler::expr_primary_of_variable(entity_index t,
+                                               SyntaxElement name)
 {
     if (!name.is_token() || !name.is_identifier() || !t)
         return false;
@@ -103,7 +104,7 @@ void itanium_mangler::refuse_expression(SyntaxElement x)
 
 /* [abi:mangling.literal] an enumerator named in a dependent expression: its
    value, L <type> <value> E, the type its enumeration (as clang) */
-bool itanium_mangler::enumerator_literal(entity_index e)
+bool itanium_mangler::expr_primary_of_enumerator(entity_index e)
 {
     qualified_type of = analysis.entity_table[e].type;
     uint64_t magnitude = 0;
@@ -121,7 +122,7 @@ bool itanium_mangler::enumerator_literal(entity_index e)
 /* [abi:mangling.literal] an integer-literal: L <type> <value> E, the type
    the first of [lex.icon]'s table that holds it (long is as wide as a
    pointer), the value in decimal */
-bool itanium_mangler::integer_literal(token_index token)
+bool itanium_mangler::expr_primary_of_integer_literal(token_index token)
 {
     owned_buffer spelling;
     analysis.token_spelling(token, spelling.get());

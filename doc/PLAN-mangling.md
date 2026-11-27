@@ -276,7 +276,21 @@ functions split along their alternatives (`type` into one function per
 `<type>` alternative, `expression_of_written` by expression form,
 `operator_name` into the table lookup).  `cxx-spec-refs.py` coverage
 reported before and after.
-Status: not started.
+Status: done (2026-11-27).  The renames of 3.5 (30 functions; the
+qualified-type writer is `cv_qualified_type`, since `qualified_type` is the
+front end's type).  `type` is a dispatcher over `type_alternative` and one
+function per alternative that is more than a letter (`va_list_type`,
+`placeholder_type`, `pointer_to_member_type`, `bit_int_type`,
+`vector_type`, `type_transformation`, `type_of_written`,
+`typename_of_written`, `make_integer_seq_of_written`), each branch tagged
+with its production.  `expression_of_written_forms` tries ten functions of
+one form each (`cast_of_written`, `sizeof_of_written`,
+`unresolved_name_of_written`, ...) in an order that keeps every earlier
+precedence, each answering `form::none`, `mangled` or `failed`.
+`cv_qualifiers` and `ref_qualifier` are written once for a type, a member
+function and a function type; `abi_tags` is its own.  ABI citations 323 ->
+362, quoted alternatives of the ABI's grammar 263 -> 272.  Identity gate:
+no difference.
 
 ### M4: the encoder interface
 All bytes go through `itanium_encoder` (3.2), reading `productions.inc`; it

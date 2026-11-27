@@ -14,13 +14,13 @@ namespace cplusplus
  *
  * Parentheses are not mangled.  Anything else: not mangled yet.
  */
-bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
+bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
 {
     if (c.is_token()) {
         if (entity_index parameter =
                 analysis.constraint_parameter(t, c.token()))
-            return constraint_parameter(t, parameter);
-        if (named_variable(t, c))
+            return template_param_of_constraint(t, parameter);
+        if (expr_primary_of_variable(t, c))
             return true;
         /* a decimal integer-literal of type int: Li <value> E */
         owned_buffer spelling;
@@ -49,12 +49,13 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             text(itanium_operator::logical_or);
         else
             text(itanium_operator::logical_and);
-        return constraint_expression(t, c[0]) && constraint_expression(t, c[2]);
+        return expression_of_constraint(t, c[0]) &&
+               expression_of_constraint(t, c[2]);
     case syntax_kind::primary_expression:
         if (c.size() != 3 ||
             !punctuator(c[0], preprocessing_op_or_punc::LEFT_PARENTHESIS))
             return false;
-        return constraint_expression(t, c[1]);
+        return expression_of_constraint(t, c[1]);
     case syntax_kind::unary_expression:
         if (c.size() == 4 && c[0].is_token() &&
             punctuator(c[1], preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
@@ -70,7 +71,7 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
                 return false;
             entity_index pe = analysis.constraint_parameter(t, a.token());
             text("st");
-            return pe && constraint_parameter(t, pe);
+            return pe && template_param_of_constraint(t, pe);
         }
         /* sizeof ... ( P ), P a template parameter pack: sZ
            <template-param> */
@@ -89,7 +90,7 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             !punctuator(c[0], preprocessing_op_or_punc::EXCLAMATION))
             return false;
         text(itanium_operator::logical_not);
-        return constraint_expression(t, c[1]);
+        return expression_of_constraint(t, c[1]);
     case syntax_kind::multiplicative_expression:
     case syntax_kind::additive_expression:
     case syntax_kind::relational_expression:
@@ -100,7 +101,8 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
         if (o == itanium_operator::none)
             return false;
         text(o);
-        return constraint_expression(t, c[0]) && constraint_expression(t, c[2]);
+        return expression_of_constraint(t, c[0]) &&
+               expression_of_constraint(t, c[2]);
     }
     case syntax_kind::requires_expression: {
         /* [abi:expressions]: requires-expression without parameter list
@@ -126,7 +128,7 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             SyntaxElement req = body[i];
             if (req.is(syntax_kind::simple_requirement) && req.size() >= 1) {
                 text("X");
-                if (!dependent_expression(req[0]))
+                if (!expression_of_written(req[0]))
                     return false;
             } else if (req.is(syntax_kind::compound_requirement)) {
                 if (!compound_requirement(t, req))
@@ -143,7 +145,7 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             return false;
         if (!source_name(analysis.token_identifier(c[0].token())))
             return false;
-        return constraint_template_args(t, c);
+        return template_args_of_constraint(t, c);
     case syntax_kind::qualified_id: {
         /* Q<args>::name, Q a class template of the template's scope:
            [abi:expressions]' <unresolved-name>, [impl.clang] in its
@@ -155,7 +157,7 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
         if (c.size() != 2 || !c[0].is(syntax_kind::nested_name_specifier))
             return false;
         if (c[1].is(syntax_kind::simple_template_id))
-            return constraint_namespace_member(t, c[0], c[1]);
+            return unresolved_name_of_constraint_member(t, c[0], c[1]);
         if (c[0].size() != 2 || !c[0][0].is(syntax_kind::simple_template_id) ||
             !c[1].is_token() || !c[1].is_identifier())
             return false;
@@ -167,7 +169,7 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             return false;
         text("sr");
         if (!source_name(analysis.token_identifier(q[0].token())) ||
-            !constraint_template_args(t, q))
+            !template_args_of_constraint(t, q))
             return false;
         text("E");
         return source_name(analysis.token_identifier(c[1].token()));
@@ -184,7 +186,7 @@ bool itanium_mangler::compound_requirement(entity_index t, SyntaxElement req)
     if (req.size() < 3)
         return false;
     text("X");
-    if (!dependent_expression(req[1]))
+    if (!expression_of_written(req[1]))
         return false;
     for (uint32_t i = 3; i < req.size(); i++) {
         if (req[i].is(standard_keyword::noexcept_)) {
@@ -200,7 +202,7 @@ bool itanium_mangler::compound_requirement(entity_index t, SyntaxElement req)
             !q[0].is_identifier())
             return false;
         text("R");
-        if (!type_constraint_concept(t, q))
+        if (!type_constraint(t, q))
             return false;
     }
     return true;
@@ -214,9 +216,8 @@ bool itanium_mangler::compound_requirement(entity_index t, SyntaxElement req)
 
    each level the namespace's name as written (std, not its inline
    namespace) */
-bool itanium_mangler::constraint_namespace_member(entity_index t,
-                                                  SyntaxElement qualifier,
-                                                  SyntaxElement id)
+bool itanium_mangler::unresolved_name_of_constraint_member(
+    entity_index t, SyntaxElement qualifier, SyntaxElement id)
 {
     if (!id[0].is_token() || !qualifier.size() ||
         qualifier[0].is(preprocessing_op_or_punc::COLON_COLON))
@@ -246,13 +247,14 @@ bool itanium_mangler::constraint_namespace_member(entity_index t,
     text("E");
     if (!source_name(analysis.token_identifier(id[0].token())))
         return false;
-    return constraint_template_args(t, id);
+    return template_args_of_constraint(t, id);
 }
 
 /* the <template-args> of a template-id c written in t's requires-clause:
    I, each argument (one of t's parameters, a fundamental type keyword or
    a class of t's scope), E */
-bool itanium_mangler::constraint_template_args(entity_index t, SyntaxElement c)
+bool itanium_mangler::template_args_of_constraint(entity_index t,
+                                                  SyntaxElement c)
 {
     text("I");
     /* (more than one argument: a template-argument-list) */
@@ -328,7 +330,7 @@ bool itanium_mangler::constraint_template_args(entity_index t, SyntaxElement c)
         }
         entity_index pe = analysis.constraint_parameter(t, a.token());
         if (pe) {
-            if (!constraint_parameter(t, pe))
+            if (!template_param_of_constraint(t, pe))
                 return false;
             continue;
         }
@@ -366,7 +368,7 @@ uint64_t itanium_mangler::constraint_level(entity_index t) const
 /* [impl.clang]: a type-constraint of t's: its concept as a <name>, with
    the template-args written, the concept then a substitution candidate
    ([abi:mangling-compression]'s template-prefix) */
-bool itanium_mangler::type_constraint_concept(entity_index t, SyntaxElement q)
+bool itanium_mangler::type_constraint(entity_index t, SyntaxElement q)
 {
     /* N::C, N a chain of namespaces: the concept's name */
     if (q.size() == 2 && q[0].is(syntax_kind::nested_name_specifier)) {
@@ -407,7 +409,7 @@ bool itanium_mangler::type_constraint_concept(entity_index t, SyntaxElement q)
     if (wrapped)
         text("N");
     if (substitution(found)) {
-        if (!constraint_template_args(t, q))
+        if (!template_args_of_constraint(t, q))
             return false;
         if (wrapped)
             text("E");
@@ -423,7 +425,7 @@ bool itanium_mangler::type_constraint_concept(entity_index t, SyntaxElement q)
     candidate y;
     y.scope = found;
     candidates.append(y);
-    if (!constraint_template_args(t, q))
+    if (!template_args_of_constraint(t, q))
         return false;
     if (nested)
         text("E");
@@ -446,8 +448,8 @@ bool itanium_mangler::type_constraint_concept(entity_index t, SyntaxElement q)
  * L the number of class templates t is a member of (0: T_); a parameter
  * of another level is a candidate of its own, not the type T_ names.
  */
-bool itanium_mangler::constraint_parameter(entity_index t,
-                                           entity_index parameter)
+bool itanium_mangler::template_param_of_constraint(entity_index t,
+                                                   entity_index parameter)
 {
     const entities &table = analysis.entity_table;
     uint64_t level = constraint_level(t);

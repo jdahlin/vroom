@@ -23,7 +23,7 @@ namespace cplusplus
  * character or boolean literal its type and value.  Anything else: not
  * mangled yet.
  */
-bool itanium_mangler::structure_expression(uint32_t s)
+bool itanium_mangler::expression_of_structure(uint32_t s)
 {
     using sa = semantic_analysis;
     uint32_t tag = 0, a = 0, b = 0;
@@ -75,20 +75,20 @@ bool itanium_mangler::structure_expression(uint32_t s)
     if (kind == syntax_kind::primary_expression && count == 3 &&
         ops[0] == preprocessing_op_or_punc::LEFT_PARENTHESIS &&
         ops[2] == preprocessing_op_or_punc::RIGHT_PARENTHESIS)
-        return structure_expression(children[1]);
+        return expression_of_structure(children[1]);
     if (kind == syntax_kind::conditional_expression && count == 5 &&
         ops[1] == preprocessing_op_or_punc::QUESTION &&
         ops[3] == preprocessing_op_or_punc::COLON) {
         text(itanium_operator::conditional);
-        return structure_expression(children[0]) &&
-               structure_expression(children[2]) &&
-               structure_expression(children[4]);
+        return expression_of_structure(children[0]) &&
+               expression_of_structure(children[2]) &&
+               expression_of_structure(children[4]);
     }
     if (kind == syntax_kind::unary_expression && count == 2) {
         itanium_operator o = prefix_operator(operator_written(ops[0], 1));
         if (o != itanium_operator::none) {
             text(o);
-            return structure_expression(children[1]);
+            return expression_of_structure(children[1]);
         }
     }
     bool binary_kind = kind == syntax_kind::additive_expression ||
@@ -105,8 +105,8 @@ bool itanium_mangler::structure_expression(uint32_t s)
         itanium_operator o = operator_written(ops[1], 2);
         if (o != itanium_operator::none) {
             text(o);
-            return structure_expression(children[0]) &&
-                   structure_expression(children[2]);
+            return expression_of_structure(children[0]) &&
+                   expression_of_structure(children[2]);
         }
     }
     return false;

@@ -33,7 +33,7 @@ bool itanium_mangler::name(entity_index e)
     if (local && table[scope].kind == entity_kind::class_type) {
         /* a member of a local class: Z <function encoding> E
            <nested-name> */
-        if (!function_scope(local))
+        if (!local_name_scope(local))
             return false;
         /* [abi:mangling-scope] a default argument's scope:
            d [<number>] _ */
@@ -74,16 +74,15 @@ bool itanium_mangler::name(entity_index e)
  * prefix ([abi:mangle.name]). The member qualifiers here are volatile,
  * const, and the optional ref-qualifier.
  */
-void itanium_mangler::member_qualifiers(const entity &x)
+void itanium_mangler::member_cv_ref_qualifiers(const entity &x)
 {
-    if (x.member_cv & cv_volatile)
-        text("V");
-    if (x.member_cv & cv_const)
-        text("K");
+    cv_qualifiers(x.member_cv & (cv_volatile | cv_const));
+    int ref = 0;
     if (x.member_cv & cv_ref_lvalue)
-        text("R");
+        ref = 1;
     if (x.member_cv & cv_ref_rvalue)
-        text("O");
+        ref = 2;
+    ref_qualifier(ref);
 }
 
 /*
@@ -99,7 +98,7 @@ bool itanium_mangler::nested_name(entity_index e)
     const entity &x = analysis.entity_table[e];
     text("N");
     if (x.kind == entity_kind::function && x.nonstatic_member)
-        member_qualifiers(x);
+        member_cv_ref_qualifiers(x);
     if (!prefix(x.enclosing))
         return false;
     if (!unqualified_name(e))
@@ -121,7 +120,7 @@ bool itanium_mangler::nested_name(entity_index e)
  * class named again as a prefix or a type is the same candidate), a
  * namespace's its own; ::std as a prefix is the substitution St, which is
  * no candidate.  A local class starts the prefix: the <local-name>'s
- * function scope is written before the <nested-name> (function_scope).
+ * function scope is written before the <nested-name> (local_name_scope).
  */
 bool itanium_mangler::prefix(entity_index scope)
 {
@@ -141,7 +140,7 @@ bool itanium_mangler::prefix(entity_index scope)
        ::std::basic_string Sa or Sb and the arguments, a candidate as a
        whole */
     if (is_class && c.name && c.instantiation) {
-        if (const char *whole = std_abbreviation(scope)) {
+        if (const char *whole = std_substitution(scope)) {
             text(whole);
             return true;
         }
@@ -170,7 +169,7 @@ bool itanium_mangler::prefix(entity_index scope)
     }
     if (!is_class && substitution(scope))
         return true;
-    /* a local class: the function scope (function_scope) came before the
+    /* a local class: the function scope (local_name_scope) came before the
        <nested-name>, whose prefix starts at the class */
     bool local = is_class && c.enclosing &&
                  table[c.enclosing].kind != entity_kind::class_type &&
@@ -243,20 +242,11 @@ bool itanium_mangler::unscoped_name(entity_index e)
  * unnamed namespace, whose name already keeps the symbol apart: both name
  * an unnamed namespace _GLOBAL__N_1 (_ZN12_GLOBAL__N_11fEv).
  */
-/* [abi:mangle.abi-tag] "<abi-tag> ::= B <source-name>" after the
-   name, from GNU's __attribute__((abi_tag("tag"))) (one tag) */
 bool itanium_mangler::unqualified_name(entity_index e, bool as_type)
 {
-    if (!unqualified_name_untagged(e, as_type))
+    if (!unqualified_name_without_tags(e, as_type))
         return false;
-    token_index tag = analysis.entity_table[e].abi_tag;
-    if (tag) {
-        owned_buffer written;
-        analysis.token_spelling(tag, written.get());
-        text("B");
-        number(written.size() - 2);
-        vbuffer_append(out, written.data() + 1, written.size() - 2);
-    }
+    abi_tags(e);
     /* [impl.clang] enable_if(true, ...): the vendor qualifier
        "U <source-name> <template-args>" of its condition */
     if (analysis.entity_table[e].gnu_flags & gnu_enable_if)
@@ -264,7 +254,27 @@ bool itanium_mangler::unqualified_name(entity_index e, bool as_type)
     return true;
 }
 
-bool itanium_mangler::unqualified_name_untagged(entity_index e, bool as_type)
+/* [abi:mangle.abi-tag]:
+
+       <abi-tags> ::= <abi-tag> [<abi-tags>]
+       <abi-tag> ::= B <source-name>
+
+   after the name, from GNU's __attribute__((abi_tag("tag"))) (one tag:
+   the string literal's characters) */
+void itanium_mangler::abi_tags(entity_index e)
+{
+    token_index tag = analysis.entity_table[e].abi_tag;
+    if (!tag)
+        return;
+    owned_buffer written;
+    analysis.token_spelling(tag, written.get());
+    text("B");
+    number(written.size() - 2);
+    vbuffer_append(out, written.data() + 1, written.size() - 2);
+}
+
+bool itanium_mangler::unqualified_name_without_tags(entity_index e,
+                                                    bool as_type)
 {
     const entities &table = analysis.entity_table;
     const entity &x = table[e];
@@ -417,9 +427,9 @@ bool itanium_mangler::ctor_dtor_name(special_member which,
        constructor it was inherited from */
     if (inherited)
         text("I");
-    if (variant == 1)
+    if (ctor_dtor_variant == 1)
         text("1");
-    else if (variant == 0 && which == special_member::destructor)
+    else if (ctor_dtor_variant == 0 && which == special_member::destructor)
         text("0");
     else
         text("2");
