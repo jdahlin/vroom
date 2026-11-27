@@ -1209,8 +1209,15 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         (!c_entity || held.designator == c_entity) &&
         held.first + count <= state.elements.size()) {
         first = held.first;
+        /* (a member that is itself a class keeps its elements for its own
+           initialization to find, which clears them: new ones would go
+           with the invocation too.  Not one with a destructor, whose
+           lifetime the evaluation does not follow through this) */
         for (uint32_t i = 0; i < count; i++) {
-            state.elements[first + i] = constant_value();
+            const constant_value kept = state.elements[first + i];
+            if (init || kept.kind != constant_value_kind::class_object ||
+                !kept.designator || destroys(kept.designator))
+                state.elements[first + i] = constant_value();
             state.element_read_only[first + i] = read_only;
         }
     } else {
