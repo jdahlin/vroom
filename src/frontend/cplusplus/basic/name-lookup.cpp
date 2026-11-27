@@ -220,7 +220,9 @@ bool semantic_analysis::declared_around(entity_index space, uint32_t name) const
 {
     while (space) {
         space = entity_table[space].enclosing;
-        if (entity_table.find(space, name))
+        entity_index e = declared_in(space, name, lookup_filter::any);
+        /* (one the definition's lookup sees) */
+        if (e && !all_past_horizon(e))
             return true;
     }
     return false;

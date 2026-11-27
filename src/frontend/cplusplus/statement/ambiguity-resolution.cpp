@@ -112,7 +112,9 @@ parser::reading parser::reading_at(unsigned ahead)
  */
 bool parser::call_of_undeclared_name(unsigned ahead)
 {
-    if (!at_identifier(ahead) ||
+    /* (not in a template: a call that depends on nothing is bound at its
+       definition, which analysis does not check) */
+    if (names.within_template() || !at_identifier(ahead) ||
         !at(preprocessing_op_or_punc::LEFT_PARENTHESIS, ahead + 1))
         return false;
     uint32_t name = tokens.identifier(position + ahead);
