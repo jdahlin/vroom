@@ -600,6 +600,50 @@ uint32_t ast_builder_math_call(cc *c, const char *name, size_t length,
     return cc_builtin_math_inline_build(c, name, length, call, 0);
 }
 
+CC_PRIVATE uint32_t cc_library_call_build(cc *c, const char *name,
+                                          const uint32_t *args, uint32_t n,
+                                          uint32_t loc)
+{
+    const cc_builtin *b = cc_builtin_table_get();
+
+    /* (ast_builder_builtin leaves the library ones out) */
+    while (b->name && strcmp(b->name, name))
+        b++;
+    if (!b->name)
+        return 0;
+    ast_qualified_type ft = cc_builtin_type(c, b);
+    const ctype *f = AST_TYPE(c, ft);
+    cc_id_list typed;
+
+    cc_id_list_init(&typed);
+    for (uint32_t i = 0; i < n; i++)
+        cc_id_list_append(
+            c, &typed, cc_conversion_apply(c, args[i], c->params[f->aux + i]));
+    uint32_t s = cc_symbol_new(c, AST_SYMBOL_BUILTIN, 0, ft, loc);
+
+    c->syms[s].val = b - cc_builtin_table_get();
+    uint32_t fn = cc_node_new(c, AST_NODE_VARIABLE, ft, loc);
+
+    AST_NODE(fn)->a = s;
+    ast_qualified_type result =
+        AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, ft)->base);
+    uint32_t call = cc_node_new(c, AST_NODE_CALL, result, loc);
+
+    AST_NODE(call)->a = cc_conversion_decay(c, fn);
+    AST_NODE(call)->b = cc_id_list_freeze(c, &typed);
+    AST_NODE(call)->c = typed.n;
+    return call;
+}
+
+uint32_t ast_builder_library_forward(cc *c, const char *name, size_t length,
+                                     ast_qualified_type result,
+                                     const uint32_t *args, uint32_t n)
+{
+    if (c->o->no_builtin || cc_library_builtin_is_disabled(c->o, name, length))
+        return 0;
+    return cc_library_forward_build(c, name, length, result, args, n, 0);
+}
+
 uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
                                     uint32_t b, const int32_t *indices,
                                     uint32_t count)

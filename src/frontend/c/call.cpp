@@ -356,6 +356,16 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
                 (size_t)cc_identifier_length(y->name), args.v, args.n, loc);
             if (made)
                 return made;
+            if (!c->o->no_builtin && !cc_library_builtin_is_disabled(
+                                         c->o, cc_identifier_string(y->name),
+                                         (size_t)cc_identifier_length(y->name)))
+                made = cc_library_forward_build(
+                    c, cc_identifier_string(y->name),
+                    (size_t)cc_identifier_length(y->name),
+                    AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, ft)->base),
+                    args.v, args.n, loc);
+            if (made)
+                return made;
         }
     }
     n = cc_node_new(c, AST_NODE_CALL,

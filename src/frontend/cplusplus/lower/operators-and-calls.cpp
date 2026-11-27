@@ -586,6 +586,20 @@ uint32_t c_lowering::abs_call(uint32_t function,
     return ast_builder_abs_call(c, name, length, arguments[0], builtin);
 }
 
+uint32_t c_lowering::forwarded_call(uint32_t function,
+                                    ast_qualified_type result,
+                                    const owned_array<uint32_t> &arguments)
+{
+    size_t length = 0;
+    bool builtin = false;
+    const char *name = library_name(function, length, builtin);
+    if (!name || builtin)
+        return 0;
+    return ast_builder_library_forward(c, name, length, result,
+                                       arguments.data(),
+                                       static_cast<uint32_t>(arguments.size()));
+}
+
 uint32_t c_lowering::math_call(uint32_t function, uint32_t call)
 {
     size_t length = 0;
@@ -1109,6 +1123,8 @@ uint32_t c_lowering::call(const semantic_node &n)
         made = x86_header_call(n.a, arguments);
         if (!made)
             made = abs_call(n.a, arguments);
+        if (!made)
+            made = forwarded_call(n.a, t, arguments);
         if (!made) {
             made =
                 make(AST_NODE_CALL, t, callee,
