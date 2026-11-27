@@ -670,8 +670,6 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
             why = "an aggregate prvalue at namespace scope";
         else if (entity_table[c].destructor)
             why = "an aggregate prvalue with a destructor";
-        else if (entity_table[f].instantiation)
-            why = "an aggregate prvalue, a conversion function template";
         else if (!result_destructible(to))
             why = "an aggregate prvalue, a result whose destructor is "
                   "inaccessible or deleted";
