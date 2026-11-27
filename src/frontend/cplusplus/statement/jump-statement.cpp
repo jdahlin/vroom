@@ -229,36 +229,25 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
             m.category = value_category::xvalue;
     } else if (movable && m.category == value_category::lvalue &&
                object.kind == type_kind::class_type &&
+               result_kind == type_kind::class_type &&
+               tokens.files.behavior.has(language_feature::rvalue_references) &&
+               m.type.unqualified() != returns.unqualified()) {
+        VTRY_SET(r, move_to_other_class(n, m, returns));
+    } else if (movable && m.category == value_category::lvalue &&
+               object.kind == type_kind::class_type &&
                (declares_move_constructor(object.entity) ||
                 /* (X(X&&) = default: no entity when trivial) */
                 entity_table[object.entity].defaulted_move_constructor)) {
         /* the first overload resolution, as an rvalue, finds the move
            constructor viable: it is chosen ([over.ics.rank]/3.2.3), deleted
-           or not.  For another class (a converting constructor), C++11 to
-           C++17 take the copy unless the chosen constructor's parameter is
-           an rvalue reference to the object's type, C++20 does not: not
-           analysed */
+           or not.  (Another class result is move_to_other_class's; a
+           result that is no class, by a conversion function, is not
+           analysed) */
         if (m.type.unqualified() != returns.unqualified())
             return not_supported_because(
                 n, "class.copy.elision",
-                "an implicit move that converts to another class");
+                "an implicit move that converts to another type");
         m.category = value_category::xvalue;
-    } else if (movable && m.category == value_category::lvalue &&
-               object.kind == type_kind::class_type &&
-               tokens.files.behavior.has(language_feature::rvalue_references) &&
-               m.type.unqualified() != returns.unqualified() &&
-               has_implicit_conversion_functions(object.entity)) {
-        /* the first overload resolution, as an rvalue, may find a
-           converting constructor of the returned class viable by a
-           conversion function of the operand's (and its parameter is
-           not an rvalue reference to the object's type, which C++11 to
-           C++17 want): not analysed.  When the operand has the returned
-           type, the copy or move constructor binds the rvalue directly,
-           an identity conversion that beats any constructor needing the
-           user-defined conversion ([over.ics.rank]/2): analysed */
-        return not_supported_because(
-            n, "class.copy.elision",
-            "an implicit move through a conversion function");
     } else if (movable && m.category == value_category::lvalue &&
                object.kind == type_kind::class_type &&
                tokens.files.behavior.has(language_feature::rvalue_references) &&
@@ -298,6 +287,38 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
     r = initialize_with(n, m, returns, false, false, result);
     operand_node = result.node;
     return r;
+}
+
+/*
+ * [class.copy.elision]/3: "overload resolution to select the constructor
+ * for the copy ... is first performed as if the expression or operand were
+ * an rvalue.  If the first overload resolution fails or was not performed,
+ * overload resolution is performed again, considering the expression or
+ * operand as an lvalue."  For a returned entity of another class than the
+ * result's, in every mode before C++23 as clang applies it ([impl.clang]
+ * P1825R0 as a defect report): m becomes an xvalue where the conversion
+ * from the rvalue exists, a deleted or ambiguous one included.  C++23's
+ * operand is an xvalue and has no second resolution (P2266R3).
+ */
+analysis_result semantic_analysis::move_to_other_class(SyntaxRef n,
+                                                       expression_meaning &m,
+                                                       qualified_type returns)
+{
+    expression_meaning rvalue = m;
+    rvalue.category = value_category::xvalue;
+    if (!tokens.files.behavior.has(
+            language_feature::multidimensional_subscript)) {
+        conversion_sequence first =
+            implicit_conversion_sequence(rvalue, returns, true);
+        if (first.kind == conversion_sequence::form::bad)
+            return analysis_result::well_formed;
+        if (first.kind == conversion_sequence::form::unknown)
+            return not_supported_because(
+                n, "class.copy.elision",
+                "an implicit move whose first overload resolution is unknown");
+    }
+    m = rvalue;
+    return analysis_result::well_formed;
 }
 
 /*

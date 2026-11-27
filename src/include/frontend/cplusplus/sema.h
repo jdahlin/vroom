@@ -2107,6 +2107,9 @@ class semantic_analysis
     bool subobject_destructor_inaccessible(entity_index c,
                                            entity_index k) const;
     entity_index implicitly_movable(SyntaxElement operand);
+    /* [class.copy.elision]/3, a returned entity of another class */
+    analysis_result move_to_other_class(SyntaxRef n, expression_meaning &m,
+                                        qualified_type returns);
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;
     /* the type's size and alignment in bytes ([expr.sizeof],
