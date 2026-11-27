@@ -2031,7 +2031,7 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
             e = cand;
     }
     return named_member_type(n, t, e, "basic.lookup.qual", type, cv,
-                             allow_placeholder);
+                             allow_placeholder, scope.entity);
 }
 
 /*
@@ -2039,10 +2039,9 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
  * enumeration or typedef-name, accessible ([class.access]/1), as a type and
  * its cv-qualifiers; anything else is not supported yet (cited by citation).
  */
-analysis_result
-semantic_analysis::named_member_type(SyntaxRef n, token_index t, entity_index e,
-                                     const char *citation, type_index &type,
-                                     uint32_t &cv, bool allow_placeholder)
+analysis_result semantic_analysis::named_member_type(
+    SyntaxRef n, token_index t, entity_index e, const char *citation,
+    type_index &type, uint32_t &cv, bool allow_placeholder, entity_index naming)
 {
     /* [temp.res]/3, [dcl.type.simple]/2: the name of a
        typename-specifier or type-name names a type; a variable, function
@@ -2062,10 +2061,17 @@ semantic_analysis::named_member_type(SyntaxRef n, token_index t, entity_index e,
                entity_table[e].kind != entity_kind::typedef_name))
         return not_supported_because(
             n, citation, "a qualified name that finds no analysed type");
+    /* [namespace.udecl]/19: named in the class whose using-declaration
+       introduced it, with that declaration's access */
+    uint8_t introduced = 0;
+    entity_index through = 0;
+    if (naming && entity_table.bound_by_using_access(
+                      naming, entity_table[e].name, introduced))
+        through = naming;
     if (entity_table[e].enclosing &&
         entity_table[entity_table[e].enclosing].kind ==
             entity_kind::class_type &&
-        !accessible(e))
+        !accessible(e, through))
         return ill_formed_at_token(t,
                                    "a private or protected member's name can "
                                    "be used only by members and friends of "

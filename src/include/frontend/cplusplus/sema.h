@@ -4893,7 +4893,8 @@ class semantic_analysis
     analysis_result named_member_type(SyntaxRef n, token_index t,
                                       entity_index e, const char *citation,
                                       type_index &type, uint32_t &cv,
-                                      bool allow_placeholder = false);
+                                      bool allow_placeholder = false,
+                                      entity_index naming = 0);
     analysis_result qualified_type_name(SyntaxRef n, type_index &type,
                                         uint32_t &cv,
                                         bool allow_placeholder = false);
