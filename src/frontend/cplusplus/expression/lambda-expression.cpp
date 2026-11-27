@@ -673,7 +673,7 @@ analysis_result semantic_analysis::lambda_default_arguments(
     }
     if (!any)
         return analysis_result::well_formed;
-    /* ([abi:mangle.local-name] of a lambda's parameter of a type local to a
+    /* (the mangled name of a lambda's parameter of a type local to a
        specialization is not clang's yet) */
     if (instantiation_depth)
         return not_supported_because(n, "dcl.fct.default",
