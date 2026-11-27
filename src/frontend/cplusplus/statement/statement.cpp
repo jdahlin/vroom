@@ -742,7 +742,7 @@ bool semantic_analysis::musttail_similar(qualified_type a,
            musttail_similar(x.operand, y.operand);
 }
 
-/* [ext:clang_attributes] clang's musttail: "the return value is the result
+/* [ext:clang_musttail] clang's musttail: "the return value is the result
    of a function call" whose function type is the caller's, with nothing to
    destroy after it.  What needs the lowered code (temporaries) is refused
    there */

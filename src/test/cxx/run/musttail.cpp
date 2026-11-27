@@ -1,4 +1,4 @@
-// [ext:clang_attributes] [[clang::musttail]] is a jump at every level: chains
+// [ext:clang_musttail] [[clang::musttail]] is a jump at every level: chains
 // deep enough to overflow the stack if any link were an ordinary call
 extern "C" int printf(const char *, ...);
 
