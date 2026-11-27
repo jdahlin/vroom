@@ -349,12 +349,59 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         COMPARE,
         K_STORE,
         K_UNARY,
-        K_BINARY
+        K_BINARY,
+        VECTOR_STORE, /* vmovdqu64 zmm, m512 */
+        BROADCAST,    /* the low element of an xmm register to every lane */
+        MOVE_SHIFT    /* shift by an immediate: the digit in `digit` */
     };
     static const struct {
         const char *name;
-        uint8_t form, map, opcode, prefix, w, tuple;
+        uint8_t form, map, opcode, prefix, w, tuple, digit;
     } ops[] = {
+        {"vpaddb", BINARY, 1, 0xfc, 1, 0, 64},
+        {"vpaddw", BINARY, 1, 0xfd, 1, 0, 64},
+        {"vpaddd", BINARY, 1, 0xfe, 1, 0, 64},
+        {"vpaddq", BINARY, 1, 0xd4, 1, 1, 64},
+        {"vpsubb", BINARY, 1, 0xf8, 1, 0, 64},
+        {"vpsubw", BINARY, 1, 0xf9, 1, 0, 64},
+        {"vpsubd", BINARY, 1, 0xfa, 1, 0, 64},
+        {"vpsubq", BINARY, 1, 0xfb, 1, 1, 64},
+        {"vpandd", BINARY, 1, 0xdb, 1, 0, 64},
+        {"vpord", BINARY, 1, 0xeb, 1, 0, 64},
+        {"vpxord", BINARY, 1, 0xef, 1, 0, 64},
+        {"vpxorq", BINARY, 1, 0xef, 1, 1, 64},
+        {"vpminsw", BINARY, 1, 0xea, 1, 0, 64},
+        {"vpmaxsw", BINARY, 1, 0xee, 1, 0, 64},
+        {"vpmullw", BINARY, 1, 0xd5, 1, 0, 64},
+        {"vpmulhw", BINARY, 1, 0xe5, 1, 0, 64},
+        {"vpmulhuw", BINARY, 1, 0xe4, 1, 0, 64},
+        {"vpmulhrsw", BINARY, 2, 0x0b, 1, 0, 64},
+        {"vpmulld", BINARY, 2, 0x40, 1, 0, 64},
+        {"vpmaddwd", BINARY, 1, 0xf5, 1, 0, 64},
+        {"vpmaddubsw", BINARY, 2, 0x04, 1, 0, 64},
+        {"vpacksswb", BINARY, 1, 0x63, 1, 0, 64},
+        {"vpackssdw", BINARY, 1, 0x6b, 1, 0, 64},
+        {"vpackuswb", BINARY, 1, 0x67, 1, 0, 64},
+        {"vpackusdw", BINARY, 2, 0x2b, 1, 0, 64},
+        {"vpdpbusd", BINARY, 2, 0x50, 1, 0, 64},
+        {"vaddps", BINARY, 1, 0x58, 0, 0, 64},
+        {"vaddpd", BINARY, 1, 0x58, 1, 1, 64},
+        {"vsubps", BINARY, 1, 0x5c, 0, 0, 64},
+        {"vsubpd", BINARY, 1, 0x5c, 1, 1, 64},
+        {"vmulps", BINARY, 1, 0x59, 0, 0, 64},
+        {"vmulpd", BINARY, 1, 0x59, 1, 1, 64},
+        {"vdivps", BINARY, 1, 0x5e, 0, 0, 64},
+        {"vdivpd", BINARY, 1, 0x5e, 1, 1, 64},
+        {"vmovdqu64", VECTOR_STORE, 1, 0x7f, 2, 1, 64},
+        {"vmovdqa64", VECTOR_STORE, 1, 0x7f, 1, 1, 64},
+        {"vpbroadcastq", BROADCAST, 2, 0x59, 1, 1, 8},
+        {"vpsraw", MOVE_SHIFT, 1, 0x71, 1, 0, 64, 4},
+        {"vpsllw", MOVE_SHIFT, 1, 0x71, 1, 0, 64, 6},
+        {"vpslld", MOVE_SHIFT, 1, 0x72, 1, 0, 64, 6},
+        {"vpsrld", MOVE_SHIFT, 1, 0x72, 1, 0, 64, 2},
+        {"vpsrad", MOVE_SHIFT, 1, 0x72, 1, 0, 64, 4},
+        {"vpsllq", MOVE_SHIFT, 1, 0x73, 1, 1, 64, 6},
+        {"vpsrlq", MOVE_SHIFT, 1, 0x73, 1, 1, 64, 2},
         {"vmovdqu64", LOAD, 1, 0x6f, 2, 1, 64},
         {"vmovdqa64", LOAD, 1, 0x6f, 1, 1, 64},
         {"vbroadcasti32x4", LOAD, 2, 0x5a, 1, 0, 16},
@@ -378,7 +425,42 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         if (strcmp(mn, ops[i].name))
             continue;
         int form = ops[i].form;
-        bool imm = form == SHIFT || form == COMPARE;
+
+        /* one mnemonic, several forms: take the one the operands have */
+        if (form == VECTOR_STORE &&
+            !(n == 2 && o[0].kind == XK_REG && o[0].cls == XR_ZMM &&
+              o[1].kind != XK_REG))
+            continue;
+        if (form == LOAD && ops[i].map == 1 && n == 2 && o[0].kind == XK_REG &&
+            o[1].kind != XK_REG)
+            continue;
+        if (form == SHIFT && !strcmp(mn, "vpsrlw") &&
+            !(n == 3 && o[0].kind == XK_IMM))
+            continue;
+        if (form == VECTOR_STORE || form == BROADCAST) {
+            XOp *reg = &o[1], *mem = &o[0];
+
+            if (form == VECTOR_STORE)
+                reg = &o[0], mem = &o[1];
+            if (n != 2 || reg->kind != XK_REG || reg->cls != XR_ZMM ||
+                (form == BROADCAST &&
+                 (mem->kind != XK_REG || mem->cls != XR_XMM)))
+                break;
+            if (mem->kind == XK_EXPR)
+                mem->kind = XK_MEM;
+            uint8_t bytes[] = {0x0f, 0x38, ops[i].opcode};
+            XForm f = F(.w = ops[i].w, .opsz16 = ops[i].prefix == 1,
+                        .rep = ops[i].prefix == 2 ? 0xf3 : 0, .op = bytes,
+                        .nop = 3, .reg = reg->reg, .rm = mem,
+                        .tuple = ops[i].tuple, .vex = 1, .vl = 0);
+
+            if (ops[i].map == 1)
+                bytes[1] = ops[i].opcode, f.nop = 2;
+            f.mask = reg->mask;
+            f.zero = reg->zero;
+            return x64_emit(a, &f);
+        }
+        bool imm = form == SHIFT || form == COMPARE || form == MOVE_SHIFT;
         bool binary = form == BINARY || form == TEST || form == COMPARE ||
                       form == K_BINARY;
         if (n != 2 + binary + imm)
@@ -399,7 +481,11 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
             f.rm = dst;
             return x64_emit(a, &f);
         }
-        int cls = form >= K_UNARY ? XR_MASK : XR_ZMM;
+        bool on_masks = form == K_UNARY || form == K_BINARY;
+        int cls = XR_ZMM;
+
+        if (on_masks)
+            cls = XR_MASK;
         int dstcls =
             form == TEST || form == COMPARE || form == TO_MASK ? XR_MASK : cls;
         if (dst->kind != XK_REG || dst->cls != dstcls ||
@@ -425,7 +511,7 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
             f.isz = 1;
             f.imm = value;
         }
-        if (form >= K_UNARY && dst->mask)
+        if (on_masks && dst->mask)
             break;
         f.mask = dst->mask;
         f.zero = dst->zero;
@@ -434,6 +520,8 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         f.vl = form == K_BINARY;
         if (form == SHIFT)
             f.reg = 2, f.vvvv = dst->reg;
+        if (form == MOVE_SHIFT) /* $imm, src, dst: dst in vvvv */
+            f.reg = ops[i].digit, f.vvvv = dst->reg;
         return x64_emit(a, &f);
     }
     return as_error_report(a, "unsupported operands for '%s'", mn);
