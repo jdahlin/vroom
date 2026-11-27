@@ -550,7 +550,7 @@ uint32_t c_lowering::x86_header_call(uint32_t function,
 }
 
 /* [ext:gnu_library_builtins] the name of the library function the callee is:
-   the C library's (C language linkage, no definition) or a __builtin_ one,
+   the C library's (C language linkage) or a __builtin_ one,
    without the prefix; null if it is neither */
 const char *c_lowering::library_name(uint32_t function, size_t &length,
                                      bool &builtin)
@@ -562,9 +562,12 @@ const char *c_lowering::library_name(uint32_t function, size_t &length,
     if (node(function).kind != semantic_kind::entity)
         return nullptr;
     const entity &f = analysis.entity_table[node(function).a];
-    if (f.kind != entity_kind::function || f.defined || !f.name)
+    if (f.kind != entity_kind::function || !f.name)
         return nullptr;
     const char *name = tokens.pp.identifier_spelling(f.name - 1, &length);
+    /* (a standard name defined here too, as clang; but its own sqrt) */
+    if (f.defined && length >= 4 && !memcmp(name, "sqrt", 4))
+        return nullptr;
     builtin = length > 10 && !memcmp(name, "__builtin_", 10);
     if (builtin) {
         name += 10;

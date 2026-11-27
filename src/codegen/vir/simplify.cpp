@@ -154,7 +154,7 @@ static void virbuild_literal_memcmp_fold(codegen_context *e,
 }
 
 /* the C library function a call's callee names, NULL if it may be the
- * program's own */
+ * program's own (defined here, static, an asm label, -fno-builtin) */
 static const char *virbuild_library_callee(codegen_context *e,
                                            const vir_insn *fn)
 {
@@ -177,6 +177,7 @@ static const char *virbuild_library_callee(codegen_context *e,
         return NULL;
     const sym *y = &c->syms[index];
 
+    /* (a definition in this unit is what runs after inlining, as clang) */
     if ((y->flags & AST_SYMBOL_FLAG_DEFINED) || y->body ||
         y->kind != AST_SYMBOL_FUNCTION || y->sc == AST_STORAGE_STATIC ||
         !(y->flags & AST_SYMBOL_FLAG_GLOBAL) ||
