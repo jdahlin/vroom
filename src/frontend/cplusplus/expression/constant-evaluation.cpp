@@ -249,6 +249,33 @@ size_t kept_elements(const state_type &state, size_t saved, bool returned,
     return saved;
 }
 
+/* how many elements stay when those from cut on go: also those that an
+   element or object below holds (a member a callee gave an older object:
+   its elements are the object's, which outlives the scope).  Pointers do
+   not count: what they point to has its own lifetime */
+template <class state_type>
+size_t referenced_elements(const state_type &state, size_t objects, size_t cut)
+{
+    size_t size = state.elements.size();
+    if (cut >= size)
+        return cut;
+    auto holds = [&](const constant_value &v) {
+        if (v.kind != constant_value_kind::array &&
+            v.kind != constant_value_kind::class_object &&
+            v.kind != constant_value_kind::union_object)
+            return;
+        size_t end = static_cast<size_t>(v.first) + v.count;
+        if (v.first < size && end <= size && end > cut)
+            cut = end;
+    };
+    for (size_t i = 0; i < objects && i < state.objects.size(); i++)
+        holds(state.objects[i].value);
+    /* (cut grows as the elements kept hold further ones) */
+    for (size_t i = 0; i < cut; i++)
+        holds(state.elements[i]);
+    return cut;
+}
+
 /* the end of a scope; what a string literal's object lies above stays
    ([lex.string]/9: static storage duration) */
 template <class state_type>
@@ -258,6 +285,7 @@ void restore(state_type &state, size_t objects, size_t elements)
         objects = state.object_floor;
     if (elements < state.element_floor)
         elements = state.element_floor;
+    elements = referenced_elements(state, objects, elements);
     state.objects.resize(objects);
     state.elements.resize(elements);
     state.element_read_only.resize(elements);
@@ -1374,9 +1402,7 @@ entity_index semantic_analysis::evaluated_class(qualified_type t) const
 /* the value v of a class or array stored in the object at place: the
    elements one by one into those the object has, when it has them (a
    store is not a new object, whose elements would be above the
-   invocation's and go with it), else v as it is.  Elements the store has
-   to make, or takes from v, stay to the end of the evaluation: the object
-   may outlive the scope they were made in */
+   invocation's and go with it), else v as it is */
 void semantic_analysis::assign_value(constant_evaluation &state, uint32_t place,
                                      const constant_value &v)
 {
@@ -1391,10 +1417,9 @@ void semantic_analysis::assign_value(constant_evaluation &state, uint32_t place,
         place_value(state, place).member = v.member;
         const constant_value e = state.elements[v.first];
         state.elements[held.first] = constant_value();
-        if (is_object_value(e) || e.kind == constant_value_kind::array) {
+        if (is_object_value(e) || e.kind == constant_value_kind::array)
             state.elements[held.first] = copy_value(state, e, false);
-            state.element_floor = static_cast<uint32_t>(state.elements.size());
-        } else
+        else
             state.elements[held.first] = e;
         return;
     }
@@ -1403,9 +1428,6 @@ void semantic_analysis::assign_value(constant_evaluation &state, uint32_t place,
         held.kind != v.kind || held.count != v.count ||
         held.designator != v.designator || held.first == v.first) {
         place_value(state, place) = v;
-        if (held.first != v.first &&
-            (is_object_value(v) || v.kind == constant_value_kind::array))
-            state.element_floor = static_cast<uint32_t>(state.elements.size());
         return;
     }
     for (uint32_t i = 0; i < v.count; i++) {
@@ -4493,18 +4515,8 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
             if (!(from & element_place) && state.objects[from].read_only &&
                 has_mutable_subobject(semantics[argument].type))
                 return CONST_NOT_CONSTANT;
-            /* into the elements the object has, which live as long as it
-               does: new ones would go with an invocation's scope */
-            const constant_value held = place_value(state, place);
-            if (held.kind == v.kind && held.count == v.count &&
-                held.designator == v.designator && held.first != v.first &&
-                v.kind != constant_value_kind::union_object) {
-                assign_value(state, place, copy_value(state, v, false));
-                return constness::constant;
-            }
             constant_value copied = copy_value(state, v, false);
             place_value(state, place) = copied;
-            state.element_floor = static_cast<uint32_t>(state.elements.size());
             return constness::constant;
         }
     }
