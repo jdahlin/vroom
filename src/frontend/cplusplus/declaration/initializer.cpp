@@ -621,8 +621,13 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
         bool const_lvalue = !rvalue_reference && (t1.cv() & cv_const) &&
                             !(t1.cv() & cv_volatile);
         if (!const_lvalue) {
-            entity_index f = own_conversion_functions(y.entity);
-            if (f && entity_table[f].next_overload)
+            /* (an explicit one is a candidate of neither here) */
+            uint32_t implicit_ones = 0;
+            for (entity_index f = own_conversion_functions(y.entity); f;
+                 f = entity_table[f].next_overload)
+                if (!entity_table[f].explicit_)
+                    implicit_ones++;
+            if (implicit_ones > 1)
                 return not_supported_because(
                     at, "over.match.ref",
                     "a non-const reference with several conversion functions");

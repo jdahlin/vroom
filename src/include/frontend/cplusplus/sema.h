@@ -7308,10 +7308,12 @@ class semantic_analysis
        parameter of the member function f */
     conversion_sequence object_sequence(const expression_meaning &object,
                                         entity_index f) const;
+    /* whether a conversion function template of c may be a candidate of a
+       copy-initialization: not declared explicit */
+    bool has_implicit_conversion_function_templates(entity_index c);
     /* whether class c or a base class of it declares a conversion
        function ([class.conv.fct]/4: "Conversion functions are
        inherited") */
-    bool has_implicit_conversion_function_templates(entity_index c);
     bool has_conversion_function_templates(entity_index c);
     bool has_conversion_functions(entity_index c) const;
     /* whether a conversion function of class c, or a specialization of one
