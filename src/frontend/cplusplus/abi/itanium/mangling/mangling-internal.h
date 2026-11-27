@@ -19,33 +19,25 @@
 
 #include "../../../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
+#include "frontend/itanium/writer.h"
 
 namespace cplusplus
 {
 
-/* [abi:mangling-operator]: one enumerator per row of operators.inc */
-enum class itanium_operator : uint8_t {
-#define ITANIUM_OPERATOR(name, code, arity, token) name,
-#include "operators.inc"
-#undef ITANIUM_OPERATOR
-    none
-};
+/* [abi:mangling-operator]: operators.inc's rows (frontend/itanium), with
+   the token each is written with in C++ */
+using itanium_operator = itanium::operator_name;
+using itanium::terminal;
 
 constexpr struct {
-    const char *code;
     uint8_t arity;
     preprocessing_op_or_punc token;
 } operator_encodings[] = {
 #define ITANIUM_OPERATOR(name, code, arity, token)                             \
-    {code, arity, preprocessing_op_or_punc::token},
-#include "operators.inc"
+    {arity, preprocessing_op_or_punc::token},
+#include "frontend/itanium/operators.inc"
 #undef ITANIUM_OPERATOR
 };
-
-inline const char *operator_code(itanium_operator o)
-{
-    return operator_encodings[static_cast<size_t>(o)].code;
-}
 
 /* the operator written with op that has arity operands; none for another */
 inline itanium_operator operator_written(preprocessing_op_or_punc op,
@@ -78,23 +70,24 @@ inline itanium_operator operator_written(SyntaxElement op, unsigned arity)
    mangled yet, and co_await is a keyword */
 inline itanium_operator prefix_operator(itanium_operator o)
 {
-    if (o == itanium_operator::increment || o == itanium_operator::decrement)
+    if (o == itanium_operator::pp_increment ||
+        o == itanium_operator::mm_decrement)
         return itanium_operator::none;
     return o;
 }
 
-/* [abi:mangling-builtin]: builtin-types.inc's code of t; nullptr for a
-   type that has none */
-inline const char *builtin_type_code(fundamental_type t)
+/* [abi:mangling-builtin]: builtin-types.inc's row of t (its names are
+   fundamental_type's); none for a type that has none */
+inline itanium::builtin builtin_of(fundamental_type t)
 {
     switch (t) {
 #define ITANIUM_BUILTIN_TYPE(type, code)                                       \
     case fundamental_type::type:                                               \
-        return code;
-#include "builtin-types.inc"
+        return itanium::builtin::type;
+#include "frontend/itanium/builtin-types.inc"
 #undef ITANIUM_BUILTIN_TYPE
     default:
-        return nullptr;
+        return itanium::builtin::none;
     }
 }
 
@@ -128,13 +121,6 @@ inline fundamental_type simple_type_keyword_alone(standard_keyword k)
     return fundamental_type::none;
 }
 
-/* the terminals of productions.inc */
-enum class terminal : uint8_t {
-#define ITANIUM_TERMINAL(name, code) name,
-#include "productions.inc"
-#undef ITANIUM_TERMINAL
-};
-
 /* [abi:mangling-compression]: a substitution candidate, as the builder
    tells them apart: a type is one candidate however it is spelled, since
    the type table has one record per type.  A namespace or template as a
@@ -157,30 +143,22 @@ struct mangling_candidate {
  * The builder (itanium_mangler) decides which production to write; it
  * writes nothing itself.
  */
-class itanium_encoder
+class itanium_encoder : public itanium::writer
 {
   public:
-    explicit itanium_encoder(vbuffer *out) : out(out)
+    explicit itanium_encoder(vbuffer *buffer) : itanium::writer(buffer)
     {
     }
-    void write(terminal t);
-    void write(itanium_operator o);
+    using itanium::writer::write;
     /* [abi:mangling-builtin]: false for a type with no code */
-    bool builtin_type(fundamental_type t);
-    void number(uint64_t n);
-    /* [abi:mangle.number]'s n before a negative one's magnitude */
-    void signed_number(int64_t n);
-    void value_number(bool negative, uint64_t magnitude);
-    /* [abi:mangle.name] <source-name> ::= <positive length number> <identifier> */
-    void source_name(const char *bytes, size_t length);
-    void source_name(const char *identifier);
-    /* the [<number>] _ of several productions: nothing before the _ for
-       the first (n 0), n - 1 for another (T_, T0_, Ut_, Ut0_, ...) */
-    void ordinal_underscore(uint64_t n);
-    void discriminator(uint64_t n);
-    void seq_id(size_t n);
-    /* a symbol that is not mangled: its identifier as it is */
-    void unmangled(const char *bytes, size_t length);
+    bool builtin_type(fundamental_type t)
+    {
+        itanium::builtin b = builtin_of(t);
+        if (b == itanium::builtin::none)
+            return false;
+        write(b);
+        return true;
+    }
 
     /* the candidates seen, but those hidden */
     size_t candidate_count() const
@@ -195,8 +173,6 @@ class itanium_encoder
     {
         candidates.append(c);
     }
-    /* <substitution> of candidate i: S_, then S <seq-id> _ */
-    void substitution(size_t i);
     /* the candidates seen so far hidden from the ones after (the number
        hidden before, to show them again with) */
     size_t hide_candidates()
@@ -219,7 +195,6 @@ class itanium_encoder
     void rewind(mark m);
 
   private:
-    vbuffer *out;
     owned_array<mangling_candidate> candidates;
     size_t hidden = 0;
 };
@@ -247,11 +222,11 @@ class itanium_mangler
            the object points to; what 2: the <type> alone, the
            string's characters */
         if (what == 0) {
-            enc.write(terminal::mangled_name);
-            enc.write(terminal::typeinfo);
+            enc.write(terminal::underscore_Z_mangled_name);
+            enc.write(terminal::TI_typeinfo);
         } else if (what == 1) {
-            enc.write(terminal::mangled_name);
-            enc.write(terminal::typeinfo_name);
+            enc.write(terminal::underscore_Z_mangled_name);
+            enc.write(terminal::TS_typeinfo_name);
         }
         return type(qualified_type::make(t, cv_none));
     }
@@ -264,8 +239,8 @@ class itanium_mangler
     {
         if (analysis.entity_table[e].kind != entity_kind::variable)
             return false;
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::reference_temporary);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::GR_reference_temporary);
         if (!encoding(e))
             return false;
         if (index)
@@ -276,16 +251,16 @@ class itanium_mangler
     /* [abi:mangling-special-vtables]: <special-name> ::= TV <type> */
     bool vtable_name(entity_index c)
     {
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::virtual_table);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::TV_virtual_table);
         return type(analysis.entity_table[c].type);
     }
     /* [abi:mangling-special-vtables]: <special-name> ::= TT <type>, the VTT
        ([abi:vtable-ctor-vtt]) */
     bool vtt_name(entity_index c)
     {
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::vtt);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::TT_vtt);
         return type(analysis.entity_table[c].type);
     }
     /* [[impl.clang]] a construction virtual table ([abi:vtable-ctor]):
@@ -293,8 +268,8 @@ class itanium_mangler
     bool construction_vtable_name(entity_index c, uint64_t offset,
                                   entity_index base)
     {
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::construction_virtual_table);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::TC_construction_virtual_table);
         if (!type(analysis.entity_table[c].type))
             return false;
         enc.number(offset);
@@ -310,8 +285,8 @@ class itanium_mangler
         const entity &x = analysis.entity_table[e];
         if (x.kind != entity_kind::variable)
             return refuse("a guard variable of an entity that is no variable");
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::guard_variable);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::GV_guard_variable);
         return encoding(e);
     }
     /* [abi:mangling-special-thunks]:
@@ -325,15 +300,15 @@ class itanium_mangler
        the virtual table */
     bool thunk_name(entity_index f, int64_t adjustment, int64_t vcall)
     {
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::thunk);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::T_thunk);
         if (vcall) {
-            enc.write(terminal::virtual_offset);
+            enc.write(terminal::v_virtual_offset);
             enc.signed_number(adjustment);
             enc.write(terminal::underscore);
             enc.signed_number(vcall);
         } else {
-            enc.write(terminal::non_virtual_offset);
+            enc.write(terminal::h_non_virtual_offset);
             enc.signed_number(adjustment);
         }
         enc.write(terminal::underscore);
@@ -344,12 +319,12 @@ class itanium_mangler
        <nested-name> */
     void runtime_vtable_name(const char *name)
     {
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::virtual_table);
-        enc.write(terminal::nested_name);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::TV_virtual_table);
+        enc.write(terminal::N_nested_name);
         enc.source_name("__cxxabiv1");
         enc.source_name(name);
-        enc.write(terminal::end);
+        enc.write(terminal::E_end);
     }
 
   private:
@@ -462,7 +437,7 @@ class itanium_mangler
     void template_param(uint64_t position)
     {
         template_params_written++;
-        enc.write(terminal::template_param);
+        enc.write(terminal::T_template_param);
         enc.ordinal_underscore(position);
     }
     bool class_template_args(entity_index c);

@@ -1,6 +1,6 @@
 # PLAN-mangling: restructuring the Itanium mangler
 
-Status: M0-M6 done (2026-11-27); M7 not done (see its status).  Every
+Status: M0-M8 done (2026-11-27).  Every
 step kept every symbol and refusal of the identity gate (M0); one bug was
 fixed on the way (M2's guard variable).
 
@@ -362,13 +362,18 @@ expectations are clang's).  In `ci/premerge.sh` with `--clang`.  It fails on
 the build before M2 (the inline variable's guard).
 Status: done (2026-11-27).
 
-### M7 (optional): the C mangler
+### M7: the C mangler
 `frontend/c/mangle.cpp` uses the encoder for its types and substitutions.
-Status: not done, and not to do as written: the C front end builds as C11
-too (`make VCC_LANG=c`, which has no C++ front end), and the encoder is
-the C++ front end's C++.  Sharing would need the tables (`operators.inc`,
-`builtin-types.inc`, `productions.inc`, already plain X-macro lists) moved
-to `include/` and a C encoder; a step of its own if `overloadable` grows.
+Status: done (2026-11-27).  vcc builds as C++ only now (the user's call:
+`VCC_LANG=c` and `make self`/`self-check`, the C-hosted self-build, are
+gone).  The tables moved to `include/frontend/itanium/` with
+`itanium::writer` (`writer.h`): terminals, numbers, `<source-name>`,
+`<seq-id>`, `<substitution>`, `<discriminator>`.  The C++ front end's
+`itanium_encoder` is the writer plus the candidate table; the C mangler
+is the writer plus its 64 C types; its own letter tables and base-36 code
+are gone.  `cxx-spec-refs.py`'s letter check covers `frontend/c/mangle.cpp`.
+Test: `src/test/cxx/mangle/overloadable.c` (12 symbols, = clang's and the
+old build's).
 
 ## 5. Decisions
 

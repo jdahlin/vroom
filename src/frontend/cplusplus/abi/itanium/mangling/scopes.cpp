@@ -120,13 +120,13 @@ bool itanium_mangler::local_name_scope(entity_index function)
     bool is_main =
         !f.enclosing && length == 4 && !memcmp(identifier, "main", 4);
 
-    enc.write(terminal::local_name);
+    enc.write(terminal::Z_local_name);
     if (is_main) {
         if (!unqualified_name(function))
             return false;
     } else if (!encoding(function))
         return false;
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
     return true;
 }
 
@@ -250,12 +250,12 @@ bool itanium_mangler::closure_type_name(entity_index c)
     if (variable) {
         if (!source_name(table[variable].name))
             return false;
-        enc.write(terminal::closure_prefix);
+        enc.write(terminal::M_closure_prefix);
         candidate x;
         x.scope = variable;
         enc.add_candidate(x);
     }
-    enc.write(terminal::closure_type);
+    enc.write(terminal::Ul_closure_type);
     /* [impl.clang] (the ABI's later template-param-decl) before the
        parameter types, one per template-parameter of a lambda's
        template-parameter-list: Ty for a type-parameter (the only ones
@@ -275,11 +275,11 @@ bool itanium_mangler::closure_type_name(entity_index c)
                 semantic_analysis::template_parameter_form_kind::template_)
                 return false;
             if (pack)
-                enc.write(terminal::pack_parameter_decl);
+                enc.write(terminal::Tp_pack_parameter_decl);
             if (kind == semantic_analysis::template_parameter_form_kind::type) {
-                enc.write(terminal::type_parameter_decl);
+                enc.write(terminal::Ty_type_parameter_decl);
             } else {
-                enc.write(terminal::non_type_parameter_decl);
+                enc.write(terminal::Tn_non_type_parameter_decl);
                 if (!type(value_type))
                     return false;
             }
@@ -290,7 +290,7 @@ bool itanium_mangler::closure_type_name(entity_index c)
         SyntaxElement constraint =
             analysis.lambda_constraint(table[c].lambda, &trailing);
         if (constraint && !trailing) {
-            enc.write(terminal::requires_clause);
+            enc.write(terminal::Q_requires_clause);
             if (!expression_of_constraint(call, constraint))
                 return false;
         }
@@ -298,7 +298,7 @@ bool itanium_mangler::closure_type_name(entity_index c)
     qualified_type signature = table[call].type;
     if (!bare_function_type(signature))
         return false;
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
     entity_index context = enclosing_function(table, c);
     uint64_t earlier = 0;
     for (entity_index other = 1; other < c; other++) {

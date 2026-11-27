@@ -60,8 +60,12 @@ HOST_CPU  ?= $(HOST_CPU_A64)
 endif
 endif
 VCC_CXX_DIALECT = -x c++ -std=gnu++20 -fno-exceptions
-VCC_LANG ?= c++
-ifeq ($(VCC_LANG),c++)
+# vcc is C++: the C front end shares the C++ front end's mangling writer
+# (frontend/itanium/writer.h), so there is no C-hosted build (VCC_LANG=c).
+ifneq ($(filter-out c++,$(VCC_LANG)),)
+$(error VCC_LANG=$(VCC_LANG): vcc builds as C++ only)
+endif
+VCC_LANG = c++
 VCC_CC = $(CCACHE) $(HOST_CXX)
 VCC_DIALECT = $(VCC_CXX_DIALECT)
 # The sources are C that also compiles as C++: {0} and partial designated
@@ -72,14 +76,6 @@ VCC_DIALECT_WARN = -Wno-missing-field-initializers -Wno-missing-braces \
 	-Wno-deprecated-anon-enum-enum-conversion
 # The host tools use the C runtime. Let the C driver select the link libraries.
 VCC_LINK = $(CCACHE) $(HOST_CC)
-else ifeq ($(VCC_LANG),c)
-VCC_CC = $(CCACHE) $(HOST_CC)
-VCC_DIALECT = -x c -std=c11
-VCC_DIALECT_WARN = -Wno-missing-field-initializers -Wno-missing-braces
-VCC_LINK = $(VCC_CC)
-else
-$(error VCC_LANG must be c or c++)
-endif
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
 VCC_SAN   ?=
 VCC_SANLD ?=
@@ -152,8 +148,8 @@ VCCD_SRC = server/diagnostics-store.cpp server/capabilities.cpp utils/fixdep.cpp
 server_SRC = $(filter-out server/diagnostics-store.cpp server/capabilities.cpp,$(wildcard server/*.cpp))
 # Split modules: a list of files each (MOD_SRC, in this order).  By default
 # each module is compiled as one TU (obj/unity/MOD.cpp #includes its files, as
-# SQLite's amalgamation), so the code generator sees all of it, also in `make
-# self` where there is no LTO, and what the files share stays static (VPRIV in
+# SQLite's amalgamation), so the code generator sees all of it, also where
+# there is no LTO, and what the files share stays static (VPRIV in
 # the headers).  `make VCC_UNITY=` compiles the files one by one.
 SPLIT_MODS = cc pp codegen driver
 # the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
@@ -174,12 +170,12 @@ SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_MODS)),$(cal
 PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC)) $(CXX_OBJ)
 # the C++ front end written against the standard (src/frontend/cplusplus,
 # doc/PLAN-cxx-spec.md) and its lowering, which the driver calls for C++:
-# C++20 code, so only a C++-hosted vcc (VCC_LANG=c++) has them
+# C++20 code
 # (the lowering to C's AST needs C's front end and code generator: apart
 # from the cplusplus module; dump/ is the developer outputs, -fcxx-dump=)
 cxxlower_SRC = $(wildcard frontend/cplusplus/lower/*.cpp)
 cplusplus_SRC = $(filter-out $(cxxlower_SRC),$(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp frontend/cplusplus/abi/*/*.cpp frontend/cplusplus/abi/*/*/*.cpp))
-CXX_OBJ = $(if $(filter c++,$(VCC_LANG)),$(call mod,cplusplus) $(call o,$(cxxlower_SRC)))
+CXX_OBJ = $(call mod,cplusplus) $(call o,$(cxxlower_SRC))
 # its subset of C++ (doc/PLAN-cxx-spec.md, Conventions), held by the compiler:
 # no RTTI, no C++ library header (C headers only), no object with a static
 # constructor or destructor, and no warning
@@ -357,29 +353,6 @@ vccrt: $(OUT)/vpp $(if $(filter environment command line,$(origin AR)),,$(OUT)/v
 
 .PHONY: vccrt
 
-# Reuse the normal target graph so each stage gets the same objects and make
-# can schedule independent compilation jobs across the recursive invocation.
-SELF ?= $(if $(filter Darwin,$(HOST_OS)),../build/self,$(OUT)-self)
-SELF_CC ?= $(abspath $(OUT))/vpp
-SELF_LANG ?= c
-SELF_TARGET = $(if $(filter Darwin,$(HOST_OS)),arm64-apple-darwin,$(HOST_ARCH)-linux-gnu)
-SELF_FLAGS ?= --target=$(SELF_TARGET) -I$(abspath headers)
-ifeq ($(HOST_OS),Linux)
-SELF_FLAGS += -isystem $(HOST_RESOURCE) -isystem /usr/include/$(SELF_TARGET) -isystem /usr/include
-endif
-# The stage compiles at VCC_OPT (-O3: VIR with the vectorizer, doc/OPTIMIZATION.md) on
-# every host; VCC_OPT=-O1 builds a comparison stage with the direct emitter.
-SELF_LINK ?= $(HOST_CC) $(if $(filter Linux,$(HOST_OS)),-no-pie)
-
-self: $(OUT)/vpp
-	$(MAKE) vcc OUT=$(SELF) VCC_LANG=$(SELF_LANG) VCC_PGO= VCC_LTO= VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
-
-self-check: self
-	$(MAKE) self SELF=$(SELF)3 SELF_CC=$(abspath $(SELF))/vpp
-	@cd $(SELF) && find obj -name '*.o' -exec sh -ec 'for o do cmp "$$o" "$(abspath $(SELF)3)/$$o"; done' sh {} +
-	@echo "self-check: stage 2 and stage 3 objects identical"
-
-.PHONY: self self-check
 
 # Check the bootstrap C dialect and the host C++ dialect independently:
 # a C warning must not hide the C++ diagnostics for that file under make -k.
