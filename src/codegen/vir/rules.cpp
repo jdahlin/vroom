@@ -565,6 +565,8 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
     case VIR_OP_MUL:
         if (virbuild_value_integer_constant(V, in.b, &k) && k == 1)
             *r = in.a;
+        else if (virbuild_value_integer_constant(V, in.b, &k) && !k)
+            *r = in.b; /* (a 128-bit product's zero high halves) */
         return false;
     case VIR_OP_AND:
         if (virbuild_value_integer_constant(V, in.b, &k) &&
