@@ -673,6 +673,18 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
         else if (!result_destructible(to))
             why = "an aggregate prvalue, a result whose destructor is "
                   "inaccessible or deleted";
+        else if (entity_table[f].instantiation) {
+            /* (their partial ordering, [temp.func.order], is not trusted
+               to find an ambiguity here) */
+            owned_array<entity_index> functions, templates;
+            owned_array<uint32_t> group;
+            bool all = visible_conversion_functions(c, functions, &templates);
+            for (entity_index held : templates)
+                function_template_overloads(held, group);
+            if (!all || group.size() > 1)
+                why = "an aggregate prvalue, one of several conversion "
+                      "function templates";
+        }
         if (why)
             return not_supported_because(at, "class.temporary", why);
     }
