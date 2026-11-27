@@ -753,6 +753,16 @@ analysis_result semantic_analysis::class_pointer_cast(SyntaxRef at,
        complete classes ([expr.static.cast]/11, [conv.ptr]/3) */
     require_complete(fp.entity);
     require_complete(tp.entity);
+    /* a class whose definition was not analysed may derive from the
+       other: no cast is ruled out */
+    const entity_index both[] = {fp.entity, tp.entity};
+    for (entity_index c : both)
+        if (entity_table[c].kind != entity_kind::class_type) {
+            handled = true;
+            return not_supported_because(
+                at, "expr.static.cast",
+                "a cast of a class whose definition was not analysed");
+        }
     if (!entity_table[fp.entity].size || !entity_table[tp.entity].size)
         return analysis_result::well_formed;
     bool ambiguous = false;
