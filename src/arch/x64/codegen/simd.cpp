@@ -1287,10 +1287,10 @@ VPRIV bool x64_x86_builtin_code(codegen_context *e, uint32_t n, uint32_t *code,
         *operands = count - 1;
         return true;
     }
-    case BINARY_XMM0:
     case TO_GENERAL: /* (movmsk: the x86 operation with a scalar result) */
         *code |= X64_X86_UNARY;
         return true;
+    case BINARY_XMM0:
     case SHIFT:
     case LOAD:
     case COMPARE:
