@@ -400,6 +400,9 @@ only; its `load` and `store` have width 2.  There is no 16-bit scalar.
 7.5.1c `i64x4` is 256 bits, x86-64 with AVX2: the type of `load`, `store`,
 block parameters and `x86` (whose instruction is then the VEX form on `ymm`
 registers).  Its lanes are the instruction's business.
+`i64x8` is the same at 512 bits, x86-64 with AVX-512BW (the EVEX form on
+`zmm` registers; a byte or word compare writes a mask register, whose bits
+the lowering spreads back to the lanes).
 
 7.5.1b `bitcast` of a vector type takes any vector type: the same 128 bits.
 
