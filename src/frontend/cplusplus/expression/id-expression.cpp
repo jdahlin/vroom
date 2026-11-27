@@ -1268,6 +1268,10 @@ analysis_result semantic_analysis::class_member_value(SyntaxRef n,
                                    "be used only by members and friends of "
                                    "the class in which it is declared",
                                    "class.access");
+    /* [basic.def.odr]/5: a reference usable in constant expressions is not
+       odr-used: the name designates the entity it is bound to */
+    if (x.constant_referent && !forced_odr_use)
+        return named_entity(t, x.constant_referent, m);
     /* [expr.prim.id.qual]/2: "The result is the member ... The result is
        an lvalue if the member is a static member function or a data
        member" */
@@ -1276,6 +1280,16 @@ analysis_result semantic_analysis::class_member_value(SyntaxRef n,
     m.type = x.type;
     m.entity = e;
     m.evaluation = constness::constant;
+    const struct type record = type_table[x.type.unqualified()];
+    if (record.kind == type_kind::lvalue_reference ||
+        record.kind == type_kind::rvalue_reference) {
+        /* [expr.type]/1: "If an expression initially has the type
+           "reference to T", the type is adjusted to T prior to any further
+           analysis." */
+        m.type = record.operand;
+        m.entity = 0;
+        m.evaluation = constness::unknown;
+    }
     m.node = expression_node(semantic_kind::entity, m, t, e);
     return analysis_result::well_formed;
 }

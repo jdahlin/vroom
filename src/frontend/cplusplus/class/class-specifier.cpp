@@ -2534,12 +2534,10 @@ analysis_result semantic_analysis::member_declarator(
             return not_supported_because(
                 declaration, "class.static.data",
                 "a static data member of a local class");
-        const struct type &record = type_table[type.unqualified()];
-        if (record.kind == type_kind::lvalue_reference ||
-            record.kind == type_kind::rvalue_reference || abstract_class(type))
+        if (abstract_class(type))
             return not_supported_because(
                 declaration, "class.static.data",
-                "a static data member of reference or abstract class type");
+                "a static data member of abstract class type");
         e = entity_table.make(entity_kind::variable, name, c);
         entity_table[e].type = type;
         /* [class.static.data]/1: "A static data member is not part of the
@@ -3138,6 +3136,9 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         s.constexpr_ &&
         (record.kind == type_kind::class_type ||
          record.kind == type_kind::array || record.kind == type_kind::pointer);
+    const bool constexpr_reference =
+        s.constexpr_ && (record.kind == type_kind::lvalue_reference ||
+                         record.kind == type_kind::rvalue_reference);
     /* [expr.const]/3: until the initializer is analysed (and if analysis
        has no rules for it) whether a member that may be usable in constant
        expressions is one, and its value, are unknown: a later member's
@@ -3158,8 +3159,9 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         x.defined = true;
         return analysis_result::well_formed;
     }
-    if (!(cv & cv_const) || (cv & cv_volatile) ||
-        (!integral_or_enumeration && !constexpr_floating && !constexpr_class))
+    if (!constexpr_reference &&
+        (!(cv & cv_const) || (cv & cv_volatile) ||
+         (!integral_or_enumeration && !constexpr_floating && !constexpr_class)))
         return not_supported_because(
             declarator, "class.static.data",
             "an in-class initializer of a static data member of a non-const, "
@@ -3185,7 +3187,10 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         record.kind == type_kind::array && value.node &&
         value.evaluation == constness::constant &&
         semantics[value.node].kind != semantic_kind::initializer_list;
-    if (constexpr_class && value.node && !literal_array) {
+    if (constexpr_reference) {
+        if (value.evaluation == constness::unknown && value.node)
+            value.evaluation = evaluate_reference_binding(value.node);
+    } else if (constexpr_class && value.node && !literal_array) {
         uint32_t data = 0;
         constness c =
             evaluate_variable(type, value.node, semantics[value.node].at, data);
@@ -3231,6 +3236,23 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         x.value = value.value;
     }
     x.definition = value.node;
+    if (constexpr_reference && !(x.gnu_flags & gnu_weak)) {
+        uint32_t bound = value.node;
+        if (bound && semantics[bound].kind == semantic_kind::bind_reference)
+            bound = semantics[bound].a;
+        if (bound && semantics[bound].kind == semantic_kind::entity) {
+            entity_index referent = semantics[bound].a;
+            const entity &r2 = entity_table[referent];
+            if (((r2.kind == entity_kind::variable && !r2.automatic &&
+                  !r2.c11_thread_local) ||
+                 r2.kind == entity_kind::function) &&
+                type_table[r2.type.unqualified()].kind !=
+                    type_kind::lvalue_reference &&
+                type_table[r2.type.unqualified()].kind !=
+                    type_kind::rvalue_reference)
+                x.constant_referent = referent;
+        }
+    }
     if (s.constexpr_ || s.inline_) {
         /* [dcl.inline]/1 (C++17): "A function or static data member
            declared with the constexpr specifier is implicitly an inline
