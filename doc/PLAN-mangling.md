@@ -341,7 +341,15 @@ The four sources call one set of `<expression>` builders
 source file keeps only the reading of its representation.  The per-mangling
 state that belongs to one source (`written_first`, `pack_element`,
 `dependent_value_depth`, ...) moves into that source's walker object.
-Status: not started.
+Status: done (2026-11-27).  `expressions.cpp` has the shapes the sources
+share: `expr_primary_external` (`L _Z <encoding> E`, 9 sites before),
+`expr_primary_value` (`L <type> [n] <value> E`, 8), `expr_primary_nullptr`,
+`function_param`, `sizeof_pack`; the operators were one table since M1.
+The per-symbol state stays in the builder, where `type()` reads it, but is
+declared in one group and set for a scope by the front end's
+`scoped_value` (six hand-written saves and two local RAII structs before);
+the class's members are grouped by file.  Identity gate: no difference.
+Speed: +0.01% instructions.
 
 ### M7 (optional): the C mangler
 `frontend/c/mangle.cpp` uses the encoder for its types and substitutions.

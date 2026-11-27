@@ -35,10 +35,7 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
         for (size_t i = 0; i < spelling.size(); i++)
             value =
                 value * 10 + static_cast<uint64_t>(spelling.data()[i] - '0');
-        enc.write(terminal::expr_primary);
-        builtin_type(fundamental_type::int_);
-        enc.number(value);
-        enc.write(terminal::end);
+        expr_primary_value(fundamental_type::int_, false, value);
         return true;
     }
     switch (c.kind()) {
@@ -86,8 +83,7 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
             /* (an expression's <template-param>: no candidate) */
             if (!pe || !analysis.constraint_parameter_is_own(t, pe))
                 return false;
-            enc.write(terminal::sizeof_pack);
-            template_param(analysis.entity_table[pe].value);
+            sizeof_pack(analysis.entity_table[pe].value);
             return true;
         }
         if (c.size() != 2 ||
@@ -294,10 +290,7 @@ bool itanium_mangler::template_args_of_constraint(entity_index t,
                 if (expansion)
                     enc.write(terminal::pack_expansion);
                 enc.write(terminal::decltype_entity);
-                enc.write(terminal::function_param);
-                if (parameter > 1)
-                    enc.number(parameter - 2);
-                enc.write(terminal::underscore);
+                function_param(parameter);
                 enc.write(terminal::end);
                 continue;
             }
@@ -321,16 +314,12 @@ bool itanium_mangler::template_args_of_constraint(entity_index t,
                     return refuse("a type of a constraint that names an "
                                   "enclosing template's parameter");
             }
-            entity_index saved = encoding_template;
-            entity_index saved_leveled = leveled_template;
-            encoding_template = t;
-            leveled_template = 0;
+            entity_index level_of = 0;
             if (leveled)
-                leveled_template = t;
-            bool ok = type(argument);
-            encoding_template = saved;
-            leveled_template = saved_leveled;
-            if (!ok)
+                level_of = t;
+            scoped_value<entity_index> in_template(encoding_template, t);
+            scoped_value<entity_index> in_level(leveled_template, level_of);
+            if (!type(argument))
                 return false;
             continue;
         }

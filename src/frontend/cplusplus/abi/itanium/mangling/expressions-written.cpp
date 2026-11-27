@@ -420,8 +420,7 @@ itanium_mangler::sizeof_of_written(SyntaxElement expression)
         for (uint32_t i = 0; i < written_count; i++) {
             const auto &b = analysis.written_bindings[written_first + i];
             if (b.identifier == pack_id && b.pack_position) {
-                enc.write(terminal::sizeof_pack);
-                template_param(b.pack_position - 1);
+                sizeof_pack(b.pack_position - 1);
                 return written_form(true);
             }
         }
@@ -429,8 +428,7 @@ itanium_mangler::sizeof_of_written(SyntaxElement expression)
                                                         expression[3].token());
         if (!pe)
             return written_form(false);
-        enc.write(terminal::sizeof_pack);
-        template_param(analysis.entity_table[pe].value);
+        sizeof_pack(analysis.entity_table[pe].value);
         return written_form(true);
     }
     /* [abi:expressions] sizeof and alignof of a type or an expression:
@@ -506,10 +504,8 @@ itanium_mangler::template_id_of_written(SyntaxElement expression)
             const auto &b = analysis.written_bindings[written_first + i];
             if (!b.specialization || b.cast != id.index().index())
                 continue;
-            enc.write(terminal::external_name);
-            if (!encoding(b.specialization))
+            if (!expr_primary_external(b.specialization))
                 return written_form(false);
-            enc.write(terminal::end);
             return written_form(true);
         }
         /* (a function template's name; an alias or class template's
@@ -905,10 +901,8 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
                 return written_form(expr_primary_of_enumerator(target));
             if (target &&
                 analysis.entity_table[target].kind == entity_kind::variable) {
-                enc.write(terminal::external_name);
-                if (!encoding(target))
+                if (!expr_primary_external(target))
                     return written_form(false);
-                enc.write(terminal::end);
                 return written_form(true);
             }
             /* ns::f as a callee: sr <source-name of ns> E <source-name> (a
@@ -1066,10 +1060,7 @@ itanium_mangler::primary_of_written(SyntaxElement expression)
     uint32_t parameter = analysis.function_parameter_position(
         encoding_template, expression.token());
     if (parameter) {
-        enc.write(terminal::function_param);
-        if (parameter > 1)
-            enc.number(parameter - 2);
-        enc.write(terminal::underscore);
+        function_param(parameter);
         return written_form(true);
     }
     /* an instantiation's pointer or reference parameter: the argument,
@@ -1077,10 +1068,8 @@ itanium_mangler::primary_of_written(SyntaxElement expression)
     if (const auto *b = written_object_binding(expression)) {
         if (record(b->type).kind != type_kind::lvalue_reference)
             enc.write(itanium_operator::address_of);
-        enc.write(terminal::external_name);
-        if (!encoding(b->specialization))
+        if (!expr_primary_external(b->specialization))
             return written_form(false);
-        enc.write(terminal::end);
         return written_form(true);
     }
     /* a non-type template parameter: its <template-param>
@@ -1102,17 +1091,13 @@ itanium_mangler::primary_of_written(SyntaxElement expression)
     /* [abi:expressions] true and false: L b 1 E, L b 0 E */
     if (expression.is(standard_keyword::true_) ||
         expression.is(standard_keyword::false_)) {
-        enc.write(terminal::expr_primary);
-        builtin_type(fundamental_type::bool_);
-        enc.number(expression.is(standard_keyword::true_));
-        enc.write(terminal::end);
+        expr_primary_value(fundamental_type::bool_, false,
+                           expression.is(standard_keyword::true_));
         return written_form(true);
     }
     /* [abi:mangling.literal]: nullptr is its type alone */
     if (expression.is(standard_keyword::nullptr_)) {
-        enc.write(terminal::expr_primary);
-        builtin_type(fundamental_type::std_nullptr_t);
-        enc.write(terminal::end);
+        expr_primary_nullptr();
         return written_form(true);
     }
     return written_form(expr_primary_of_integer_literal(expression.token()));

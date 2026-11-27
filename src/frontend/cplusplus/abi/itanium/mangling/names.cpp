@@ -254,10 +254,7 @@ bool itanium_mangler::unqualified_name(entity_index e, bool as_type)
         enc.write(terminal::vendor_qualifier);
         enc.write(terminal::enable_if_attribute);
         enc.write(terminal::template_args);
-        enc.write(terminal::expr_primary);
-        enc.builtin_type(fundamental_type::bool_);
-        enc.number(1);
-        enc.write(terminal::end);
+        expr_primary_value(fundamental_type::bool_, false, 1);
         enc.write(terminal::end);
     }
     return true;
@@ -330,14 +327,11 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
         enc.write(terminal::cast);
         if (x.instantiation) {
             entity_index tmpl = analysis.specialized_template(e);
-            entity_index saved = encoding_template;
-            encoding_template = tmpl;
-            bool ok = type(
+            scoped_value<entity_index> in_template(encoding_template, tmpl);
+            return type(
                 analysis
                     .type_table[analysis.entity_table[tmpl].type.unqualified()]
                     .operand);
-            encoding_template = saved;
-            return ok;
         }
         return type(analysis.type_table[x.type.unqualified()].operand);
     }

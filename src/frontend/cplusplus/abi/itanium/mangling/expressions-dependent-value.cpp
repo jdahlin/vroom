@@ -40,10 +40,7 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
         return type(x.type);
     }
     if (is(form::integer_literal)) {
-        enc.write(terminal::expr_primary);
-        builtin_type(fundamental_type::int_);
-        enc.number(x.name);
-        enc.write(terminal::end);
+        expr_primary_value(fundamental_type::int_, false, x.name);
         return true;
     }
     if (is(form::member_call)) {
@@ -56,10 +53,8 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
     }
     if (is(form::static_member)) {
         /* a static data member: an external name, L_Z <encoding> E */
-        enc.write(terminal::external_name);
-        if (!encoding(x.name))
+        if (!expr_primary_external(x.name))
             return false;
-        enc.write(terminal::end);
         return true;
     }
     if (is(form::logical_not)) {

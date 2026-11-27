@@ -139,14 +139,8 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
     const entities &table = analysis.entity_table;
     /* (a specialization named within another's arguments: the enclosing
        one's template parameters are resolved again after it) */
-    struct restore {
-        entity_index &place;
-        entity_index before;
-        ~restore()
-        {
-            place = before;
-        }
-    } outer_template = {encoding_template, encoding_template};
+    scoped_value<entity_index> outer_template(encoding_template,
+                                              encoding_template);
     entity_index pattern_of = analysis.specialized_template(e);
     entity_index scope = table[e].enclosing;
     bool nested = scope && !is_std(scope);
@@ -198,12 +192,16 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
        expression, E; the requires-clause of the template-head */
     SyntaxElement constraint = analysis.template_constraint(pattern_of);
     bool head_constraint = constraint && !table[scope].lambda;
-    entity_index outer_encoding_template = encoding_template;
-    if (typed_parameters)
-        encoding_template = pattern_of;
-    bool arguments =
-        template_args(e, typed_parameters, true, UINT32_MAX, !head_constraint);
-    encoding_template = outer_encoding_template;
+    bool arguments = false;
+    {
+        entity_index arguments_template = encoding_template;
+        if (typed_parameters)
+            arguments_template = pattern_of;
+        scoped_value<entity_index> in_arguments(encoding_template,
+                                                arguments_template);
+        arguments = template_args(e, typed_parameters, true, UINT32_MAX,
+                                  !head_constraint);
+    }
     if (!arguments)
         return false;
     if (head_constraint) {
@@ -226,11 +224,8 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
        operators) */
     if (table[e].special == special_member::none &&
         !table[e].conversion_function) {
-        const char *outer_part = mangling_part;
-        mangling_part = "the return type";
-        bool typed = type(record(pattern).operand);
-        mangling_part = outer_part;
-        if (!typed)
+        scoped_value<const char *> in_return(mangling_part, "the return type");
+        if (!type(record(pattern).operand))
             return false;
     }
     if (!bare_function_type(pattern))

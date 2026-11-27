@@ -36,18 +36,12 @@ bool itanium_mangler::expression_of_structure(uint32_t s)
     if (tag == sa::tag_literal + (uint32_t)literal_kind::integer_literal ||
         tag == sa::tag_literal + (uint32_t)literal_kind::character_literal ||
         tag == sa::tag_literal + (uint32_t)literal_kind::boolean_literal) {
-        enc.write(terminal::expr_primary);
-        if (!builtin_type(static_cast<fundamental_type>(a)))
-            return false;
-        enc.number(word);
-        enc.write(terminal::end);
-        return true;
+        return expr_primary_value(static_cast<fundamental_type>(a), false,
+                                  word);
     }
     if (tag == sa::tag_literal + (uint32_t)literal_kind::pointer_literal) {
         /* [abi:mangling.literal]: nullptr is its type alone */
-        enc.write(terminal::expr_primary);
-        enc.builtin_type(fundamental_type::std_nullptr_t);
-        enc.write(terminal::end);
+        expr_primary_nullptr();
         return true;
     }
     if (tag != sa::tag_node)

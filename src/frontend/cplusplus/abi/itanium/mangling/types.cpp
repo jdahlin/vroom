@@ -227,18 +227,8 @@ bool itanium_mangler::class_enum_type(qualified_type t)
  */
 bool itanium_mangler::bare_function_type(qualified_type t)
 {
-    struct part_scope {
-        const char *&part;
-        const char *saved;
-        part_scope(const char *&p, const char *now) : part(p), saved(p)
-        {
-            part = now;
-        }
-        ~part_scope()
-        {
-            part = saved;
-        }
-    } in_types(mangling_part, "the parameter or return types");
+    scoped_value<const char *> in_types(mangling_part,
+                                        "the parameter or return types");
     const struct type &f = record(t);
     if (f.kind != type_kind::function)
         return false;
@@ -608,13 +598,15 @@ bool itanium_mangler::type_of_written(qualified_type t,
         enc.write(terminal::decltype_entity);
     else
         enc.write(terminal::decltype_expression);
-    uint32_t saved_first = written_first, saved_count = written_count;
-    written_first = analysis.entity_table[w].first_member;
-    written_count = analysis.entity_table[w].member_count;
-    bool done = expression_of_written(operand);
-    pack_element = UINT32_MAX;
-    written_first = saved_first;
-    written_count = saved_count;
+    bool done = false;
+    {
+        scoped_value<uint32_t> first(written_first,
+                                     analysis.entity_table[w].first_member);
+        scoped_value<uint32_t> count(written_count,
+                                     analysis.entity_table[w].member_count);
+        done = expression_of_written(operand);
+        pack_element = UINT32_MAX;
+    }
     enc.write(terminal::end);
     if (!done)
         return refuse(type_kind_description(type_kind::dependent));

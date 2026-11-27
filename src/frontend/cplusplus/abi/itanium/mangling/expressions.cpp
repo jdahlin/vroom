@@ -46,10 +46,8 @@ bool itanium_mangler::expr_primary_of_variable(entity_index t,
     }
     if (!target || analysis.entity_table[target].kind != entity_kind::variable)
         return false;
-    enc.write(terminal::external_name);
-    if (!encoding(target))
+    if (!expr_primary_external(target))
         return false;
-    enc.write(terminal::end);
     return true;
 }
 
@@ -109,13 +107,8 @@ bool itanium_mangler::expr_primary_of_enumerator(entity_index e)
     qualified_type of = analysis.entity_table[e].type;
     uint64_t magnitude = 0;
     bool negative = analysis.enumerator_value(e, magnitude);
-    enc.write(terminal::expr_primary);
-    if (!type(of))
+    if (!expr_primary_value(of, negative, magnitude))
         return false;
-    if (negative)
-        enc.write(terminal::negative);
-    enc.number(magnitude);
-    enc.write(terminal::end);
     return true;
 }
 
@@ -189,14 +182,89 @@ bool itanium_mangler::expr_primary_of_integer_literal(token_index token)
             unsigned bits = widths[rank] - 1 + u;
             if (bits < 64 && value >> bits)
                 continue;
-            enc.write(terminal::expr_primary);
-            builtin_type(ranks[rank * 2 + u]);
-            enc.number(value);
-            enc.write(terminal::end);
+            expr_primary_value(ranks[rank * 2 + u], false, value);
             return true;
         }
     }
     return false;
+}
+
+/*
+ * The shapes the four sources of expressions (expressions-*.cpp) share.
+ * [abi:expressions]:
+ *
+ *     <expr-primary> ::= L _Z <encoding> E
+ *
+ * an object or function named by its external name.
+ */
+bool itanium_mangler::expr_primary_external(entity_index e)
+{
+    enc.write(terminal::external_name);
+    if (!encoding(e))
+        return false;
+    enc.write(terminal::end);
+    return true;
+}
+
+/*
+ * [abi:expressions]:
+ *
+ *     <expr-primary> ::= L <type> <value number> E
+ *
+ * [abi:mangling.literal]: the value in decimal, n before a negative one's
+ * magnitude (a bool's 0 or 1).
+ */
+bool itanium_mangler::expr_primary_value(qualified_type t, bool negative,
+                                         uint64_t magnitude)
+{
+    enc.write(terminal::expr_primary);
+    if (!type(t))
+        return false;
+    enc.value_number(negative, magnitude);
+    enc.write(terminal::end);
+    return true;
+}
+
+bool itanium_mangler::expr_primary_value(fundamental_type t, bool negative,
+                                         uint64_t magnitude)
+{
+    enc.write(terminal::expr_primary);
+    if (!builtin_type(t))
+        return false;
+    enc.value_number(negative, magnitude);
+    enc.write(terminal::end);
+    return true;
+}
+
+/* [abi:expressions] <expr-primary> ::= L <nullptr type> E, nullptr's
+   ([abi:mangling.literal]: its type alone) */
+void itanium_mangler::expr_primary_nullptr()
+{
+    enc.write(terminal::expr_primary);
+    builtin_type(fundamental_type::std_nullptr_t);
+    enc.write(terminal::end);
+}
+
+/* [abi:mangle.function-param]:
+
+       <function-param> ::= fp <top-level CV-qualifiers> _
+                        ::= fp <top-level CV-qualifiers> <parameter-2 non-negative number> _
+
+   the parameter at position (from 1), no CV-qualifiers */
+void itanium_mangler::function_param(uint32_t position)
+{
+    enc.write(terminal::function_param);
+    if (position > 1)
+        enc.number(position - 2);
+    enc.write(terminal::underscore);
+}
+
+/* [abi:expressions] <expression> ::= sZ <template-param>, sizeof... of a
+   parameter pack */
+void itanium_mangler::sizeof_pack(uint64_t position)
+{
+    enc.write(terminal::sizeof_pack);
+    template_param(position);
 }
 
 } // namespace cplusplus

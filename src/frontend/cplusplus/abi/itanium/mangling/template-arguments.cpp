@@ -115,11 +115,9 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
                 analysis.dependent_parameter_type(function, i, declared)) {
                 enc.write(terminal::pack_parameter_decl);
                 enc.write(terminal::non_type_parameter_decl);
-                const char *outer_part = mangling_part;
-                mangling_part = "a non-type template parameter's type";
-                bool typed = type(value_type);
-                mangling_part = outer_part;
-                if (!typed)
+                scoped_value<const char *> in_type(
+                    mangling_part, "a non-type template parameter's type");
+                if (!type(value_type))
                     return false;
             }
         } else if (function &&
@@ -128,11 +126,9 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
                 return refuse("a non-type template parameter pack of a "
                               "dependent type");
             enc.write(terminal::non_type_parameter_decl);
-            const char *outer_part = mangling_part;
-            mangling_part = "a non-type template parameter's type";
-            bool typed = non_type_parameter_type(c, i, declared);
-            mangling_part = outer_part;
-            if (!typed)
+            scoped_value<const char *> in_type(
+                mangling_part, "a non-type template parameter's type");
+            if (!non_type_parameter_type(c, i, declared))
                 return false;
         }
         /* [impl.clang]: a type-parameter with a type-constraint, "Tk"
@@ -313,17 +309,8 @@ bool itanium_mangler::template_template_arg(entity_index t, uint32_t parameter)
 
 bool itanium_mangler::template_arg_of_dependent_value(entity_index d)
 {
-    struct depth_scope {
-        uint32_t &depth;
-        explicit depth_scope(uint32_t &d) : depth(d)
-        {
-            depth++;
-        }
-        ~depth_scope()
-        {
-            depth--;
-        }
-    } in_value(dependent_value_depth);
+    scoped_value<uint32_t> in_value(dependent_value_depth,
+                                    dependent_value_depth + 1);
     if (!analysis.entity_table[d].value) {
         /* an expression kept as written (dependent_value_entity): X
            <expression> E, the names an alias template bound in it as
@@ -335,9 +322,10 @@ bool itanium_mangler::template_arg_of_dependent_value(entity_index d)
             return false;
         SyntaxRef n = SyntaxRef(node_index(
             static_cast<uint32_t>(analysis.entity_table[w.entity].value)));
-        uint32_t saved_first = written_first, saved_count = written_count;
-        written_first = analysis.entity_table[w.entity].first_member;
-        written_count = analysis.entity_table[w.entity].member_count;
+        scoped_value<uint32_t> first(
+            written_first, analysis.entity_table[w.entity].first_member);
+        scoped_value<uint32_t> count(
+            written_count, analysis.entity_table[w.entity].member_count);
         bool done = false;
         bool pattern = false;
         /* a pack expansion whose pattern is a type: <type>, Dp */
@@ -355,8 +343,6 @@ bool itanium_mangler::template_arg_of_dependent_value(entity_index d)
             done = expression_of_written(n);
             enc.write(terminal::end);
         }
-        written_first = saved_first;
-        written_count = saved_count;
         return done;
     }
     enc.write(terminal::template_arg_expression);
@@ -412,10 +398,8 @@ bool itanium_mangler::template_arg_of(entity_index c, uint32_t i,
             if (!type(object.operand))
                 return false;
         }
-        enc.write(terminal::external_name);
-        if (!encoding(named))
+        if (!expr_primary_external(named))
             return false;
-        enc.write(terminal::end);
         if (element_of)
             enc.write(terminal::end);
         if (!reference)
@@ -446,20 +430,13 @@ bool itanium_mangler::template_arg_of(entity_index c, uint32_t i,
            the <expr-primary> below, L <type> 0 E */
         enc.write(terminal::template_arg_expression);
         enc.write(itanium_operator::address_of);
-        enc.write(terminal::external_name);
-        if (!encoding(static_cast<entity_index>(v)))
+        if (!expr_primary_external(static_cast<entity_index>(v)))
             return false;
-        enc.write(terminal::end);
         enc.write(terminal::end);
         return true;
     }
-    enc.write(terminal::expr_primary);
-    if (!type(of))
+    if (!expr_primary_value(of, negative, v))
         return false;
-    if (negative)
-        enc.write(terminal::negative);
-    enc.number(v);
-    enc.write(terminal::end);
     return true;
 }
 
