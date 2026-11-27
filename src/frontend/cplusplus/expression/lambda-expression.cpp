@@ -591,6 +591,13 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
     entity_table.bind(c, call_name, f);
     entity_table[c].call_operator = f;
     l.call = f;
+    r = lambda_default_arguments(n, f, parameters);
+    if (r != analysis_result::well_formed) {
+        entity_table[c].kind = entity_kind::none;
+        note_held(c);
+        lambda_captures.resize(l.first_capture);
+        return r;
+    }
 
     owned_array<capture_record> captures;
     r = lambda_body(n, body, l, parameters, captures);
@@ -614,6 +621,60 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
         member_closures.append(k);
     }
     return closure_object(l, captures, m);
+}
+
+/*
+ * [dcl.fct.default]/3: the default arguments of a non-generic lambda's
+ * function call operator f.  One that names a local entity or this is not
+ * analysed here (/8, [dcl.fct.default]/9: mostly ill-formed).
+ */
+analysis_result semantic_analysis::lambda_default_arguments(
+    SyntaxRef n, entity_index f, const owned_array<parameter_meaning> &list)
+{
+    bool any = false;
+    for (const parameter_meaning &p : list) {
+        if (!p.default_argument)
+            continue;
+        any = true;
+        SyntaxRef clause = node_of(p.default_argument);
+        token_index first = clause.first_token();
+        token_index end = clause.end_token();
+        if (p.default_argument.is_token()) {
+            first = p.default_argument.token();
+            end = first + 1;
+        }
+        for (token_index t = first; t < end; t++) {
+            if (tokens[t].kind == token_kind::keyword &&
+                syntax_parser.keyword_of(tokens[t]) == standard_keyword::this_)
+                return not_supported_because(n, "dcl.fct.default",
+                                             "a lambda's default argument "
+                                             "naming this");
+            if (tokens[t].kind != token_kind::identifier)
+                continue;
+            lookup_result found =
+                lookup_unqualified(tokens.identifier(t), lookup_filter::any);
+            if (!found.entity)
+                continue;
+            const entity &x = entity_table[found.entity];
+            if ((x.kind == entity_kind::variable ||
+                 x.kind == entity_kind::structured_binding) &&
+                !is_namespace(x.enclosing) &&
+                entity_table[x.enclosing].kind != entity_kind::class_type)
+                return not_supported_because(n, "dcl.fct.default",
+                                             "a lambda's default argument "
+                                             "naming a local variable");
+        }
+    }
+    if (!any)
+        return analysis_result::well_formed;
+    owned_array<parameter_meaning> saved =
+        static_cast<owned_array<parameter_meaning> &&>(function_parameters);
+    function_parameters.clear();
+    for (const parameter_meaning &p : list)
+        function_parameters.append(p);
+    analysis_result r = default_arguments(n, f, entity_kind::function, true);
+    function_parameters = static_cast<owned_array<parameter_meaning> &&>(saved);
+    return r;
 }
 
 /* whether an identifier of part is the name of an init-capture of l */
@@ -778,11 +839,6 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
     for (const parameter_meaning &parameter : parameters) {
         if (r != analysis_result::well_formed)
             break;
-        /* a default argument ([dcl.fct.default]) */
-        if (parameter.default_argument)
-            r = not_supported_because(
-                n, "dcl.fct.default",
-                "a default argument in a lambda parameter");
         /* [expr.prim.lambda.capture]/5: "If an identifier in a
            simple-capture appears as the declarator-id of a parameter of the
            lambda-declarator's parameter-declaration-clause, the program is
@@ -940,6 +996,11 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
     owned_array<parameter_meaning> call_parameters;
     r = lambda_call_type(n, declarator, l, type, call_parameters);
     current_scope = outer;
+    for (const parameter_meaning &x : call_parameters)
+        if (r == analysis_result::well_formed && x.default_argument)
+            r = not_supported_because(n, "dcl.fct.default",
+                                      "a default argument in a generic "
+                                      "lambda's parameter");
     expressions.resize(expressions_before);
     name_uses.resize(uses_before);
     if (r != analysis_result::well_formed)
@@ -1067,6 +1128,11 @@ analysis_result semantic_analysis::lambda_specialization(
                                                l.enclosing_this);
         r = lambda_call_type(n, declarator, l, type, parameters);
     }
+    for (const parameter_meaning &x : parameters)
+        if (r == analysis_result::well_formed && x.default_argument)
+            r = not_supported_because(n, "dcl.fct.default",
+                                      "a default argument in a generic "
+                                      "lambda's parameter");
     if (r != analysis_result::well_formed || !body) {
         lambda_captures.resize(l.first_capture);
         return r;

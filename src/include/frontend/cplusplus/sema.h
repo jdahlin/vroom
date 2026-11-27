@@ -3675,6 +3675,9 @@ class semantic_analysis
                                                expression_meaning &m);
     bool names_init_capture(SyntaxElement part, const lambda_context &l) const;
     analysis_result
+    lambda_default_arguments(SyntaxRef n, entity_index f,
+                             const owned_array<parameter_meaning> &list);
+    analysis_result
     lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                      qualified_type &type,
                      owned_array<parameter_meaning> &parameters);
