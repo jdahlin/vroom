@@ -709,8 +709,10 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     } else if (init.is(syntax_kind::braced_init_list) && !value_initialized) {
         r = list_initialization(init, type, true, value);
     } else if (init.is(syntax_kind::new_initializer) || value_initialized) {
+        /* (a lone braced-init-list is no initializer-list node) */
         bool has_list =
-            init.size() == 3 && init[1].is(syntax_kind::initializer_list);
+            init.size() == 3 && (init[1].is(syntax_kind::initializer_list) ||
+                                 init[1].is(syntax_kind::braced_init_list));
         owned_array<expression_meaning> list;
         /* [over.best.ics]/1: a braced-init-list argument of a constructor,
            converted by [over.ics.list], kept as written; as in a
