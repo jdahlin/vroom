@@ -745,6 +745,13 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
                                          .type.unqualified()]
                               .entity;
         entity_index one = class_member_lookup(of, name, ambiguous);
+        /* [class.pre]/2: a base's injected-class-name is a member of it
+           (not of a specialization's here: before '<' it is the
+           template's, [temp.local]/1) */
+        const entity &b = entity_table[of];
+        if (!one && b.name == name && b.kind == entity_kind::class_type &&
+            !b.instantiation)
+            one = of;
         if (one && found && one != found)
             ambiguous = true;
         if (one)
