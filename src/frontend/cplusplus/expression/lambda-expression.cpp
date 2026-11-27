@@ -505,6 +505,10 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
     } else if (initialized_member && !current_lambda()) {
         member = initialized_member;
         scope = entity_table[member].enclosing;
+    } else if (defining_class && !current_lambda() && !function_state.active) {
+        /* [basic.scope.class]: a lambda-expression in a member-specification
+           (e.g. a static data member's initializer) is in the class's scope */
+        scope = defining_class;
     }
     /* the key of the closures kept: the member's, or a deduction's */
     uint32_t kept_key = member;
