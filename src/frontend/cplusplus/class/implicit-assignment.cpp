@@ -481,6 +481,40 @@ semantic_analysis::implicit_assignment_definitions(entity_index c, SyntaxRef n)
     return analysis_result::well_formed;
 }
 
+/*
+ * [dcl.fct.def.default]/5: a copy or move assignment operator f defaulted
+ * after its first declaration (X& X::operator=(const X&) = default; outside
+ * the class) is user-provided; its definition n is the implicit one's
+ * ([class.copy.assign]/12).
+ */
+analysis_result
+semantic_analysis::defaulted_assignment_definition(SyntaxRef n, entity_index f)
+{
+    entity_index c = entity_table[f].enclosing;
+    if (entity_table[c].kind != entity_kind::class_type ||
+        (!copy_assignment_operator(f, c) && !move_assignment_operator(f, c)))
+        return not_supported_because(
+            n, "dcl.fct.def.default",
+            "an out-of-class default of a function that is no copy or move "
+            "assignment operator");
+    if (entity_table[c].union_ || entity_table[c].virtual_base_count)
+        return not_supported_because(
+            n, "class.copy.assign",
+            "a defaulted assignment of a union or a class with virtual bases");
+    qualified_type returns = qualified_type::make(
+        type_table.lvalue_reference_to(
+            qualified_type::make(entity_table[c].type.unqualified(), cv_none)),
+        cv_none);
+    qualified_type declared = qualified_type::make(
+        type_table[entity_table[f].type.unqualified()].operand.unqualified(),
+        cv_none);
+    if (!(declared == returns))
+        return not_supported_because(
+            n, "dcl.fct.def.default",
+            "a defaulted assignment whose return type is not X&");
+    return implicit_assignment_body(c, n, f, returns);
+}
+
 /* the body of implicit assignment operator f of class c: each subobject
    assigned, then return *this */
 analysis_result semantic_analysis::implicit_assignment_body(

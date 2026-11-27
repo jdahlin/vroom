@@ -5107,6 +5107,8 @@ class semantic_analysis
     analysis_result implicit_assignments(entity_index c);
     analysis_result implicit_assignment_definitions(entity_index c,
                                                     SyntaxRef n);
+    analysis_result defaulted_assignment_definition(SyntaxRef n,
+                                                    entity_index f);
     analysis_result implicit_assignment_body(entity_index c, SyntaxRef n,
                                              entity_index f,
                                              qualified_type returns);
