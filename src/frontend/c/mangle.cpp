@@ -112,11 +112,11 @@ static void cc_mangle_type(cc *c, cc_mangler *m, ast_qualified_type t)
     if (q) {
         /* <qualified-type>, <CV-qualifiers> ::= [r] [V] [K] */
         if (q & AST_QUALIFIER_RESTRICT)
-            m->out.write(terminal::restrict_qualifier);
+            m->out.write(terminal::r_restrict_qualifier);
         if (q & AST_QUALIFIER_VOLATILE)
-            m->out.write(terminal::volatile_qualifier);
+            m->out.write(terminal::V_volatile_qualifier);
         if (q & AST_QUALIFIER_CONST)
-            m->out.write(terminal::const_qualifier);
+            m->out.write(terminal::K_const_qualifier);
         cc_mangle_type(c, m, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
         cc_mangle_substitution_add(m, t);
         return;
@@ -124,18 +124,18 @@ static void cc_mangle_type(cc *c, cc_mangler *m, ast_qualified_type t)
     x = AST_TYPE(c, t);
     switch (k) {
     case AST_TYPE_POINTER:
-        m->out.write(terminal::pointer);
+        m->out.write(terminal::P_pointer);
         cc_mangle_type(c, m, x->base);
         break;
     case AST_TYPE_ARRAY:
-        m->out.write(terminal::array_type);
+        m->out.write(terminal::A_array_type);
         if (!(x->flags & (AST_TYPE_FLAG_INCOMPLETE | AST_TYPE_FLAG_VLA)))
             m->out.number(x->n);
         m->out.write(terminal::underscore);
         cc_mangle_type(c, m, x->base);
         break;
     case AST_TYPE_FUNCTION:
-        m->out.write(terminal::function_type);
+        m->out.write(terminal::F_function_type);
         cc_mangle_type(c, m, x->base);
         if (!x->n && !(x->flags & AST_TYPE_FLAG_VARIADIC))
             m->out.write(itanium::builtin::void_);
@@ -143,8 +143,8 @@ static void cc_mangle_type(cc *c, cc_mangler *m, ast_qualified_type t)
             cc_mangle_type(
                 c, m, AST_QUALIFIED_TYPE_UNQUALIFIED(c->params[x->aux + i]));
         if (x->flags & AST_TYPE_FLAG_VARIADIC)
-            m->out.write(terminal::ellipsis);
-        m->out.write(terminal::end);
+            m->out.write(terminal::z_ellipsis);
+        m->out.write(terminal::E_end);
         break;
     default: { /* struct, union, enum */
         const tag *r = &c->tags[x->aux];
@@ -153,7 +153,7 @@ static void cc_mangle_type(cc *c, cc_mangler *m, ast_qualified_type t)
         if (id) {
             cc_mangle_source_name(m, id);
         } else {
-            m->out.write(terminal::unnamed_type);
+            m->out.write(terminal::Ut_unnamed_type);
             m->out.write(terminal::underscore);
         }
         break;
@@ -176,9 +176,9 @@ static uint32_t cc_mangle_overload(cc *c, uint32_t s)
     vbuffer_fixed(&b, storage, sizeof(storage));
     b.flags |= VBUFFER_STICKY;
     cc_mangler m(&b);
-    m.out.write(terminal::mangled_name);
+    m.out.write(terminal::underscore_Z_mangled_name);
     if (y->sc == AST_STORAGE_STATIC)
-        m.out.write(terminal::internal_linkage);
+        m.out.write(terminal::L_internal_linkage);
     cc_mangle_source_name(&m, y->name);
     if (!f->n && !(f->flags & AST_TYPE_FLAG_VARIADIC))
         m.out.write(itanium::builtin::void_);
@@ -186,7 +186,7 @@ static uint32_t cc_mangle_overload(cc *c, uint32_t s)
         cc_mangle_type(c, &m,
                        AST_QUALIFIED_TYPE_UNQUALIFIED(c->params[f->aux + i]));
     if (f->flags & AST_TYPE_FLAG_VARIADIC)
-        m.out.write(terminal::ellipsis);
+        m.out.write(terminal::z_ellipsis);
     if (b.failed)
         return 0;
     keep = (char *)cc_heap_allocate(c, b.n + 1);

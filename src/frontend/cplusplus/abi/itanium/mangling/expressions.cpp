@@ -215,10 +215,10 @@ void itanium_mangler::template_argument_elements(
  */
 bool itanium_mangler::expr_primary_external(entity_index e)
 {
-    enc.write(terminal::external_name);
+    enc.write(terminal::L_Z_external_name);
     if (!encoding(e))
         return false;
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
     return true;
 }
 
@@ -233,14 +233,14 @@ bool itanium_mangler::expr_primary_external(entity_index e)
 bool itanium_mangler::expr_primary_value(qualified_type t, bool negative,
                                          uint64_t magnitude)
 {
-    enc.write(terminal::expr_primary);
+    enc.write(terminal::L_expr_primary);
     return type(t) && expr_primary_end(negative, magnitude);
 }
 
 bool itanium_mangler::expr_primary_value(fundamental_type t, bool negative,
                                          uint64_t magnitude)
 {
-    enc.write(terminal::expr_primary);
+    enc.write(terminal::L_expr_primary);
     return builtin_type(t) && expr_primary_end(negative, magnitude);
 }
 
@@ -248,7 +248,7 @@ bool itanium_mangler::expr_primary_value(fundamental_type t, bool negative,
 bool itanium_mangler::expr_primary_end(bool negative, uint64_t magnitude)
 {
     enc.value_number(negative, magnitude);
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
     return true;
 }
 
@@ -256,9 +256,9 @@ bool itanium_mangler::expr_primary_end(bool negative, uint64_t magnitude)
    ([abi:mangling.literal]: its type alone) */
 void itanium_mangler::expr_primary_nullptr()
 {
-    enc.write(terminal::expr_primary);
+    enc.write(terminal::L_expr_primary);
     builtin_type(fundamental_type::std_nullptr_t);
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
 }
 
 /* [abi:mangle.function-param]:
@@ -269,7 +269,7 @@ void itanium_mangler::expr_primary_nullptr()
    the parameter at position (from 1), no CV-qualifiers */
 void itanium_mangler::function_param(uint32_t position)
 {
-    enc.write(terminal::function_param);
+    enc.write(terminal::fp_function_param);
     if (position > 1)
         enc.number(position - 2);
     enc.write(terminal::underscore);
@@ -279,7 +279,7 @@ void itanium_mangler::function_param(uint32_t position)
    parameter pack */
 void itanium_mangler::sizeof_pack(uint64_t position)
 {
-    enc.write(terminal::sizeof_pack);
+    enc.write(terminal::sZ_sizeof_pack);
     template_param(position);
 }
 

@@ -20,13 +20,13 @@ namespace cplusplus
  */
 bool itanium_mangler::nested_name_of_dependent_member(entity_index e)
 {
-    enc.write(terminal::nested_name);
+    enc.write(terminal::N_nested_name);
     if (!prefix_of_dependent_member(
             static_cast<type_index>(analysis.entity_table[e].value)))
         return false;
     if (!source_name(analysis.entity_table[e].name))
         return false;
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
     return true;
 }
 
@@ -121,11 +121,11 @@ bool itanium_mangler::class_enum_type(qualified_type t)
            with the <template-prefix> a <substitution> */
         size_t seen = candidate_of(analysis.specialized_template(c));
         if (seen != no_candidate) {
-            enc.write(terminal::nested_name);
+            enc.write(terminal::N_nested_name);
             enc.substitution(seen);
             if (!template_args(c))
                 return false;
-            enc.write(terminal::end);
+            enc.write(terminal::E_end);
             return true;
         }
     } else if (x.instantiation &&
@@ -163,7 +163,7 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         size_t length = 0;
         const char *identifier = spelling(x.name, &length);
         if (length == 9 && !memcmp(identifier, "allocator", 9)) {
-            enc.write(terminal::std_allocator);
+            enc.write(terminal::Sa_std_allocator);
             return template_args(c);
         }
         /* <substitution> ::= Ss # std::basic_string<char,
@@ -175,12 +175,12 @@ bool itanium_mangler::class_enum_type(qualified_type t)
            basic_string is Sb and its arguments, another stream its
            name */
         terminal whole = std_substitution(c);
-        if (whole != terminal::end) {
+        if (whole != terminal::E_end) {
             enc.write(whole);
             return true;
         }
         if (length == 12 && !memcmp(identifier, "basic_string", 12)) {
-            enc.write(terminal::std_basic_string);
+            enc.write(terminal::Sb_std_basic_string);
             return template_args(c);
         }
     }
@@ -201,14 +201,14 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         return false;
     /* <nested-name>: the prefix and the name; the type as a whole is the
        candidate type() adds */
-    enc.write(terminal::nested_name);
+    enc.write(terminal::N_nested_name);
     if (!prefix(x.enclosing))
         return false;
     if (!unqualified_name(c))
         return false;
     if (!class_template_args(c))
         return false;
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
     if (local)
         local_class_discriminator(local_class, local);
     return true;
@@ -238,7 +238,7 @@ bool itanium_mangler::bare_function_type(qualified_type t)
         if (!type(parameters[i]))
             return false;
     if (f.variadic)
-        enc.write(terminal::ellipsis);
+        enc.write(terminal::z_ellipsis);
     else if (!f.parameter_count)
         enc.builtin_type(fundamental_type::void_);
     return true;
@@ -277,7 +277,7 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
         /* [impl.clang] a substitution candidate itself */
         if (substitution(t, member_class))
             return true;
-        enc.write(terminal::substituted_pack);
+        enc.write(terminal::underscore_SUBSTPACK_substituted_pack);
         add_candidate(t);
         return true;
     }
@@ -364,32 +364,32 @@ bool itanium_mangler::type_alternative(qualified_type t,
     switch (r.kind) {
     /* [abi:mangling-type] <type> ::= P <type> */
     case type_kind::pointer:
-        enc.write(terminal::pointer);
+        enc.write(terminal::P_pointer);
         return type(r.operand);
     /* [abi:mangling-type] <type> ::= R <type> */
     case type_kind::lvalue_reference:
-        enc.write(terminal::lvalue_reference);
+        enc.write(terminal::R_lvalue_reference);
         return type(r.operand);
     /* [abi:mangling-type] <type> ::= O <type> */
     case type_kind::rvalue_reference:
-        enc.write(terminal::rvalue_reference);
+        enc.write(terminal::O_rvalue_reference);
         return type(r.operand);
     /* [abi:mangling-type] <type> ::= C <type>  # complex pair (C99) */
     case type_kind::complex:
-        enc.write(terminal::complex_pair);
+        enc.write(terminal::C_complex_pair);
         return type(r.operand);
     case type_kind::pointer_to_member:
         return pointer_to_member_type(t);
     case type_kind::block_pointer:
         /* [abi:mangling-type]'s vendor extended type qualifier, as clang
            mangles a block pointer ([ext:clang_blocks]) */
-        enc.write(terminal::vendor_qualifier);
+        enc.write(terminal::U_vendor_qualifier);
         enc.source_name("block_pointer");
         return type(r.operand);
     case type_kind::atomic:
         /* [abi:mangling-type]'s vendor extended type qualifier, as clang
            mangles _Atomic(T) ([ext:clang_atomic]) */
-        enc.write(terminal::vendor_qualifier);
+        enc.write(terminal::U_vendor_qualifier);
         enc.source_name("_Atomic");
         return type(r.operand);
     case type_kind::bit_int:
@@ -399,7 +399,7 @@ bool itanium_mangler::type_alternative(qualified_type t,
 
                <type> ::= Dp <type>
         */
-        enc.write(terminal::pack_expansion);
+        enc.write(terminal::Dp_pack_expansion);
         return type(r.operand);
     case type_kind::function:
         /* [abi:mangling-type] <type> ::= <function-type> */
@@ -440,7 +440,7 @@ bool itanium_mangler::va_list_type(qualified_type t)
     if (substitution(t))
         return true;
     if (record(t).fundamental == fundamental_type::builtin_va_list) {
-        enc.write(terminal::std_prefix);
+        enc.write(terminal::St_std_prefix);
         enc.source_name("__va_list");
     } else
         enc.source_name("__va_list_tag");
@@ -460,9 +460,9 @@ bool itanium_mangler::va_list_type(qualified_type t)
 bool itanium_mangler::placeholder_type(const struct type &r)
 {
     static const terminal codes[2][2] = {
-        {terminal::auto_type, terminal::decltype_auto_type},
-        {terminal::constrained_auto_type,
-         terminal::constrained_decltype_auto_type}};
+        {terminal::Da_auto_type, terminal::Dc_decltype_auto_type},
+        {terminal::Dk_constrained_auto_type,
+         terminal::DK_constrained_decltype_auto_type}};
     entity_index constraint = r.entity >> 2;
     enc.write(codes[constraint != 0][(r.entity & 3) == 2]);
     return !constraint || name(constraint);
@@ -477,7 +477,7 @@ bool itanium_mangler::placeholder_type(const struct type &r)
 bool itanium_mangler::pointer_to_member_type(qualified_type t)
 {
     const struct type &r = record(t);
-    enc.write(terminal::pointer_to_member);
+    enc.write(terminal::M_pointer_to_member);
     type_index cls = analysis.entity_table[r.entity].type.unqualified();
     bool class_ok = false;
     if (cls) {
@@ -519,9 +519,9 @@ bool itanium_mangler::pointer_to_member_type(qualified_type t)
 bool itanium_mangler::bit_int_type(const struct type &r)
 {
     if (r.fundamental == fundamental_type::unsigned_int)
-        enc.write(terminal::unsigned_bit_int);
+        enc.write(terminal::DU_unsigned_bit_int);
     else
-        enc.write(terminal::bit_int);
+        enc.write(terminal::DB_bit_int);
     if (r.entity)
         template_param(analysis.entity_table[r.entity].value);
     else
@@ -535,7 +535,7 @@ bool itanium_mangler::bit_int_type(const struct type &r)
    the element type */
 bool itanium_mangler::vector_type(const struct type &r)
 {
-    enc.write(terminal::vector);
+    enc.write(terminal::Dv_vector);
     if (r.entity)
         template_param(analysis.entity_table[r.entity].value);
     else
@@ -553,14 +553,14 @@ bool itanium_mangler::vector_type(const struct type &r)
 bool itanium_mangler::type_transformation(const struct type &r)
 {
     uint64_t operand = analysis.entity_table[r.entity].value;
-    enc.write(terminal::vendor_type);
+    enc.write(terminal::u_vendor_type);
     bool done = source_name(analysis.entity_table[r.entity].name);
     if (done) {
-        enc.write(terminal::template_args);
+        enc.write(terminal::I_template_args);
         done = type(
             qualified_type::make(static_cast<type_index>(operand & 0xffffffffu),
                                  static_cast<uint32_t>(operand >> 32)));
-        enc.write(terminal::end);
+        enc.write(terminal::E_end);
     }
     return done;
 }
@@ -595,9 +595,9 @@ bool itanium_mangler::type_of_written(qualified_type t,
         (punctuator(operand[1], preprocessing_op_or_punc::DOT) ||
          punctuator(operand[1], preprocessing_op_or_punc::ARROW));
     if (operand.is_token() || member_access)
-        enc.write(terminal::decltype_entity);
+        enc.write(terminal::Dt_decltype_entity);
     else
-        enc.write(terminal::decltype_expression);
+        enc.write(terminal::DT_decltype_expression);
     bool done = false;
     {
         scoped_value<uint32_t> first(written_first,
@@ -607,7 +607,7 @@ bool itanium_mangler::type_of_written(qualified_type t,
         done = expression_of_written(operand);
         pack_element = UINT32_MAX;
     }
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
     if (!done)
         return refuse(type_kind_description(type_kind::dependent));
     add_candidate(t, member_class);
@@ -630,11 +630,11 @@ bool itanium_mangler::typename_of_written(qualified_type t, SyntaxRef n)
     if (first == wc || !id[0].is_identifier())
         return false;
     const auto &q = analysis.written_bindings[wf + first];
-    enc.write(terminal::nested_name);
+    enc.write(terminal::N_nested_name);
     if (!prefix_of_dependent_member(q.type.unqualified()) ||
         !source_name(analysis.token_identifier(id[0].token())))
         return false;
-    enc.write(terminal::template_args);
+    enc.write(terminal::I_template_args);
     for (uint32_t i = first + 1; i < wc; i++) {
         const auto &a = analysis.written_bindings[wf + i];
         if (a.cast != n.index().index())
@@ -642,8 +642,8 @@ bool itanium_mangler::typename_of_written(qualified_type t, SyntaxRef n)
         if (!type(a.type))
             return false;
     }
-    enc.write(terminal::end);
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
+    enc.write(terminal::E_end);
     add_candidate(t);
     return true;
 }
@@ -670,14 +670,14 @@ bool itanium_mangler::make_integer_seq_of_written(qualified_type t)
         builtin.scope = UINT32_MAX;
         enc.add_candidate(builtin);
     }
-    enc.write(terminal::template_args);
+    enc.write(terminal::I_template_args);
     if (!template_template_arg(parts[0]->specialization, 0) ||
         !type(parts[1]->type))
         return false;
-    enc.write(terminal::template_arg_expression);
+    enc.write(terminal::X_template_arg_expression);
     template_param(parts[2]->pack_position - 1);
-    enc.write(terminal::end);
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
+    enc.write(terminal::E_end);
     add_candidate(t);
     return true;
 }
@@ -723,7 +723,7 @@ bool itanium_mangler::builtin_type(fundamental_type t)
     /* [impl.clang] __bf16 on arm64: AAPCS64's vendor type, u <source-name>
        ([abi:mangling-builtin]'s vendor extended type) */
     if (t == fundamental_type::bfloat16 && !analysis.x86_64_target()) {
-        enc.write(terminal::vendor_type);
+        enc.write(terminal::u_vendor_type);
         enc.source_name("__bf16");
         return true;
     }
@@ -756,11 +756,11 @@ bool itanium_mangler::cv_qualified_type(qualified_type t)
 void itanium_mangler::cv_qualifiers(unsigned cv)
 {
     if (cv & cv_restrict)
-        enc.write(terminal::restrict_qualifier);
+        enc.write(terminal::r_restrict_qualifier);
     if (cv & cv_volatile)
-        enc.write(terminal::volatile_qualifier);
+        enc.write(terminal::V_volatile_qualifier);
     if (cv & cv_const)
-        enc.write(terminal::const_qualifier);
+        enc.write(terminal::K_const_qualifier);
 }
 
 /* [abi:mangle.qualified-type]:
@@ -772,9 +772,9 @@ void itanium_mangler::cv_qualifiers(unsigned cv)
 void itanium_mangler::ref_qualifier(int ref)
 {
     if (ref == 1)
-        enc.write(terminal::lvalue_ref_qualifier);
+        enc.write(terminal::R_lvalue_ref_qualifier);
     else if (ref == 2)
-        enc.write(terminal::rvalue_ref_qualifier);
+        enc.write(terminal::O_rvalue_ref_qualifier);
 }
 
 /*
@@ -792,15 +792,15 @@ bool itanium_mangler::function_type(qualified_type t)
     cv_qualifiers(function.function_cv & (cv_volatile | cv_const));
     /* <exception-spec> ::= Do  # non-throwing */
     if (function.non_throwing)
-        enc.write(terminal::non_throwing);
+        enc.write(terminal::Do_non_throwing);
 
-    enc.write(terminal::function_type);
+    enc.write(terminal::F_function_type);
     if (!type(function.operand))
         return false;
     if (!bare_function_type(t))
         return false;
     ref_qualifier(function.function_ref);
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
     return true;
 }
 
@@ -816,7 +816,7 @@ bool itanium_mangler::function_type(qualified_type t)
 bool itanium_mangler::array_type(qualified_type t)
 {
     const struct type &array = record(t);
-    enc.write(terminal::array_type);
+    enc.write(terminal::A_array_type);
     /* [abi:mangle.array-type]: an instantiation-dependent bound,
 
            <array-type> ::= A <instantiation-dependent array bound expression> _ <element type>

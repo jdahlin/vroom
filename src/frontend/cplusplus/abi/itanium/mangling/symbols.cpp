@@ -64,7 +64,7 @@ bool itanium_mangler::mangled_name(entity_index e)
         enc.unmangled(identifier, length);
         return true;
     }
-    enc.write(terminal::mangled_name);
+    enc.write(terminal::underscore_Z_mangled_name);
     return encoding(e);
 }
 
@@ -110,7 +110,7 @@ bool itanium_mangler::encoding(entity_index e)
             entity_index pattern = analysis.specialized_template(x.enclosing);
             if (!pattern)
                 return false;
-            enc.write(terminal::requires_clause);
+            enc.write(terminal::Q_requires_clause);
             return expression_of_constraint(pattern, part[1]);
         }
     }
@@ -160,7 +160,7 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
         local = local_function(e, &local_class);
         if (member && local && !local_name_scope(local))
             return false;
-        enc.write(terminal::nested_name);
+        enc.write(terminal::N_nested_name);
         if (member && x.nonstatic_member)
             member_cv_ref_qualifiers(x);
     }
@@ -172,7 +172,7 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
             if (!prefix(scope))
                 return false;
         } else if (scope) {
-            enc.write(terminal::std_prefix);
+            enc.write(terminal::St_std_prefix);
         }
         if (!unqualified_name(e))
             return false;
@@ -205,13 +205,13 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
     if (!arguments)
         return false;
     if (head_constraint) {
-        enc.write(terminal::requires_clause);
+        enc.write(terminal::Q_requires_clause);
         if (!expression_of_constraint(pattern_of, constraint))
             return false;
-        enc.write(terminal::end);
+        enc.write(terminal::E_end);
     }
     if (nested)
-        enc.write(terminal::end);
+        enc.write(terminal::E_end);
     if (local)
         local_class_discriminator(local_class, local);
     /* a variable template's specialization: <data name> */
@@ -239,7 +239,7 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
     else if ((constraint = analysis.template_trailing_constraint(pattern_of)))
         trailing = true;
     if (constraint && trailing) {
-        enc.write(terminal::requires_clause);
+        enc.write(terminal::Q_requires_clause);
         return expression_of_constraint(pattern_of, constraint);
     }
     return true;

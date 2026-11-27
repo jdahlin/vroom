@@ -75,7 +75,7 @@ bool itanium_mangler::expression_of_structure(uint32_t s)
     if (kind == syntax_kind::conditional_expression && count == 5 &&
         ops[1] == preprocessing_op_or_punc::QUESTION &&
         ops[3] == preprocessing_op_or_punc::COLON) {
-        enc.write(itanium_operator::conditional);
+        enc.write(itanium_operator::qu_conditional);
         return expression_of_structure(children[0]) &&
                expression_of_structure(children[2]) &&
                expression_of_structure(children[4]);

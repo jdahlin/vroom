@@ -101,7 +101,7 @@ class writer
     void value_number(bool negative, uint64_t magnitude)
     {
         if (negative)
-            write(terminal::negative);
+            write(terminal::n_negative);
         number(magnitude);
     }
     void signed_number(int64_t n)
@@ -162,7 +162,7 @@ class writer
        candidate i: S_ the first, S <i-1 in base 36> _ another */
     void substitution(size_t i)
     {
-        write(terminal::substitution);
+        write(terminal::S_substitution);
         if (i)
             seq_id(i - 1);
         write(terminal::underscore);

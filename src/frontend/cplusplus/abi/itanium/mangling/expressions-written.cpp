@@ -206,7 +206,7 @@ bool itanium_mangler::template_args_of_written(SyntaxElement id,
     bool saved_dependent = operand_dependent;
     operand_dependent = false;
     bool value_argument = false;
-    enc.write(terminal::template_args);
+    enc.write(terminal::I_template_args);
     owned_array<SyntaxElement> written;
     template_argument_elements(id, written);
     for (size_t k = 0; k < written.size(); k++) {
@@ -223,15 +223,15 @@ bool itanium_mangler::template_args_of_written(SyntaxElement id,
         }
         bool literal = a.is_token() && !a.is_identifier();
         if (!literal) {
-            enc.write(terminal::template_arg_expression);
+            enc.write(terminal::X_template_arg_expression);
             value_argument = true;
         }
         if (!expression_of_written(a))
             return false;
         if (!literal)
-            enc.write(terminal::end);
+            enc.write(terminal::E_end);
     }
-    enc.write(terminal::end);
+    enc.write(terminal::E_end);
     dependent = operand_dependent || value_argument;
     operand_dependent = saved_dependent || dependent;
     return true;
@@ -311,7 +311,7 @@ bool itanium_mangler::expression_list_of_written(SyntaxElement list)
             continue;
         if (i + 1 < items.size() &&
             items[i + 1].is(preprocessing_op_or_punc::ELLIPSIS))
-            enc.write(terminal::pack_expansion_expression);
+            enc.write(terminal::sp_pack_expansion_expression);
         if (!expression_of_written(items[i]))
             return false;
     }
@@ -369,7 +369,7 @@ itanium_mangler::vendor_type_trait_of_written(SyntaxElement expression)
         expression.size() >= 4 && expression[0].is_token()) {
         owned_buffer name;
         analysis.token_spelling(expression[0].token(), name.get());
-        enc.write(terminal::vendor_type);
+        enc.write(terminal::u_vendor_type);
         enc.source_name(name.data(), name.size());
         for (uint32_t i = 2; i + 1 < expression.size(); i++) {
             SyntaxElement a = expression[i];
@@ -386,7 +386,7 @@ itanium_mangler::vendor_type_trait_of_written(SyntaxElement expression)
             if (!type(b->type))
                 return written_form(false);
         }
-        enc.write(terminal::end);
+        enc.write(terminal::E_end);
         return written_form(true);
     }
     return form::none;
@@ -453,31 +453,31 @@ itanium_mangler::sizeof_of_written(SyntaxElement expression)
             of_type = operand.is(syntax_kind::type_id);
         }
         if (vendor) {
-            enc.write(terminal::vendor_type);
+            enc.write(terminal::u_vendor_type);
             enc.source_name("__alignof__");
             if (of_type) {
                 if (!type_operand_of_written(operand))
                     return written_form(false);
             } else {
-                enc.write(terminal::template_arg_expression);
+                enc.write(terminal::X_template_arg_expression);
                 if (!expression_of_written(operand))
                     return written_form(false);
-                enc.write(terminal::end);
+                enc.write(terminal::E_end);
             }
-            enc.write(terminal::end);
+            enc.write(terminal::E_end);
             return written_form(true);
         }
         if (of_type) {
             if (size)
-                enc.write(terminal::sizeof_type);
+                enc.write(terminal::st_sizeof_type);
             else
-                enc.write(terminal::alignof_type);
+                enc.write(terminal::at_alignof_type);
             return written_form(type_operand_of_written(operand));
         }
         if (size)
-            enc.write(terminal::sizeof_expression);
+            enc.write(terminal::sz_sizeof_expression);
         else
-            enc.write(terminal::alignof_expression);
+            enc.write(terminal::az_alignof_expression);
         return written_form(expression_of_written(operand));
     }
     return form::none;
@@ -537,7 +537,7 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
             const auto &b = analysis.written_bindings[written_first + i];
             if (b.cast != r.index().index())
                 continue;
-            enc.write(terminal::cast);
+            enc.write(terminal::cv_cast);
             return written_form(type(b.type) &&
                                 expression_of_written(expression[3]));
         }
@@ -555,24 +555,24 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
         punctuator(expression[1], preprocessing_op_or_punc::LESS) &&
         expression[2].is(syntax_kind::type_id) &&
         expression[4].is(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
-        terminal named_cast = terminal::end;
+        terminal named_cast = terminal::E_end;
         switch (expression[0].keyword()) {
         case standard_keyword::dynamic_cast_:
-            named_cast = terminal::dynamic_cast_;
+            named_cast = terminal::dc_dynamic_cast_;
             break;
         case standard_keyword::static_cast_:
-            named_cast = terminal::static_cast_;
+            named_cast = terminal::sc_static_cast_;
             break;
         case standard_keyword::const_cast_:
-            named_cast = terminal::const_cast_;
+            named_cast = terminal::cc_const_cast_;
             break;
         case standard_keyword::reinterpret_cast_:
-            named_cast = terminal::reinterpret_cast_;
+            named_cast = terminal::rc_reinterpret_cast_;
             break;
         default:
             break;
         }
-        if (named_cast != terminal::end) {
+        if (named_cast != terminal::E_end) {
             enc.write(named_cast);
             return written_form(type_operand_of_written(expression[2]) &&
                                 expression_of_written(expression[5]));
@@ -594,7 +594,7 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
         qualified_type operand;
         fundamental_type keyword_type = fundamental_type::none;
         if (type_of_written_operand(expression[0], operand, keyword_type)) {
-            enc.write(terminal::cast);
+            enc.write(terminal::cv_cast);
             if (!type_operand_of_written(expression[0]))
                 return written_form(false);
             owned_array<SyntaxElement> arguments;
@@ -606,7 +606,7 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
             if (!expression_list_of_written(expression[2]))
                 return written_form(false);
             if (arguments.size() != 1)
-                enc.write(terminal::end);
+                enc.write(terminal::E_end);
             return written_form(true);
         }
     }
@@ -622,10 +622,10 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
         qualified_type operand;
         fundamental_type keyword_type = fundamental_type::none;
         if (type_of_written_operand(expression, operand, keyword_type)) {
-            enc.write(terminal::braced_cast);
+            enc.write(terminal::tl_braced_cast);
             if (!type_operand_of_written(expression))
                 return written_form(false);
-            enc.write(terminal::end);
+            enc.write(terminal::E_end);
             return written_form(true);
         }
     }
@@ -643,11 +643,11 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
         qualified_type operand;
         fundamental_type keyword_type = fundamental_type::none;
         if (type_of_written_operand(expression[0], operand, keyword_type)) {
-            enc.write(terminal::cast);
+            enc.write(terminal::cv_cast);
             if (!type_operand_of_written(expression[0]))
                 return written_form(false);
             enc.write(terminal::underscore);
-            enc.write(terminal::end);
+            enc.write(terminal::E_end);
             return written_form(true);
         }
     }
@@ -656,10 +656,10 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
         expression[0].keyword() == standard_keyword::void_ &&
         expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         expression[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-        enc.write(terminal::cast);
+        enc.write(terminal::cv_cast);
         enc.builtin_type(fundamental_type::void_);
         enc.write(terminal::underscore);
-        enc.write(terminal::end);
+        enc.write(terminal::E_end);
         return written_form(true);
     }
 
@@ -672,13 +672,13 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
             const auto &b = analysis.written_bindings[written_first + i];
             if (b.identifier || b.cast != whole.index().index())
                 continue;
-            enc.write(terminal::braced_cast);
+            enc.write(terminal::tl_braced_cast);
             if (!type(b.type))
                 return written_form(false);
             if (expression[1].size() > 2 &&
                 !expression_list_of_written(expression[1][1]))
                 return written_form(false);
-            enc.write(terminal::end);
+            enc.write(terminal::E_end);
             return written_form(true);
         }
     }
@@ -709,14 +709,14 @@ itanium_mangler::operator_of_written(SyntaxElement expression)
        <expression> */
     if (expression.is(syntax_kind::conditional_expression) &&
         expression.size() == 5) {
-        enc.write(itanium_operator::conditional);
+        enc.write(itanium_operator::qu_conditional);
         return written_form(expression_of_written(expression[0]) &&
                             expression_of_written(expression[2]) &&
                             expression_of_written(expression[4]));
     }
     if (expression.is(syntax_kind::expression) && expression.size() == 3 &&
         punctuator(expression[1], preprocessing_op_or_punc::COMMA)) {
-        enc.write(itanium_operator::comma);
+        enc.write(itanium_operator::cm_comma);
         return written_form(expression_of_written(expression[0]) &&
                             expression_of_written(expression[2]));
     }
@@ -794,13 +794,13 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
             if (level == qualifier_level::template_param && last)
                 level = qualifier_level::none;
             if (level != qualifier_level::none) {
-                enc.write(terminal::unresolved_scope);
+                enc.write(terminal::sr_unresolved_scope);
                 for (uint32_t i = 0; i < last; i += 2)
                     source_name(analysis.token_identifier(qual[i].token()));
                 if (!unresolved_qualifier_level(qual[last], level, level_type))
                     return written_form(false);
                 if (level != qualifier_level::template_param)
-                    enc.write(terminal::end);
+                    enc.write(terminal::E_end);
                 if (member.is_identifier())
                     return written_form(
                         source_name(analysis.token_identifier(member.token())));
@@ -824,7 +824,7 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
                 analysis.type_table[analysis.entity_table[pe]
                                         .type.unqualified()]
                         .kind == type_kind::template_parameter) {
-                enc.write(terminal::unresolved_scope);
+                enc.write(terminal::sr_unresolved_scope);
                 return written_form(
                     type(analysis.entity_table[pe].type) &&
                     source_name(analysis.token_identifier(member.token())));
@@ -839,8 +839,8 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
             qual[last].is(syntax_kind::simple_template_id) &&
             qual[last].size() >= 3 && qual[last][0].is_identifier()) {
             if (global)
-                enc.write(terminal::global_scope);
-            enc.write(terminal::unresolved_scope);
+                enc.write(terminal::gs_global_scope);
+            enc.write(terminal::sr_unresolved_scope);
             for (; qi < last; qi += 2) {
                 if (!qual[qi].is_identifier() ||
                     !source_name(analysis.token_identifier(qual[qi].token())))
@@ -857,7 +857,7 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
                 return written_form(
                     refuse("a member of a specialization its arguments "
                            "resolve (clang's L _Z <encoding> E)"));
-            enc.write(terminal::end);
+            enc.write(terminal::E_end);
             return written_form(
                 source_name(analysis.token_identifier(member.token())));
         }
@@ -911,10 +911,10 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
                     entity_kind::namespace_entity &&
                 (!target ||
                  analysis.entity_table[target].kind != entity_kind::variable)) {
-                enc.write(terminal::unresolved_scope);
+                enc.write(terminal::sr_unresolved_scope);
                 if (!source_name(analysis.entity_table[scope].name))
                     return written_form(false);
-                enc.write(terminal::end);
+                enc.write(terminal::E_end);
                 return written_form(
                     source_name(analysis.token_identifier(member.token())));
             }
@@ -923,8 +923,8 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
         if (member.is(syntax_kind::simple_template_id) && member.size() >= 3 &&
             member[0].is_token()) {
             if (global)
-                enc.write(terminal::global_scope);
-            enc.write(terminal::unresolved_scope);
+                enc.write(terminal::gs_global_scope);
+            enc.write(terminal::sr_unresolved_scope);
             while (qi + 1 < qual.size()) {
                 if (!qual[qi].is_identifier())
                     return written_form(false);
@@ -932,10 +932,10 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
                     return written_form(false);
                 qi += 2;
             }
-            enc.write(terminal::end);
+            enc.write(terminal::E_end);
             if (!source_name(analysis.token_identifier(member[0].token())))
                 return written_form(false);
-            enc.write(terminal::template_args);
+            enc.write(terminal::I_template_args);
             owned_array<SyntaxElement> written;
             template_argument_elements(member, written);
             for (SyntaxElement a : written) {
@@ -960,7 +960,7 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
                 if (!pe || !type(analysis.entity_table[pe].type))
                     return written_form(false);
             }
-            enc.write(terminal::end);
+            enc.write(terminal::E_end);
             return written_form(true);
         }
         return written_form(false);
@@ -981,7 +981,7 @@ itanium_mangler::postfix_of_written(SyntaxElement expression)
             op.is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
             expression[expression.size() - 1].is(
                 preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-            enc.write(itanium_operator::call);
+            enc.write(itanium_operator::cl_call);
             uint32_t unresolved_name = 0;
             if (base.is_token() && !written_object_binding(base) &&
                 !analysis.function_parameter_position(encoding_template,
@@ -995,7 +995,7 @@ itanium_mangler::postfix_of_written(SyntaxElement expression)
             if (expression.size() == 4 &&
                 !expression_list_of_written(expression[2]))
                 return written_form(false);
-            enc.write(terminal::end);
+            enc.write(terminal::E_end);
             return written_form(true);
         }
 
@@ -1003,7 +1003,7 @@ itanium_mangler::postfix_of_written(SyntaxElement expression)
         if (expression.size() == 4 &&
             op.is(preprocessing_op_or_punc::LEFT_BRACKET) &&
             expression[3].is(preprocessing_op_or_punc::RIGHT_BRACKET)) {
-            enc.write(itanium_operator::subscript);
+            enc.write(itanium_operator::ix_subscript);
             return written_form(expression_of_written(base) &&
                                 expression_of_written(expression[2]));
         }
@@ -1018,9 +1018,9 @@ itanium_mangler::postfix_of_written(SyntaxElement expression)
             if (!member[0].is_identifier())
                 return written_form(false);
             if (dot)
-                enc.write(terminal::member_access);
+                enc.write(terminal::dt_member_access);
             else
-                enc.write(itanium_operator::arrow);
+                enc.write(itanium_operator::pt_arrow);
             bool dependent = false;
             return written_form(
                 expression_of_written(base) &&
@@ -1030,9 +1030,9 @@ itanium_mangler::postfix_of_written(SyntaxElement expression)
         if (expression.size() == 3 && expression[2].is_token() &&
             (dot || op.is(preprocessing_op_or_punc::ARROW))) {
             if (dot)
-                enc.write(terminal::member_access);
+                enc.write(terminal::dt_member_access);
             else
-                enc.write(itanium_operator::arrow);
+                enc.write(itanium_operator::pt_arrow);
             return written_form(
                 expression_of_written(base) &&
                 source_name(analysis.token_identifier(expression[2].token())));
@@ -1058,7 +1058,7 @@ itanium_mangler::primary_of_written(SyntaxElement expression)
        [abi:expressions] [ad] L _Z <encoding> E */
     if (const auto *b = written_object_binding(expression)) {
         if (record(b->type).kind != type_kind::lvalue_reference)
-            enc.write(itanium_operator::address_of);
+            enc.write(itanium_operator::ad_address_of);
         if (!expr_primary_external(b->specialization))
             return written_form(false);
         return written_form(true);

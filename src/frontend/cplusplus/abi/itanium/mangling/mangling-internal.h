@@ -70,7 +70,8 @@ inline itanium_operator operator_written(SyntaxElement op, unsigned arity)
    mangled yet, and co_await is a keyword */
 inline itanium_operator prefix_operator(itanium_operator o)
 {
-    if (o == itanium_operator::increment || o == itanium_operator::decrement)
+    if (o == itanium_operator::pp_increment ||
+        o == itanium_operator::mm_decrement)
         return itanium_operator::none;
     return o;
 }
@@ -221,11 +222,11 @@ class itanium_mangler
            the object points to; what 2: the <type> alone, the
            string's characters */
         if (what == 0) {
-            enc.write(terminal::mangled_name);
-            enc.write(terminal::typeinfo);
+            enc.write(terminal::underscore_Z_mangled_name);
+            enc.write(terminal::TI_typeinfo);
         } else if (what == 1) {
-            enc.write(terminal::mangled_name);
-            enc.write(terminal::typeinfo_name);
+            enc.write(terminal::underscore_Z_mangled_name);
+            enc.write(terminal::TS_typeinfo_name);
         }
         return type(qualified_type::make(t, cv_none));
     }
@@ -238,8 +239,8 @@ class itanium_mangler
     {
         if (analysis.entity_table[e].kind != entity_kind::variable)
             return false;
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::reference_temporary);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::GR_reference_temporary);
         if (!encoding(e))
             return false;
         if (index)
@@ -250,16 +251,16 @@ class itanium_mangler
     /* [abi:mangling-special-vtables]: <special-name> ::= TV <type> */
     bool vtable_name(entity_index c)
     {
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::virtual_table);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::TV_virtual_table);
         return type(analysis.entity_table[c].type);
     }
     /* [abi:mangling-special-vtables]: <special-name> ::= TT <type>, the VTT
        ([abi:vtable-ctor-vtt]) */
     bool vtt_name(entity_index c)
     {
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::vtt);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::TT_vtt);
         return type(analysis.entity_table[c].type);
     }
     /* [[impl.clang]] a construction virtual table ([abi:vtable-ctor]):
@@ -267,8 +268,8 @@ class itanium_mangler
     bool construction_vtable_name(entity_index c, uint64_t offset,
                                   entity_index base)
     {
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::construction_virtual_table);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::TC_construction_virtual_table);
         if (!type(analysis.entity_table[c].type))
             return false;
         enc.number(offset);
@@ -284,8 +285,8 @@ class itanium_mangler
         const entity &x = analysis.entity_table[e];
         if (x.kind != entity_kind::variable)
             return refuse("a guard variable of an entity that is no variable");
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::guard_variable);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::GV_guard_variable);
         return encoding(e);
     }
     /* [abi:mangling-special-thunks]:
@@ -299,15 +300,15 @@ class itanium_mangler
        the virtual table */
     bool thunk_name(entity_index f, int64_t adjustment, int64_t vcall)
     {
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::thunk);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::T_thunk);
         if (vcall) {
-            enc.write(terminal::virtual_offset);
+            enc.write(terminal::v_virtual_offset);
             enc.signed_number(adjustment);
             enc.write(terminal::underscore);
             enc.signed_number(vcall);
         } else {
-            enc.write(terminal::non_virtual_offset);
+            enc.write(terminal::h_non_virtual_offset);
             enc.signed_number(adjustment);
         }
         enc.write(terminal::underscore);
@@ -318,12 +319,12 @@ class itanium_mangler
        <nested-name> */
     void runtime_vtable_name(const char *name)
     {
-        enc.write(terminal::mangled_name);
-        enc.write(terminal::virtual_table);
-        enc.write(terminal::nested_name);
+        enc.write(terminal::underscore_Z_mangled_name);
+        enc.write(terminal::TV_virtual_table);
+        enc.write(terminal::N_nested_name);
         enc.source_name("__cxxabiv1");
         enc.source_name(name);
-        enc.write(terminal::end);
+        enc.write(terminal::E_end);
     }
 
   private:
@@ -436,7 +437,7 @@ class itanium_mangler
     void template_param(uint64_t position)
     {
         template_params_written++;
-        enc.write(terminal::template_param);
+        enc.write(terminal::T_template_param);
         enc.ordinal_underscore(position);
     }
     bool class_template_args(entity_index c);

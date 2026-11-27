@@ -42,7 +42,7 @@ terminal itanium_mangler::std_substitution(entity_index c) const
     const entity &x = analysis.entity_table[c];
     if (x.kind != entity_kind::class_type || !x.instantiation || !x.name ||
         !is_std(x.enclosing) || in_inline_namespace(c))
-        return terminal::end;
+        return terminal::E_end;
     size_t length = 0;
     const char *identifier = spelling(x.name, &length);
     static const struct {
@@ -50,10 +50,10 @@ terminal itanium_mangler::std_substitution(entity_index c) const
         uint32_t arguments;
         terminal code;
     } whole[] = {
-        {"basic_string", 3, terminal::std_string},
-        {"basic_istream", 2, terminal::std_istream},
-        {"basic_ostream", 2, terminal::std_ostream},
-        {"basic_iostream", 2, terminal::std_iostream},
+        {"basic_string", 3, terminal::Ss_std_string},
+        {"basic_istream", 2, terminal::Si_std_istream},
+        {"basic_ostream", 2, terminal::So_std_ostream},
+        {"basic_iostream", 2, terminal::Sd_std_iostream},
     };
     for (const auto &w : whole) {
         if (length != strlen(w.name) || memcmp(identifier, w.name, length) ||
@@ -61,7 +61,7 @@ terminal itanium_mangler::std_substitution(entity_index c) const
             continue;
         for (uint32_t i = 0; i < w.arguments; i++)
             if (analysis.specialization_pack(c, i))
-                return terminal::end;
+                return terminal::E_end;
         qualified_type first = analysis.specialization_argument(c, 0);
         const struct type &fr = record(first);
         if (first.cv() || fr.kind != type_kind::fundamental ||
@@ -71,10 +71,10 @@ terminal itanium_mangler::std_substitution(entity_index c) const
             (w.arguments == 3 &&
              !is_std_class_of_char(analysis.specialization_argument(c, 2),
                                    "allocator", 9)))
-            return terminal::end;
+            return terminal::E_end;
         return w.code;
     }
-    return terminal::end;
+    return terminal::E_end;
 }
 
 /*
