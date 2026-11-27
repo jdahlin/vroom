@@ -633,11 +633,14 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         if (kind == entity_kind::none)
             return not_supported_because(n, "namespace.udecl",
                                          "a using of a held name");
-        for (entity_index o = e; o; o = entity_table[o].next_overload)
+        for (entity_index o = e; o; o = entity_table[o].next_overload) {
             if (!accessible(o, c))
                 return ill_formed_at_token(
                     t, "a using-declaration shall name an accessible member",
                     "namespace.udecl");
+            if (entity_table[o].access != declaration_access)
+                using_accesses.append({o, c, declaration_access});
+        }
         entity_index own = entity_table.find(c, name);
         if (own) {
             /* [namespace.udecl]/15 (C++20 /14): the base's member
