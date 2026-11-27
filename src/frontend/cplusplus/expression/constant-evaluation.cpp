@@ -3951,32 +3951,42 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
             return c;
         callee = semantics[callee].b;
     }
-    if (semantics[callee].kind != semantic_kind::entity) {
-        /* [expr.call]/1 through a pointer to function: one that is a null
-           pointer value designates no function, an undefined operation
-           ([expr.const]/5.8; clang's "evaluates to a null function
-           pointer"); any other is not evaluated */
+    entity_index called = 0;
+    if (semantics[callee].kind == semantic_kind::entity) {
+        called = semantics[callee].a;
+    } else {
+        /* [expr.call]/1 through a pointer to function: the function it
+           points to; one that is a null pointer value designates none, an
+           undefined operation ([expr.const]/5.8; clang's "evaluates to a
+           null function pointer") */
         uint32_t pointer = 0;
         if (semantics[callee].kind == semantic_kind::indirection)
             pointer = semantics[callee].a;
         else if (type_table[semantics[x.a].type.unqualified()].kind ==
                  type_kind::pointer)
             pointer = x.a;
-        if (pointer) {
-            constant_value p;
-            constness pc = evaluate_node(state, pointer, p);
-            if (pc == constness::constant &&
-                p.kind == constant_value_kind::pointer && !p.designator &&
-                !p.offset && !p.count && !p.literal)
-                return CONST_NOT_CONSTANT_RULE;
-        }
-        return CONST_UNKNOWN;
+        if (!pointer)
+            return CONST_UNKNOWN;
+        constant_value p;
+        constness pc = evaluate_node(state, pointer, p);
+        if (pc != constness::constant)
+            return pc;
+        if (p.kind != constant_value_kind::pointer || p.offset)
+            return CONST_UNKNOWN;
+        if (!p.designator && !p.count && !p.literal)
+            return CONST_NOT_CONSTANT_RULE;
+        /* a function's address is that of its object */
+        if (p.count != 1 || (p.first & element_place) ||
+            p.first >= state.objects.size())
+            return CONST_UNKNOWN;
+        called = state.objects[p.first].entity;
+        if (!called || entity_table[called].kind != entity_kind::function)
+            return CONST_UNKNOWN;
     }
     /* [meta.const.eval]/1: true within a manifestly constant-evaluated
        expression ([expr.const]/14), which this evaluation is unless it is
        potential_constant's or the claims' */
-    if (entity_table[semantics[callee].a].gnu_flags &
-        gnu_is_constant_evaluated) {
+    if (entity_table[called].gnu_flags & gnu_is_constant_evaluated) {
         if (state.potential || state.any_expression)
             return CONST_UNKNOWN;
         v = constant_value();
@@ -3985,7 +3995,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         return constness::constant;
     }
     /* [ext:gnu_library_builtins] clang evaluates the bit counts */
-    if (uint16_t row = entity_table[semantics[callee].a].gnu_builtin_row) {
+    if (uint16_t row = entity_table[called].gnu_builtin_row) {
         const gnu_builtin &b = gnu_builtin_at(row);
         /* the fold table says whether it is evaluated at all */
         if (b.fold != builtin_fold::none && !gnu_builtin_folds(b))
@@ -3997,7 +4007,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         case builtin_fold::lock_free:
             return evaluate_query_builtin(state, b.which, x, v);
         case builtin_fold::floating_constant:
-            return evaluate_floating_builtin(state, semantics[callee].a, x, v);
+            return evaluate_floating_builtin(state, called, x, v);
         case builtin_fold::identity:
             return evaluate_node(state, semantics.items(x.first)[0], v);
         case builtin_fold::bswap:
@@ -4020,7 +4030,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
        is a constant expression, whose pointer is the first argument) */
     if (!x.b && x.count >= 2) {
         static const char assume_aligned[] = "__builtin_assume_aligned";
-        const entity &callee_entity = entity_table[semantics[callee].a];
+        const entity &callee_entity = entity_table[called];
         if (callee_entity.name &&
             callee_entity.name ==
                 tokens.pp.identifier(assume_aligned,
@@ -4032,10 +4042,10 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
        is evaluated as clang's builtin, without its definition: the result
        refers or points to the argument's object.  std::addressof and
        std::__addressof are constexpr, the others when declared so */
-    if (!x.b && x.count == 1 && cxx_library_builtin(semantics[callee].a)) {
-        entity_index t = specialized_template(semantics[callee].a);
-        if (!entity_table[semantics[callee].a].constexpr_ &&
-            !named(t, "addressof") && !named(t, "__addressof"))
+    if (!x.b && x.count == 1 && cxx_library_builtin(called)) {
+        entity_index t = specialized_template(called);
+        if (!entity_table[called].constexpr_ && !named(t, "addressof") &&
+            !named(t, "__addressof"))
             return CONST_NOT_CONSTANT_NOTE(
                 rule_note::call_non_constexpr_function);
         uint32_t object = 0;
@@ -4068,7 +4078,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         if (!self.count || (self.extent && self.offset >= self.extent))
             return CONST_NOT_CONSTANT;
     }
-    entity_index function = semantics[callee].a;
+    entity_index function = called;
     /* [expr.const]/5.4 (C++20 allowed it): an invocation of a virtual
        function, called through its dynamic type or not */
     if (entity_table[function].virtual_ &&
