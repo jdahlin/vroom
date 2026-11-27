@@ -1280,6 +1280,13 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
             at, "temp.arg.nontype",
             "an address argument that does not name an entity");
     const entity x = entity_table[e];
+    /* [temp.spec]/6 checks the base-clause of a specialization, which is
+       analysed only once the specialization is instantiated: one whose
+       head selects from an overload set is not accepted unchecked */
+    if (selected && x.next_overload && explicit_declaration_names)
+        return not_supported_because(
+            at, "temp.spec",
+            "an overloaded function's address as a specialization's argument");
     /* /3: "... the result of a typeid expression" */
     if (x.typeinfo_of)
         return ill_formed(at,
