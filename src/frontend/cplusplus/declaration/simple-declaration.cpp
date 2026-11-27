@@ -1416,13 +1416,9 @@ analysis_result semantic_analysis::default_initialize_variable(
         token_index place = claim_place;
         entity_index claims = claim_scope;
         VTRY(r, construct(declaration, object, none, 0, value));
-        if (constexpr_variable && entity_table[e].automatic)
-            return not_supported_because(
-                declaration, "dcl.init",
-                "a constexpr local default-initialized by a constructor");
         /* [basic.start.static]/2: constant initialization for a static
            variable default-initialized by a constexpr constructor */
-        if (!entity_table[e].automatic && value.node) {
+        if ((!entity_table[e].automatic || constexpr_variable) && value.node) {
             uint32_t data = 0;
             constness c = constness::unknown;
             /* [class.default.ctor]/4: a constructor of a class with
@@ -1438,7 +1434,8 @@ analysis_result semantic_analysis::default_initialize_variable(
             /* an array of a class that is not dynamic, constructed at
                start-up or on first use: refused, its lowering not
                followed (clang's symbols differ where one is) */
-            else if (!(object == type) && !entity_table[record].dynamic &&
+            else if (!entity_table[e].automatic && !(object == type) &&
+                     !entity_table[record].dynamic &&
                      !is_class_entity(entity_table[e].enclosing))
                 return not_supported_because(declaration, "dcl.init",
                                              "default construction of this "
