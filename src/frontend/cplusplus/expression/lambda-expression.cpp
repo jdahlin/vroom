@@ -656,6 +656,12 @@ analysis_result semantic_analysis::lambda_default_arguments(
             if (!found.entity)
                 continue;
             const entity &x = entity_table[found.entity];
+            /* [expr.const]: an immediate invocation in it is checked
+               where it is used, which analysis does not follow */
+            if (x.immediate)
+                return not_supported_because(n, "dcl.fct.default",
+                                             "a lambda's default argument "
+                                             "naming an immediate function");
             if ((x.kind == entity_kind::variable ||
                  x.kind == entity_kind::structured_binding) &&
                 !is_namespace(x.enclosing) &&
@@ -667,6 +673,12 @@ analysis_result semantic_analysis::lambda_default_arguments(
     }
     if (!any)
         return analysis_result::well_formed;
+    /* ([abi:mangle.local-name] of a lambda's parameter of a type local to a
+       specialization is not clang's yet) */
+    if (instantiation_depth)
+        return not_supported_because(n, "dcl.fct.default",
+                                     "a lambda's default argument in a "
+                                     "template's specialization");
     owned_array<parameter_meaning> saved =
         static_cast<owned_array<parameter_meaning> &&>(function_parameters);
     function_parameters.clear();
