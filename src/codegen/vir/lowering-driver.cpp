@@ -256,6 +256,55 @@ static uint32_t virbuild_pass_through_value(const vir_function *f, bool ret32,
     }
 }
 
+/* a call of several results (a record in two registers) at i, in b, is a sibling call: the
+ * results taken out in order, and returned in that order and no other (so each is already in
+ * the register this function returns it in), also through brs to blocks that only pass them on */
+static bool virbuild_call_results_returned(const vir_function *f, uint32_t b,
+                                           uint32_t i)
+{
+    const vir_block *k = &f->blocks[b];
+    uint32_t value[8], count = 0, j;
+
+    for (j = i + 1; j < k->first + k->insn_count && count < 8 &&
+                    f->insns[j].op == VIR_OP_PROJ && f->insns[j].a == i &&
+                    f->insns[j].b == count;
+         j++)
+        value[count++] = j;
+    if (!count)
+        return false;
+    for (int hop = 0; hop <= 4; hop++) {
+        const vir_insn *t;
+
+        if (j >= k->first + k->insn_count)
+            return false;
+        t = &f->insns[j];
+        if (t->op == VIR_OP_RET) {
+            if (f->extra[t->c] != count)
+                return false;
+            for (uint32_t n = 0; n < count; n++)
+                if (f->extra[t->c + 1 + n] != value[n])
+                    return false;
+            return true;
+        }
+        if (t->op != VIR_OP_BR)
+            return false;
+        const vir_block *next = &f->blocks[t->a];
+
+        for (uint32_t n = 0; n < count; n++) {
+            uint32_t q = 0;
+
+            while (q < next->parameter_count && f->extra[t->c + q] != value[n])
+                q++;
+            if (q == next->parameter_count)
+                return false;
+            value[n] = next->first + q;
+        }
+        k = next;
+        j = next->first + next->parameter_count;
+    }
+    return false;
+}
+
 /* the call at i, in b, is a sibling call: what the ret after it returns is its result (or
  * nothing), also through brs to blocks of only what passes the result on */
 VPRIV bool virbuild_call_is_sibling(codegen_context *e, const vir_function *f,
@@ -269,13 +318,14 @@ VPRIV bool virbuild_call_is_sibling(codegen_context *e, const vir_function *f,
     if (f->insns[i].op ==
         VIR_OP_INVOKE) /* (its frame must stay for the landing pad) */
         return false;
-    if (!tail || f->insns[i].type == VIR_TYPE_MULTI ||
-        (t->op == VIR_OP_SYMADDR &&
-         CODEGEN_REFERENCE_KIND(t->a) == CODEGEN_REFERENCE_SYMBOL &&
-         !em_tail_target_ok(
-             e, codegen_symbol_canonical(e->compile_context,
-                                         CODEGEN_REFERENCE_INDEX(t->a)))))
+    if (!tail || (t->op == VIR_OP_SYMADDR &&
+                  CODEGEN_REFERENCE_KIND(t->a) == CODEGEN_REFERENCE_SYMBOL &&
+                  !em_tail_target_ok(e, codegen_symbol_canonical(
+                                            e->compile_context,
+                                            CODEGEN_REFERENCE_INDEX(t->a)))))
         return false;
+    if (f->insns[i].type == VIR_TYPE_MULTI)
+        return virbuild_call_results_returned(f, b, i);
     j = virbuild_pass_through_skip(f, ret32, k, i + 1, &res);
     for (int hop = 0;; hop++) {
         uint32_t q;

@@ -62,9 +62,9 @@ The frontend and walker also apply local optimizations when `cc_opts.opt >= 1`.
   has no live cleanup, and the call has no argument on the stack, no
   result in memory (x86-64), no argument by reference to a copy (arm64).  VIR
   asks the same of its own instructions after inlining and slot promotion: a
-  slot's address that only loads, stores and copies use does not count.  The
-  direct emitter looks at the source, so a local passed by reference to an
-  inlined function keeps the calls (where clang jumps).
+  slot's address that only loads, stores and copies use does not count.  A
+  record result in two registers is passed on by a jump too, when the
+  function returns exactly those, in order.
 - **Records** (`arch/a64/codegen/opt.c`, `func.c`): the clean-up passes over
   each function's machine records: liveness, copies, slots, extensions, dead
   records, folds, flags, unreachable code and fall-throughs, a frame only when

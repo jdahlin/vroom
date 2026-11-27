@@ -76,6 +76,22 @@ static NOINLINE const char *walk_pointer(const char *p, long n)
     }
 }
 
+/* a record result in two registers passed on, and one that must not be: the members swapped */
+struct two {
+    long a, b;
+};
+static NOINLINE struct two pair_chain(long n, long a, long b)
+{
+    if (!n)
+        return (struct two){a, b};
+    return pair_chain(n - 1, a + 1, b + 2);
+}
+static NOINLINE struct two pair_swapped(long n)
+{
+    struct two t = pair_chain(n, 0, 0);
+    return (struct two){t.b, t.a};
+}
+
 /* negative cases: each callee reads the caller's frame after using the stack itself */
 static int *saved;
 
@@ -212,6 +228,8 @@ int main(void)
     printf("%d %d\n", is_even(DEPTH), is_odd(DEPTH + 1));
     printf("%g\n", sum_double(DEPTH, 0, 0));
     printf("%s\n", walk_pointer("pointer", DEPTH));
+    struct two p = pair_chain(DEPTH, 1, 2), q = pair_swapped(10);
+    printf("%ld %ld %ld %ld\n", p.a, p.b, q.a, q.b);
     printf("%d %d %d %d %d\n", local_argument(10), local_array(20),
            local_stored(30), parameter_address(40), local_member(50));
     printf("%d %d %d %d %d %d\n", local_in_register_struct(60),
