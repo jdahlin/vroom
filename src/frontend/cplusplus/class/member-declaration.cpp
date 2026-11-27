@@ -488,6 +488,8 @@ node_index parser::member_declarator(const decl_specifier_facts &specifiers,
         facts.name != member_class_name)
         declare_declarator(specifiers, facts);
     bool function = facts.first == derivation::function;
+    if (facts.name && specifiers.friend_ && function)
+        friend_names.append(facts.name);
     bool virt = false;
     /* [class.mem]/1: member-declarator: declarator requires-clause */
     /* a requires-clause after a member that is no function: clang's

@@ -106,8 +106,8 @@ parser::reading parser::reading_at(unsigned ahead)
 }
 
 /*
- * [basic.lookup.argdep]: a call whose name only argument-dependent lookup
- * finds, a hidden friend's among them.  As a declaration, T(x); would need
+ * [basic.lookup.argdep]: a call of a hidden friend's name, which only
+ * argument-dependent lookup finds.  As a declaration, T(x); would need
  * T declared and would declare x anew, hiding the object x: not read so.
  */
 bool parser::call_of_undeclared_name(unsigned ahead)
@@ -115,10 +115,14 @@ bool parser::call_of_undeclared_name(unsigned ahead)
     if (!at_identifier(ahead) ||
         !at(preprocessing_op_or_punc::LEFT_PARENTHESIS, ahead + 1))
         return false;
+    uint32_t name = tokens.identifier(position + ahead);
+    bool befriended = false;
+    for (uint32_t declared : friend_names)
+        befriended = befriended || declared == name;
     scope_index found = 0;
     bool dependent = false;
-    if (names.lookup_unqualified(tokens.identifier(position + ahead), &found,
-                                 &dependent) != name_kind::not_declared)
+    if (!befriended || names.lookup_unqualified(name, &found, &dependent) !=
+                           name_kind::not_declared)
         return false;
     for (unsigned i = ahead + 2;; i += 2) {
         unsigned length = 0;

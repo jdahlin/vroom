@@ -1,5 +1,5 @@
-// [basic.lookup.argdep], [stmt.ambig]: a statement f(x); of a name only
-// argument-dependent lookup finds (a hidden friend) is a call.
+// [basic.lookup.argdep], [stmt.ambig]: a statement f(x); of a hidden
+// friend's name, which only argument-dependent lookup finds, is a call.
 struct P {
     friend void bump(P &p) { p.x += 1; }
     int x = 1;
@@ -8,8 +8,8 @@ namespace n
 {
 struct Q {
     int y = 10;
+    friend void add(Q &a, Q &b) { a.y += b.y; }
 };
-void add(Q &a, Q &b) { a.y += b.y; }
 } // namespace n
 
 static int run(P paint, n::Q q, n::Q r)
