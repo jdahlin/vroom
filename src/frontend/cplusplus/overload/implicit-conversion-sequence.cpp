@@ -82,6 +82,12 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
         return s;
     s.identity = false;
     s.rank = 2;
+    /* [ext:clang_ext_vector_type] there is no conversion between two
+       different extended vector types */
+    if (f.kind == type_kind::ext_vector && t.kind == type_kind::ext_vector &&
+        (f.bound != t.bound ||
+         f.operand.unqualified() != t.operand.unqualified()))
+        return of_form(sequence::form::bad);
     /* [ext:gnu_vector_size] clang's lax vector conversions are between
        integer vectors only: vectors of different element types, one of
        them floating, do not convert (x86 intrinsic types' overloads).
