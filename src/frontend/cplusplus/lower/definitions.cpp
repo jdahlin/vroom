@@ -451,10 +451,16 @@ bool c_lowering::translation_unit()
         if (!function_definition_or_drop(d.entity))
             return false;
     }
-    if (!lower_waiting_functions())
-        return false;
-    if (!complete_variants())
-        return false;
+    /* a complete object variant uses virtual tables, and so functions that
+       wait for a use, which may use further variants */
+    for (bool again = true; again;) {
+        if (!lower_waiting_functions() || !complete_variants())
+            return false;
+        again = false;
+        for (entity_index e : waiting_functions)
+            if (e && used_symbols[e])
+                again = true;
+    }
     return !failure.what;
 }
 

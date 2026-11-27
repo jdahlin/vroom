@@ -392,7 +392,13 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
                 r.vcall / static_cast<int64_t>(analysis.pointer_size()), t);
         arguments.append(value);
     }
-    uint32_t target = symbol(f, at, r.variant);
+    uint32_t target = 0;
+    if (x.special == special_member::destructor && r.variant == 1)
+        /* the complete object destructor its calls use: D2 where no D1
+           is made (special_callee) */
+        target = special_callee(f, at);
+    else
+        target = symbol(f, at, r.variant);
     if (!target)
         return false;
     ast_builder_symbol_flags_add(c, target, AST_SYMBOL_FLAG_USED);

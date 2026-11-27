@@ -84,6 +84,12 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
     } else {
         return true;
     }
+    /* /5: each element of an initializer_list of a class converts to it
+       by itself, where the initialization of the backing array could elide
+       braces (set::insert({point, upper}) of a set of aggregates) */
+    if (t.kind == type_kind::class_type &&
+        type_table[element.unqualified()].kind == type_kind::class_type)
+        return list_elements_convert(list, element);
     if (type_table[element.unqualified()].kind != type_kind::array)
         return true;
     owned_array<SyntaxElement> clauses;
@@ -100,6 +106,35 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
             tokens[clauses[i].token()].kind == token_kind::literal &&
             tokens[clauses[i].token()].literal == literal_kind::string_literal;
         if (!string)
+            return false;
+    }
+    return true;
+}
+
+/* whether no element of list that is an expression has no implicit
+   conversion to the class target ([over.ics.list]/5) */
+bool semantic_analysis::list_elements_convert(SyntaxRef list,
+                                              qualified_type target)
+{
+    owned_array<SyntaxElement> clauses;
+    if (list_clauses(list, clauses) != analysis_result::well_formed)
+        return true;
+    for (size_t i = 0; i < clauses.size(); i++) {
+        if (clauses[i].is(syntax_kind::braced_init_list) ||
+            clauses[i].is(syntax_kind::designated_initializer_clause))
+            continue;
+        substitution_mark mark = mark_substitution();
+        expression_meaning e;
+        substituting++;
+        analysis_result r = expression(clauses[i], e);
+        conversion_sequence s;
+        s.kind = conversion_sequence::form::unknown;
+        if (r == analysis_result::well_formed && e.node)
+            s = implicit_conversion_sequence(
+                e, qualified_type::make(target.unqualified(), cv_none), true);
+        substituting--;
+        undo_substitution(mark);
+        if (s.kind == conversion_sequence::form::bad)
             return false;
     }
     return true;

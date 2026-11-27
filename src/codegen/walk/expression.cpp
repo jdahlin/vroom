@@ -3151,16 +3151,21 @@ static codegen_value walk_statement_expression_emit(codegen_context *e,
 
     int cmark = e->walk_state->cleanup_count;
     codegen_value v = codegen_value_constant(0);
+    /* (as an inlined call's body: walk_call_inline) */
+    bool condition_jumped = e->walk_state->condition_jumped;
 
     for (uint32_t i = 0; i + 1 < b->c; i++)
         walk_statement_emit(e, c->lists[b->b + i]);
+    e->walk_state->condition_jumped = condition_jumped;
     if (b->c) {
         uint32_t last = c->lists[b->b + b->c - 1];
 
         if (N(last)->op == AST_NODE_EXPRESSION && N(last)->a)
             v = walk_value_emit(e, N(last)->a);
-        else
+        else {
             walk_statement_emit(e, last);
+            e->walk_state->condition_jumped = condition_jumped;
+        }
     }
     if (e->walk_state->cleanup_count > cmark) {
         /* (a register value survives the calls: they save the live temporaries) */

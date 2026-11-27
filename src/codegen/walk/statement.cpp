@@ -1942,7 +1942,7 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
     int64_t saved_sp = 0;
     codegen_value res;
 
-    uint32_t lmark = W->local_slot_count;
+    uint32_t lmark = 0;
 
     memcpy(I.caller_array_elements, W->array_elements,
            sizeof I.caller_array_elements),
@@ -2008,6 +2008,9 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
             }
             av[i] = v;
         }
+        /* (after the arguments: a compound literal among them lives as long
+		   as the caller's block, not as this copy) */
+        lmark = W->local_slot_count;
         W->inline_local_depth++;
         for (uint32_t i = 0; i < body->aux; i++) {
             uint32_t p = c->lists[body->a + i];
@@ -2097,7 +2100,11 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
     W->instance = ++W->instance_count;
     W->inline_call = &I;
     W->depth++;
+    /* (the body's branches decide nothing for a condition the call is in: a
+	   while (1) in it would make the caller's if drop its then branch) */
+    bool condition_jumped = W->condition_jumped;
     walk_statement_emit(e, c->syms[s].body);
+    W->condition_jumped = condition_jumped;
     W->depth--;
     W->inline_local_depth--;
     /* the copy's locals and parameters are dead: their slots free, the symbols unbound */
