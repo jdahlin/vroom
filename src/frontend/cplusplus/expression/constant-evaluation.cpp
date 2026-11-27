@@ -4483,8 +4483,18 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
             if (!(from & element_place) && state.objects[from].read_only &&
                 has_mutable_subobject(semantics[argument].type))
                 return CONST_NOT_CONSTANT;
+            /* into the elements the object has, which live as long as it
+               does: new ones would go with an invocation's scope */
+            const constant_value held = place_value(state, place);
+            if (held.kind == v.kind && held.count == v.count &&
+                held.designator == v.designator && held.first != v.first &&
+                v.kind != constant_value_kind::union_object) {
+                assign_value(state, place, copy_value(state, v, false));
+                return constness::constant;
+            }
             constant_value copied = copy_value(state, v, false);
             place_value(state, place) = copied;
+            state.element_floor = static_cast<uint32_t>(state.elements.size());
             return constness::constant;
         }
     }
