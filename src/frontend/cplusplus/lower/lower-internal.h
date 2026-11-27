@@ -824,7 +824,7 @@ class c_lowering
     uint32_t member_pointer_equality(const semantic_node &n, int op);
     uint32_t member_function_call(const semantic_node &n,
                                   owned_array<uint32_t> &items,
-                                  uint32_t &object);
+                                  uint32_t &object, bool expressions);
     /* a value read more than once: lowered again when that has no effect,
        else held in a temporary of the full-expression */
     struct reread {

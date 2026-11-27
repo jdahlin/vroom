@@ -417,17 +417,29 @@ uint32_t c_lowering::member_pointer_equality(const semantic_node &n, int op)
  */
 uint32_t c_lowering::member_function_call(const semantic_node &n,
                                           owned_array<uint32_t> &items,
-                                          uint32_t &object)
+                                          uint32_t &object, bool expressions)
 {
     const semantic_node &access = node(n.a);
     ast_qualified_type vp = pointer_to(void_type);
     ast_qualified_type d = ast_builder_type_ptrdiff(c);
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     ast_qualified_type bytes = pointer_to(byte);
-    uint32_t address = held_value(access.a, bytes, items);
+    auto hold = [&](uint32_t value, ast_qualified_type to) -> uint32_t {
+        if (!expressions)
+            return held_value(value, to, items);
+        uint32_t lowered = expression(value);
+        if (!lowered)
+            return 0;
+        if (record(node(value).type).kind == type_kind::pointer)
+            lowered = cast(lowered, to, AST_CAST_POINTER_TO_POINTER);
+        uint32_t symbol = full_expression_temporary(to);
+        items.append(assign(to, c_variable(c, symbol, to), lowered));
+        return symbol;
+    };
+    uint32_t address = hold(access.a, bytes);
     if (!address)
         return 0;
-    uint32_t pair = held_value(access.b, member_function_pointer_type(), items);
+    uint32_t pair = hold(access.b, member_function_pointer_type());
     if (!pair)
         return 0;
     ast_qualified_type t = member_function_pointer_type();
@@ -441,9 +453,12 @@ uint32_t c_lowering::member_function_call(const semantic_node &n,
              make(AST_NODE_BINARY, d, adj(), ast_builder_integer(c, d, 1), 0,
                   LEX_TOKEN_GREATER_GREATER, 0),
              0, 0, AST_NODE_FLAG_LVALUE);
-    items.append(c_statement(
-        c, assign(bytes, read(address, bytes),
-                  make(AST_NODE_ADDRESS, bytes, moved, 0, 0, 0, 0))));
+    uint32_t adjusted =
+        assign(bytes, read(address, bytes),
+               make(AST_NODE_ADDRESS, bytes, moved, 0, 0, 0, 0));
+    if (!expressions)
+        adjusted = c_statement(c, adjusted);
+    items.append(adjusted);
     const struct type &pointer = record(node(access.b).type);
     qualified_type class_type_ = qualified_type::make(
         analysis.entity_table[pointer.entity].type.unqualified(), cv_none);

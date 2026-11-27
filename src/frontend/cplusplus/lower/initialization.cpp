@@ -20,8 +20,22 @@ uint32_t c_lowering::store(ast_qualified_type t, qualified_type object_type,
 {
     /* [class.copy.elision]/1, [abi:calls]: a class passed by address is
        built where it ends up, a call's result too */
-    if (built_in_place(object_type) && ast_builder_node_is_call(c, value))
-        return make(AST_NODE_CALL_INTO, void_type, object, value, 0, 0, 0);
+    if (built_in_place(object_type)) {
+        /* (the call may follow, as comma operands, what is held for it) */
+        owned_array<uint32_t> before;
+        uint32_t made = value;
+        while (ast_builder_ast(c)->nodes[made].op == AST_NODE_COMMA) {
+            before.append(ast_builder_ast(c)->nodes[made].a);
+            made = ast_builder_ast(c)->nodes[made].b;
+        }
+        if (ast_builder_node_is_call(c, made)) {
+            uint32_t into =
+                make(AST_NODE_CALL_INTO, void_type, object, made, 0, 0, 0);
+            for (size_t i = before.size(); i; i--)
+                into = comma(void_type, before[i - 1], into);
+            return into;
+        }
+    }
     /* an empty class has no value: its byte may be another member's
        ([[no_unique_address]], an empty base) */
     if (empty_object(object_type))
