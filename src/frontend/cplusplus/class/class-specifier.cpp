@@ -703,6 +703,12 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     entity_table[c].base_count = 0;
     analysis_result result = analysis_result::well_formed;
     if (has_bases) {
+        /* [basic.lookup.unqual]/7: the names of a class defined outside its
+           class or namespace are looked up there (struct Y::X : B<X>) */
+        entity_index bases_scope = current_scope;
+        if (head_qualifier)
+            bases_scope = entity_table[c].enclosing;
+        scoped_value<entity_index> nominated(current_scope, bases_scope);
         require_complete_class++;
         result = base_clause(c, head_children[next], key);
         require_complete_class--;
