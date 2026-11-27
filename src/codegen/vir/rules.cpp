@@ -352,6 +352,23 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
     case VIR_OP_X86: {
         if (virbuild_minmax_simplify(V, S, q))
             return true;
+        /* pand with all ones: the other operand (a shift by a constant ANDs
+		 * its mask of the counts in range) */
+        if (x64_x86_operator_is(in.c, "pand")) {
+            for (int side = 0; side < 2; side++) {
+                uint32_t mask = virbuild_value_resolve(V, side ? in.a : in.b);
+                uint32_t kept = virbuild_value_resolve(V, side ? in.b : in.a);
+                const vir_insn *ones = &V->insns[mask].insn;
+
+                if (ones->op == VIR_OP_VSPLAT &&
+                    virbuild_value_integer_constant(
+                        V, virbuild_value_resolve(V, ones->a), &k) &&
+                    k == -1 && V->insns[kept].insn.type == in.type) {
+                    *r = kept;
+                    return false;
+                }
+            }
+        }
         /* a shift by a constant in a vector: by an immediate */
         vir_insn count = V->insns[in.b].insn;
         uint32_t code = 0;

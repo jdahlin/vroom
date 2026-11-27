@@ -18,7 +18,7 @@
 /* with the vectorizer, which runs later: a longer loop of scalars is its */
 #define VIRBUILD_UNROLL_SCALAR_TRIPS_VECTORIZING 8
 #define VIRBUILD_UNROLL_SIZE 640 /* instructions after unrolling */
-#define VIRBUILD_UNROLL_BLOCKS 8
+#define VIRBUILD_UNROLL_BLOCKS 32
 #define VIRBUILD_UNROLL_PARAMETERS 24
 
 typedef struct virbuild_unroll_loop {
