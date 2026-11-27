@@ -119,6 +119,15 @@ bool semantic_analysis::trivial_zero_initialized(entity_index c)
     return true;
 }
 
+/* [over.call.func]: the token t names the function called, and e begins
+   an overload set */
+bool semantic_analysis::overload_set_called(token_index t, entity_index e) const
+{
+    return t == overloaded_callee &&
+           entity_table[e].kind == entity_kind::function &&
+           entity_table[e].next_overload;
+}
+
 /*
  * [expr.ref]/6.2 and /6.3: the member e of the object m, a glvalue (or a
  * prvalue, materialized: [basic.lval]/7) of the member's class.
@@ -156,15 +165,12 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
     /* [class.access]/4: of an overloaded function called, "access control
        is applied to the function selected by overload resolution"
        (call_function), not to the name's first declaration */
-    bool overloads_called = at == overloaded_callee &&
-                            entity_table[e].kind == entity_kind::function &&
-                            entity_table[e].next_overload;
     /* [class.protected]/1: the object expression's class, not that of
        the base subobject a qualified name converted it to */
     entity_index accessed_through = object_class;
     if (written_class)
         accessed_through = written_class;
-    if (!overloads_called && !accessible(e, accessed_through))
+    if (!overload_set_called(at, e) && !accessible(e, accessed_through))
         /* [class.access]/1.1: "private; that is, its name can be used only
            by members and friends of the class in which it is declared" */
         return ill_formed_at_token(at,

@@ -4949,6 +4949,7 @@ class semantic_analysis
        member function: (*this).name */
     analysis_result implicit_member_access(token_index at, entity_index e,
                                            expression_meaning &m);
+    bool overload_set_called(token_index t, entity_index e) const;
     /* [class.access]: whether a member with this access can be named
        here */
     bool accessible(entity_index member, entity_index object_class = 0) const;
