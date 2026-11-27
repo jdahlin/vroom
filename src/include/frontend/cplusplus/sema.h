@@ -3820,6 +3820,12 @@ class semantic_analysis
     bool vectors_compatible(qualified_type a, qualified_type b) const;
     bool vector_scalar_fits(const expression_meaning &scalar,
                             qualified_type element, bool &fits) const;
+    analysis_result vector_against_zero(SyntaxRef n, token_index at,
+                                        preprocessing_op_or_punc op,
+                                        expression_meaning &v,
+                                        expression_meaning &m);
+    analysis_result vector_logical_not(SyntaxRef n, token_index at,
+                                       expression_meaning &m);
     analysis_result vector_logical(SyntaxRef n, token_index at,
                                    preprocessing_op_or_punc op,
                                    expression_meaning &left,

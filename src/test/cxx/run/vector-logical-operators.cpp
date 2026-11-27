@@ -1,4 +1,4 @@
-/* [ext:gnu_vector_size] && and || of vectors: a mask lane by lane, both
+/* [ext:gnu_vector_size] &&, || and ! of vectors: a mask lane by lane, both
    operands evaluated */
 extern "C" int printf(const char *, ...);
 
@@ -28,6 +28,9 @@ int main(int argc, char **)
     I zero = {};
     show("both", count(zero) && count(a));
     show("f", mn && l);
+    show("!a", !a);
+    show("!f", !l);
+    show("!!", !count(b));
     printf("%d\n", calls);
     return 0;
 }

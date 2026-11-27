@@ -140,6 +140,31 @@ bool semantic_analysis::vectors_compatible(qualified_type a,
            x.operand.unqualified() == y.operand.unqualified();
 }
 
+/* each lane of v compared with zero by op: a mask */
+analysis_result semantic_analysis::vector_against_zero(
+    SyntaxRef n, token_index at, preprocessing_op_or_punc op,
+    expression_meaning &v, expression_meaning &m)
+{
+    expression_meaning zero;
+    zero.type = qualified_type::make(
+        type_table.fundamental(fundamental_type::int_), cv_none);
+    zero.category = value_category::prvalue;
+    zero.evaluation = constness::constant;
+    zero.node = expression_node(semantic_kind::constant, zero, at);
+    return vector_binary(n, at, op, v, zero, m);
+}
+
+/* [ext:gnu_vector_size] !v: the lanes that are zero */
+analysis_result semantic_analysis::vector_logical_not(SyntaxRef n,
+                                                      token_index at,
+                                                      expression_meaning &m)
+{
+    VTRY(r, operand_value(n, m));
+    expression_meaning v = m;
+    return vector_against_zero(n, at, preprocessing_op_or_punc::EQUAL_EQUAL, v,
+                               m);
+}
+
 /* [ext:gnu_vector_size] && and || of two vectors of one type, as clang
    does them: both operands evaluated, each lane compared with zero, the
    masks combined */
@@ -158,16 +183,9 @@ analysis_result semantic_analysis::vector_logical(SyntaxRef n, token_index at,
             "a logical operator on a vector and an operand of another type");
     expression_meaning *operands[] = {&left, &right};
     expression_meaning masks[2];
-    for (int i = 0; i < 2; i++) {
-        expression_meaning zero;
-        zero.type = qualified_type::make(
-            type_table.fundamental(fundamental_type::int_), cv_none);
-        zero.category = value_category::prvalue;
-        zero.evaluation = constness::constant;
-        zero.node = expression_node(semantic_kind::constant, zero, at);
-        VTRY_SET(r, vector_binary(n, at, op_t::EXCLAMATION_EQUAL, *operands[i],
-                                  zero, masks[i]));
-    }
+    for (int i = 0; i < 2; i++)
+        VTRY_SET(r, vector_against_zero(n, at, op_t::EXCLAMATION_EQUAL,
+                                        *operands[i], masks[i]));
     op_t combined = op_t::BAR;
     if (op == op_t::AMPERSAND_AMPERSAND)
         combined = op_t::AMPERSAND;
