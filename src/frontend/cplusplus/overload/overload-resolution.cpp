@@ -786,10 +786,12 @@ analysis_result semantic_analysis::best_viable_function(
             candidates[i].rewritten == candidates[w].rewritten &&
             candidates[i].reversed == candidates[w].reversed)
             continue;
-        /* a reversed member candidate against a non-member one: nothing
-           resolves their tie (clang's error too, as in libc++'s
-           optional == against a class derived from optional with a member
-           operator==, where it makes a constraint unsatisfied) */
+        /* a member that is no template against a non-member candidate:
+           [over.match.best]/2 prefers neither unless its conversions are
+           no worse, so crosswise ones are an ambiguity (clang's error too,
+           reversed or not, as in libc++'s optional == against a class
+           derived from optional with a member operator==, where it makes a
+           constraint unsatisfied) */
         bool member_against_free = false;
         if (candidates[w].function && candidates[i].function) {
             auto member = [&](size_t k) {
@@ -797,9 +799,10 @@ analysis_result semantic_analysis::best_viable_function(
                     entity_table[candidates[k].function].enclosing;
                 return entity_table[in].kind == entity_kind::class_type;
             };
-            member_against_free = member(w) != member(i) &&
-                                  ((member(w) && candidates[w].reversed) ||
-                                   (member(i) && candidates[i].reversed));
+            member_against_free =
+                member(w) != member(i) &&
+                ((member(w) && !candidates[w].template_index) ||
+                 (member(i) && !candidates[i].template_index));
         }
         if (!better(w, i) && !member_against_free &&
             (candidates[w].rewritten || candidates[i].rewritten))
