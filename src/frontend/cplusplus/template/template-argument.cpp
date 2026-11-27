@@ -1283,6 +1283,14 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
     if (result != analysis_result::well_formed)
         return result;
     entity_index e = m.entity;
+    if (!e && !reference && written.is(syntax_kind::cast_expression)) {
+        /* [conv.ptr]/1, [expr.static.cast]: (T)nullptr of the parameter's
+           type is its null pointer value */
+        SyntaxElement last = written[written.size() - 1];
+        if (last.is_token() && last.keyword() == standard_keyword::nullptr_ &&
+            m.type.unqualified() == to.unqualified())
+            return analysis_result::well_formed;
+    }
     if (!e)
         return not_supported_because(
             at, "temp.arg.nontype",
