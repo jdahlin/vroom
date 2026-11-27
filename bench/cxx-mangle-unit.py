@@ -2,7 +2,7 @@
 """
 bench/cxx-mangle-unit.py: the Itanium mangler's unit tests
 (src/test/cxx/mangle, one file per section of the ABI's mangling
-grammar).  Each `// MANGLE: SYMBOL` line of a file is a symbol vpp -c's
+grammar, and the C front end's overloadable functions, a .c file).  Each `// MANGLE: SYMBOL` line of a file is a symbol vpp -c's
 object must have (defined or referenced, llvm-nm); `// MANGLE-XFAIL:
 SYMBOL reason` one it is known not to have yet (an error once it has it).
 --clang also has clang++ -c compile each file and checks that its object
@@ -24,15 +24,18 @@ R = os.path.dirname(B)
 TESTS = os.path.join(R, 'src', 'test', 'cxx', 'mangle')
 NM = '/usr/lib/llvm-23/bin/llvm-nm'
 CLANG = '/usr/lib/llvm-23/bin/clang++'
-FLAGS = ['--target=aarch64-linux-gnu', '-nostdinc', '-x', 'c++',
-         '-std=c++20', '-fno-exceptions', '-O0', '-w', '-c']
+FLAGS = ['--target=aarch64-linux-gnu', '-nostdinc', '-O0', '-w', '-c']
+LANGUAGE = {'.cpp': ['-x', 'c++', '-std=c++20', '-fno-exceptions'],
+            '.c': ['-x', 'c', '-std=c11']}
 EXPECT = re.compile(r'^//\s*MANGLE(-XFAIL)?:\s*(\S+)', re.M)
 
 
 def symbols(compiler, src, extra):
     with tempfile.TemporaryDirectory() as tmp:
         obj = os.path.join(tmp, 'x.o')
-        p = subprocess.run([compiler] + extra + FLAGS + [src, '-o', obj],
+        language = LANGUAGE[os.path.splitext(src)[1]]
+        p = subprocess.run([compiler] + extra + FLAGS + language +
+                           [src, '-o', obj],
                            capture_output=True, text=True)
         if p.returncode:
             return None, p.stderr.strip()
@@ -76,7 +79,8 @@ def main():
     ap.add_argument('pattern', nargs='?')
     a = ap.parse_args()
     vpp = os.path.join(a.bin_dir, 'vpp')
-    names = sorted(f for f in os.listdir(TESTS) if f.endswith('.cpp') and
+    names = sorted(f for f in os.listdir(TESTS)
+                   if os.path.splitext(f)[1] in LANGUAGE and
                    (not a.pattern or a.pattern in f))
     failed = total = 0
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:

@@ -387,6 +387,7 @@ def extension_contexts(path):
 
 
 MANGLING = os.path.join(FRONTEND, 'abi', 'itanium', 'mangling')
+ITANIUM = os.path.join(R, 'src', 'include', 'frontend', 'itanium')
 MANGLING_TABLE = re.compile(r'^ITANIUM_(?:TERMINAL|OPERATOR|BUILTIN_TYPE)\(\w+, "([^"]*)"', re.M)
 C_COMMENT = re.compile(r'/\*.*?\*/|//[^\n]*', re.S)
 C_STRING = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
@@ -394,15 +395,17 @@ C_STRING = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
 
 def mangling_letters(errors):
     """doc/PLAN-mangling.md 3.3: every letter of a mangled name is in one of
-    the mangler's tables (productions.inc, operators.inc, builtin-types.inc)
-    and the encoder (encoder.cpp) writes it; a builder file spells none and
-    writes no byte itself"""
+    the mangling tables (include/frontend/itanium: productions.inc,
+    operators.inc, builtin-types.inc) and the writer (writer.h) writes it; a
+    mangler's file (the C++ front end's, the C front end's mangle.cpp)
+    spells none and writes no byte itself"""
     codes = set()
     for name in ('productions.inc', 'operators.inc', 'builtin-types.inc'):
-        with open(os.path.join(MANGLING, name)) as f:
+        with open(os.path.join(ITANIUM, name)) as f:
             codes.update(MANGLING_TABLE.findall(f.read()))
     for path in sorted(glob.glob(os.path.join(MANGLING, '*.cpp')) +
-                       [os.path.join(MANGLING, 'mangling-internal.h')]):
+                       [os.path.join(MANGLING, 'mangling-internal.h'),
+                        os.path.join(R, 'src', 'frontend', 'c', 'mangle.cpp')]):
         if os.path.basename(path) == 'encoder.cpp':
             continue
         with open(path) as f:
@@ -428,7 +431,8 @@ def main():
     a = ap.parse_args()
     files = a.files or sorted(glob.glob(os.path.join(FRONTEND, '**', '*.cpp'), recursive=True) +
                               glob.glob(os.path.join(FRONTEND, '**', '*.h'), recursive=True) +
-                              glob.glob(os.path.join(FRONTEND, '**', '*.inc'), recursive=True))
+                              glob.glob(os.path.join(FRONTEND, '**', '*.inc'), recursive=True) +
+                              glob.glob(os.path.join(R, 'src', 'include', 'frontend', 'itanium', '*')))
     subclauses = subclause_files()
     grammar = spec_grammar()
     rules = spec_rules(subclauses)

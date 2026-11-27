@@ -24,7 +24,9 @@ first; most items only add a file to one of them.
 Existing gates that every change must keep green: `vcc-diff.py cmp`
 (pp parity), `vcc-sema.py run` + `layout` (878/879), `vcc-ctests.py`
 (1708/1708), `vcc-diag.py` (63/63), `vcc-sema.py warn` (879/879),
-`make -C src self-check`, `make -C src fuzz-regress`, kernel boot.
+`make -C src fuzz-regress`, kernel boot (`make -C src self-check` is gone:
+vcc builds as C++ only since 2026-11-27, and vcc does not compile C++
+well enough to build itself; doc/PLAN-mangling.md M7).
 
 - [x] **T0 performance gate.** (done: `bench/vbench.py gate`.)  Every item below must leave the hot path
   alone: `bench/vbench.py` (kernel front end + emit, fixed corpus) before

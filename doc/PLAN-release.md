@@ -33,7 +33,7 @@ applies to.  Each gate must have a script with a clear green/red result
 |---|-------|-------------------|
 | G0 | Gate rig | `bench/release-gate.py` runs G1-G9 (or reads their latest results) and writes a status table per platform; CI runs it on every platform |
 | G1 | Correctness | TODO.md tiers 1-3 empty, no `xfail` left that points there. Csmith and YARPGen differentially against clang: N CPU hours per target and optimization level without a diff |
-| G2 | Corpus | The Linux kernel boots Debian to `running`; PostgreSQL `meson test`, SQLite (the TCL tests) and vcc self-built (stage 2 = stage 3) green; the Debian selection builds and passes its own tests with `CC=vcc` |
+| G2 | Corpus | The Linux kernel boots Debian to `running`; PostgreSQL `meson test`, SQLite (the TCL tests) and vcc self-built (stage 2 = stage 3; needs vcc's C++ front end since vcc builds as C++ only, 2026-11-27) green; the Debian selection builds and passes its own tests with `CC=vcc` |
 | G3 | Drop-in | autoconf, meson and cmake configure with `CC=vcc` for the whole corpus without project patches. Unknown flags give a warning. Flag table against gcc and clang (`bench/vcc-driver.py` extended) |
 | G4 | Platforms | G1-G3 run on every target: macOS arm64, Linux arm64, mac->Linux arm64, Linux x86-64, macOS x86-64, wasm, Windows x64 (x86_64-w64-mingw32 from Linux; run under Wine and on windows-2025 in CI). ABI tests (`bench/vcc-abi.py`) clang/vcc × caller/callee on every target |
 | G5 | Code quality | `-O1`: run time within X % of clang -O1 on a fixed benchmark suite; `-O0` unchanged in compile speed (the SSA path `-O2` is owned by `PLAN-vir.md`; G5 measures `-O1` and stays with the non-SSA optimizer) |

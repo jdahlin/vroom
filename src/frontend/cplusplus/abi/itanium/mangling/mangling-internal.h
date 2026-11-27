@@ -19,33 +19,25 @@
 
 #include "../../../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
+#include "frontend/itanium/writer.h"
 
 namespace cplusplus
 {
 
-/* [abi:mangling-operator]: one enumerator per row of operators.inc */
-enum class itanium_operator : uint8_t {
-#define ITANIUM_OPERATOR(name, code, arity, token) name,
-#include "operators.inc"
-#undef ITANIUM_OPERATOR
-    none
-};
+/* [abi:mangling-operator]: operators.inc's rows (frontend/itanium), with
+   the token each is written with in C++ */
+using itanium_operator = itanium::operator_name;
+using itanium::terminal;
 
 constexpr struct {
-    const char *code;
     uint8_t arity;
     preprocessing_op_or_punc token;
 } operator_encodings[] = {
 #define ITANIUM_OPERATOR(name, code, arity, token)                             \
-    {code, arity, preprocessing_op_or_punc::token},
-#include "operators.inc"
+    {arity, preprocessing_op_or_punc::token},
+#include "frontend/itanium/operators.inc"
 #undef ITANIUM_OPERATOR
 };
-
-inline const char *operator_code(itanium_operator o)
-{
-    return operator_encodings[static_cast<size_t>(o)].code;
-}
 
 /* the operator written with op that has arity operands; none for another */
 inline itanium_operator operator_written(preprocessing_op_or_punc op,
@@ -83,18 +75,18 @@ inline itanium_operator prefix_operator(itanium_operator o)
     return o;
 }
 
-/* [abi:mangling-builtin]: builtin-types.inc's code of t; nullptr for a
-   type that has none */
-inline const char *builtin_type_code(fundamental_type t)
+/* [abi:mangling-builtin]: builtin-types.inc's row of t (its names are
+   fundamental_type's); none for a type that has none */
+inline itanium::builtin builtin_of(fundamental_type t)
 {
     switch (t) {
 #define ITANIUM_BUILTIN_TYPE(type, code)                                       \
     case fundamental_type::type:                                               \
-        return code;
-#include "builtin-types.inc"
+        return itanium::builtin::type;
+#include "frontend/itanium/builtin-types.inc"
 #undef ITANIUM_BUILTIN_TYPE
     default:
-        return nullptr;
+        return itanium::builtin::none;
     }
 }
 
@@ -128,13 +120,6 @@ inline fundamental_type simple_type_keyword_alone(standard_keyword k)
     return fundamental_type::none;
 }
 
-/* the terminals of productions.inc */
-enum class terminal : uint8_t {
-#define ITANIUM_TERMINAL(name, code) name,
-#include "productions.inc"
-#undef ITANIUM_TERMINAL
-};
-
 /* [abi:mangling-compression]: a substitution candidate, as the builder
    tells them apart: a type is one candidate however it is spelled, since
    the type table has one record per type.  A namespace or template as a
@@ -157,30 +142,22 @@ struct mangling_candidate {
  * The builder (itanium_mangler) decides which production to write; it
  * writes nothing itself.
  */
-class itanium_encoder
+class itanium_encoder : public itanium::writer
 {
   public:
-    explicit itanium_encoder(vbuffer *out) : out(out)
+    explicit itanium_encoder(vbuffer *buffer) : itanium::writer(buffer)
     {
     }
-    void write(terminal t);
-    void write(itanium_operator o);
+    using itanium::writer::write;
     /* [abi:mangling-builtin]: false for a type with no code */
-    bool builtin_type(fundamental_type t);
-    void number(uint64_t n);
-    /* [abi:mangle.number]'s n before a negative one's magnitude */
-    void signed_number(int64_t n);
-    void value_number(bool negative, uint64_t magnitude);
-    /* [abi:mangle.name] <source-name> ::= <positive length number> <identifier> */
-    void source_name(const char *bytes, size_t length);
-    void source_name(const char *identifier);
-    /* the [<number>] _ of several productions: nothing before the _ for
-       the first (n 0), n - 1 for another (T_, T0_, Ut_, Ut0_, ...) */
-    void ordinal_underscore(uint64_t n);
-    void discriminator(uint64_t n);
-    void seq_id(size_t n);
-    /* a symbol that is not mangled: its identifier as it is */
-    void unmangled(const char *bytes, size_t length);
+    bool builtin_type(fundamental_type t)
+    {
+        itanium::builtin b = builtin_of(t);
+        if (b == itanium::builtin::none)
+            return false;
+        write(b);
+        return true;
+    }
 
     /* the candidates seen, but those hidden */
     size_t candidate_count() const
@@ -195,8 +172,6 @@ class itanium_encoder
     {
         candidates.append(c);
     }
-    /* <substitution> of candidate i: S_, then S <seq-id> _ */
-    void substitution(size_t i);
     /* the candidates seen so far hidden from the ones after (the number
        hidden before, to show them again with) */
     size_t hide_candidates()
@@ -219,7 +194,6 @@ class itanium_encoder
     void rewind(mark m);
 
   private:
-    vbuffer *out;
     owned_array<mangling_candidate> candidates;
     size_t hidden = 0;
 };

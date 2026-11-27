@@ -47,10 +47,14 @@ relative to it); `TODO.md` stays at the top.
   `CC_OPTIMIZATIONS` (`include/frontend/c/cc.h`) and a line in that document.
 - `PLAN-vir-inline.md` (steps I0-I5, a proposal): inlining on VIR instead of
   in the walker; what today's limit and clang's threshold measure.
-- `PLAN-mangling.md` (steps M0-M7, a proposal): restructuring the Itanium
+- `PLAN-mangling.md` (steps M0-M8, done): restructuring the Itanium
   mangler (`frontend/cplusplus/abi/itanium/mangling/`, internal header
   `mangling-internal.h`): files by ABI section, a builder apart from the
-  encoder, each encoding letter in one table (`operators.inc`, ...).
+  encoder, each encoding letter in one table; the tables and the byte
+  writer are `include/frontend/itanium/` (`writer.h`, `operators.inc`,
+  `builtin-types.inc`, `productions.inc`), which the C front end's
+  `overloadable` mangler (`frontend/c/mangle.cpp`) uses too.  vcc builds as
+  C++ only (no `VCC_LANG=c`, no `make self`).
 - `PLAN-vir-eh.md` (steps E0-E8): Itanium exceptions in VIR, both lowerings and
   the direct emitter (`invoke`, landing pads, LSDA), and the AST nodes the C++
   front end will produce; RTTI and modules need nothing from VIR.
@@ -94,7 +98,7 @@ relative to it); `TODO.md` stays at the top.
   lowering to codegen, steps S0-S9, a plan under review).  The driver compiles
   C++ through it (`lower/compile.cpp`, `include/frontend/cplusplus/compile.h`;
   the lowering to C's AST is `lower/`, files by topic sharing `lower-internal.h`;
-  a C-hosted vcc has none): what the analysis or lowering does not handle yet
+  ): what the analysis or lowering does not handle yet
   is an error with the reason.  There are no separate C++ tools: the front
   end's developer outputs (tokens, syntax tree, analysis, the claims the
   harnesses have clang check) are driver options, `vpp -x c++ -fsyntax-only
@@ -304,7 +308,6 @@ relative to it); `TODO.md` stays at the top.
 ## Build and test
 ```
 make -C src -j 6 vcc                # all vcc tools, hosted in GNU C++20
-make -C src -j 6 vcc VCC_LANG=c     # build the implementation as C11
 make -C src -j 6 vcc VCC_UNITY= OUT=../build/src-parts   # file by file: each file compiles alone
 make -C src -k -j 6 cplusplus-check # the C++ front end's files, each alone with its flags (CPLUSPLUS_FLAGS: no RTTI, no C++ library, -Werror; ~3 s)
 bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
