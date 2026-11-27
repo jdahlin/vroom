@@ -1536,24 +1536,20 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 4: quality
 
-- [ ] **musttail's limits, and sibling calls clang makes that vcc does not** [P].
-  `musttail` is a jump or an error (`codegen/musttail.cpp`).  Refused: arguments
-  on the stack (x86-64: more than the argument registers, or a vector wider than
-  the ISA's registers), results returned in memory, arm64 arguments passed by
-  reference to a copy, Windows x64, WebAssembly, builtins.  Other calls in tail
-  position are sibling calls where the frame's address cannot have got out
-  (doc/OPTIMIZATION.md), never at `-O0`.  Missing: the direct emitter's check is
-  on the source, so a local or parameter passed by reference to an inlined
-  function keeps the calls; VIR takes no vector arguments on x86-64 and no
-  call whose result is a record in two registers.  Skia's raster pipeline stages
-  are exactly the first two (every stage passes `r, g, b, a` by reference to its
-  inlined `_k`): 637 of 640 stages of sse2, ml3 and ml4 at `-O3` still end in
-  `call`.  So C++ answers `__has_cpp_attribute(clang::musttail)` with 0: Skia
-  then rewinds its stack, which its stages without the attribute need.  Even
-  with that fixed, Skia built at `-O0` would rely on `musttail` alone (as with
-  clang), and its stages without it would grow the stack.  *Validate:*
-  `src/test/vcc/sibling-calls.c`, `src/test/cxx/run/sibling-calls.cpp`; every
-  Skia stage ends in `jmp` by objdump.
+- [ ] **musttail's limits** [P].  `musttail` is a jump or an error
+  (`codegen/musttail.cpp`).  Refused: arguments on the stack (x86-64: more than
+  the argument registers, or a vector wider than the ISA's registers), results
+  returned in memory, arm64 arguments passed by reference to a copy, Windows
+  x64, WebAssembly, builtins.  Other calls in tail position are sibling calls
+  where the frame's address cannot have got out (doc/OPTIMIZATION.md), never at
+  `-O0`.  C++ claims `__has_cpp_attribute(clang::musttail)` on x86-64 Linux
+  only: there every stage of Skia's raster pipeline (sse2, ml3, ml4) and of
+  skcms jumps, but `start_pipeline`, `stack_checkpoint` (which call) and
+  `just_return`, `stack_rewind`, skcms's `store_*` (which return).  arm64 is
+  unchecked: the C++ front end does not yet compile Skia's or skcms's NEON
+  code.  Skia built at `-O0` relies on `musttail` alone, as with clang.
+  *Validate:* the same objdump check for arm64, then claim it there.
+
 - [ ] **VIR's code shape against the direct emitter's rules** [P].  Since
   -O2 is VIR (doc/OPTIMIZATION.md), `bench/vcc-opt-rules.py` checks code shape
   at -O0/-O1 alone (`DIRECT_LEVELS`) and `bench/vcc-tail-controls.py` runs with

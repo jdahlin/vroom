@@ -114,6 +114,10 @@ struct implementation_defined_behavior {
        __va_list_tag[1], not AAPCS64's struct (a va_list passed as an
        argument or received as a parameter is a pointer to the tag) */
     bool va_list_is_array = false;
+    /* [impl.clang] whether __has_attribute and __has_cpp_attribute claim
+       clang::musttail: on x86-64 Linux, where Skia's and skcms's stages were
+       checked to compile to jumps */
+    bool claims_musttail = false;
 
     /* the choices of clang -cc1 -triple aarch64-unknown-linux-gnu -std=... */
     static implementation_defined_behavior for_edition(standard_edition edition,

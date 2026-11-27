@@ -354,7 +354,7 @@ def feature_check_queries():
             continue
         names.update(re.findall(r'\b(__\w+)\b', text))
     # type traits and other keyword-builtins: the spellings of keyword.inc
-    for m in re.finditer(r'^KEYWORD\("(__\w+)"', open(os.path.join(OUT, 'lex', 'keyword.inc')).read(), re.M):
+    for m in re.finditer(r'^KEYWORD\("(__\w+)"', open(os.path.join(OUT, 'lexer', 'keyword.inc')).read(), re.M):
         names.add(m.group(1))
     builtins = sorted(n for n in names if not n.endswith('_'))
     queries += [('builtin', n) for n in builtins]
@@ -366,8 +366,7 @@ def feature_check_queries():
 # (Skia's raster pipeline) also counts on the optimizer making its other
 # forwarding calls jumps, which vcc does only for the simplest wrappers, so it
 # takes its portable path; a musttail written anyway is honoured
-FEATURE_CHECKS_NOT_VCCS = {('attribute', 'musttail'),
-                           ('cpp_attribute', 'clang::musttail')}
+FEATURE_CHECKS_NOT_VCCS = set()
 
 
 def feature_checks(clang='clang-23'):
