@@ -3537,6 +3537,15 @@ class semantic_analysis
     /* [expr.prim.id.qual] */
     analysis_result qualified_id(QualifiedId n, expression_meaning &m);
     analysis_result qualified_template_id(SyntaxRef n, expression_meaning &m);
+    /* [namespace.udecl]: the qualified-ids naming a member through a
+       member using-declaration, by token, and their naming class, whose
+       access the declaration gives */
+    struct using_named {
+        token_index at = 0;
+        entity_index naming = 0;
+    };
+    owned_array<using_named> using_named_members;
+    entity_index using_naming_class(token_index t) const;
     analysis_result class_member_value(SyntaxRef n, token_index t,
                                        entity_index e, expression_meaning &m);
     /* [expr.prim.id]: the expression that names the entity e, found by

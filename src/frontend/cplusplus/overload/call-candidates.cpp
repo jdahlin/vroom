@@ -259,9 +259,12 @@ semantic_analysis::resolve_call(SyntaxRef n,
         semantics[f.node].kind == semantic_kind::bound_member_function &&
         semantics[f.node].c)
         object_class = semantics[f.node].c;
+    entity_index access_class_of = object_class;
+    if (!access_class_of)
+        access_class_of = using_naming_class(callee_at);
     if (x.enclosing &&
         entity_table[x.enclosing].kind == entity_kind::class_type &&
-        !accessible(c, object_class))
+        !accessible(c, access_class_of))
         /* [class.access]/4: "access control is applied to the function
            selected by overload resolution" */
         return ill_formed(n,
