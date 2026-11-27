@@ -94,7 +94,7 @@ node_index parser::template_declaration(node_index (parser::*declaration)())
         add_token();
         add_token();
         add_token();
-        scoped_value<scope_index> none(template_scope, UINT32_MAX);
+        scoped_value<scope_index> none(template_scope, no_scope);
         scoped_value<scope_index> single(single_declarator_scope,
                                          names.declaring_scope());
         flag_set explicit_(explicit_declaration, true);
@@ -147,7 +147,7 @@ node_index parser::explicit_instantiation(node_index (parser::*declaration)())
         add_token();
     }
     add_token(); /* template */
-    scoped_value<scope_index> none(template_scope, UINT32_MAX);
+    scoped_value<scope_index> none(template_scope, no_scope);
     scoped_value<scope_index> single(single_declarator_scope,
                                      names.declaring_scope());
     flag_set explicit_(explicit_declaration, true);
