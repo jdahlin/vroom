@@ -383,6 +383,7 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
     bool copy_deleted = false, move_deleted = false;
     bool copy_non_throwing = true, move_non_throwing = true;
     bool nonconst_form = false;
+    bool copy_unknown = false;
     for (entity_index e : order) {
         qualified_type t = entity_table[e].type;
         const struct type &r = type_table[t.unqualified()];
@@ -405,8 +406,13 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
             subobject_assignment(k, c, false, copy_non_throwing, nonconst_form);
         assignment_use moving =
             subobject_assignment(k, c, true, move_non_throwing, nonconst_form);
-        if (copying == assignment_use::unknown ||
-            moving == assignment_use::unknown) {
+        if (copying == assignment_use::unknown &&
+            moving != assignment_use::unknown && !user_copy) {
+            /* (a template may copy it, unique_ptr's: the move one is
+               declared without the copy one) */
+            copy_unknown = true;
+        } else if (copying == assignment_use::unknown ||
+                   moving == assignment_use::unknown) {
             /* (the defaulted move assignment beside a user-declared copy
                one is declared all the same: else the copy one, deleted,
                would be chosen; a body that cannot be formed leaves it
@@ -432,8 +438,9 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
             declare_implicit_assignment(c, true, false, move_non_throwing);
         return analysis_result::well_formed;
     }
-    declare_implicit_assignment(c, false, copy_deleted, copy_non_throwing,
-                                nonconst_form);
+    if (!copy_unknown || copy_deleted)
+        declare_implicit_assignment(c, false, copy_deleted, copy_non_throwing,
+                                    nonconst_form);
     /* /3: the move assignment operator; /7: "A defaulted move assignment
        operator that is defined as deleted is ignored by overload
        resolution" */
