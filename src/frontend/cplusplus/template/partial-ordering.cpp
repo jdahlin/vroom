@@ -698,10 +698,13 @@ bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
         return false;
     }
     const uint32_t firsts[2] = {ss.first_pattern, tt.first_pattern};
-    unsigned expansions = 0;
+    unsigned expansions[2] = {0, 0};
+    /* the place of each side's trailing expansion: the argument and the
+       number of elements before it */
+    uint64_t places[2] = {0, 0};
     for (uint32_t i = 0; i < ss.pattern_count; i++)
-        for (uint32_t first : firsts) {
-            const template_argument a = template_arguments[first + i];
+        for (uint32_t side = 0; side < 2; side++) {
+            const template_argument a = template_arguments[firsts[side] + i];
             if (a.kind == template_argument::kind_t::pack) {
                 if (a.count == UINT32_MAX) {
                     unknown = true;
@@ -712,7 +715,8 @@ bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
                     if (e.kind == template_argument::kind_t::pack &&
                         e.count == UINT32_MAX && j + 1 == a.count &&
                         e.value != UINT32_MAX) {
-                        expansions++;
+                        expansions[side]++;
+                        places[side] = (uint64_t(i) << 32) | j;
                     } else if (e.kind != template_argument::kind_t::type ||
                                !orderable(e.type, false)) {
                         unknown = true;
@@ -724,9 +728,11 @@ bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
                 unknown = true;
             }
         }
-    /* A single trailing expansion can be deduced against a fixed pack.
-       Ordering two expansions requires comparing their patterns. */
-    if (expansions > 1)
+    /* A single trailing expansion can be deduced against a fixed pack; two
+       bare ones after as many elements each deduce one another
+       ([temp.deduct.type]/9).  Other shapes are not ordered here. */
+    if (expansions[0] > 1 || expansions[1] > 1 ||
+        (expansions[0] && expansions[1] && places[0] != places[1]))
         unknown = true;
     if (unknown)
         return false;
