@@ -1342,8 +1342,10 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
     if (expanded)
         clause_packs = &packs;
     analysis_result r;
-    if (designations.any && target == type_kind::lvalue_reference &&
-        (type_table[type.unqualified()].operand.cv() & cv_const)) {
+    if (designations.any &&
+        (target == type_kind::rvalue_reference ||
+         (target == type_kind::lvalue_reference &&
+          (type_table[type.unqualified()].operand.cv() & cv_const)))) {
         /* [dcl.init.list]/3.10, [impl.clang] for a designated list: a
            prvalue of the referenced aggregate, which the reference binds */
         qualified_type prvalue = qualified_type::make(

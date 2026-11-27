@@ -145,19 +145,23 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
                 owned_array<entity_index> candidates;
                 overload_set(found.entity, candidates);
                 bool others = false, declared_copy = false;
+                bool declared_move = false;
                 for (entity_index f : candidates) {
                     if (copy_assignment_operator(f, c))
                         declared_copy = true;
-                    else if (!move_assignment_operator(f, c))
+                    else if (move_assignment_operator(f, c))
+                        declared_move = true;
+                    else
                         others = true;
                 }
-                /* a class that declares its copy assignment operator has no
-                   implicit one beside what it declares
-                   ([class.copy.assign]/2, /4): overload resolution takes
-                   the list as the argument */
+                /* a class whose copy assignment operator is an entity
+                   (declared, or the implicit one, not trivial), as its
+                   defaulted move one if it has one, has no candidate
+                   beside them ([class.copy.assign]/2, /4): overload
+                   resolution takes the list as the argument */
                 if (others && declared_copy &&
-                    !entity_table[c].defaulted_copy_assignment &&
-                    !entity_table[c].defaulted_move_assignment)
+                    (declared_move ||
+                     !entity_table[c].defaulted_move_assignment))
                     return braced_assignment(n, op, left, m);
                 if (others)
                     return not_supported_because(
