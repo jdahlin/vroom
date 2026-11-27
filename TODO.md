@@ -1536,22 +1536,30 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 4: quality
 
-- [ ] **musttail's limits, and general sibling calls** [P].  `musttail` is a
-  jump or an error (`codegen/musttail.cpp`).  Refused: arguments on the stack
-  (x86-64: more than the argument registers, or a vector wider than the ISA's
-  registers), results returned in memory, arm64 arguments passed by reference
-  to a copy, Windows x64, WebAssembly, builtins.  Other calls in tail position
-  stay calls (only `em_tail_candidate`'s forwarding wrappers jump), so C++
-  answers `__has_cpp_attribute(clang::musttail)` with 0: Skia then rewinds its
-  stack, which its stages without the attribute need.  *Validate:*
-  `src/test/vcc/musttail.c`, `src/test/cxx/run/musttail.cpp`; Skia's HIGHP
-  stages end in `jmp` by objdump.
+- [ ] **musttail's limits, and sibling calls clang makes that vcc does not** [P].
+  `musttail` is a jump or an error (`codegen/musttail.cpp`).  Refused: arguments
+  on the stack (x86-64: more than the argument registers, or a vector wider than
+  the ISA's registers), results returned in memory, arm64 arguments passed by
+  reference to a copy, Windows x64, WebAssembly, builtins.  Other calls in tail
+  position are sibling calls where the frame's address cannot have got out
+  (doc/OPTIMIZATION.md), never at `-O0`.  Missing: the direct emitter's check is
+  on the source, so a local or parameter passed by reference to an inlined
+  function keeps the calls; VIR takes no vector arguments on x86-64 and no
+  call whose result is a record in two registers.  Skia's raster pipeline stages
+  are exactly the first two (every stage passes `r, g, b, a` by reference to its
+  inlined `_k`): 637 of 640 stages of sse2, ml3 and ml4 at `-O3` still end in
+  `call`.  So C++ answers `__has_cpp_attribute(clang::musttail)` with 0: Skia
+  then rewinds its stack, which its stages without the attribute need.  Even
+  with that fixed, Skia built at `-O0` would rely on `musttail` alone (as with
+  clang), and its stages without it would grow the stack.  *Validate:*
+  `src/test/vcc/sibling-calls.c`, `src/test/cxx/run/sibling-calls.cpp`; every
+  Skia stage ends in `jmp` by objdump.
 - [ ] **VIR's code shape against the direct emitter's rules** [P].  Since
   -O2 is VIR (doc/OPTIMIZATION.md), `bench/vcc-opt-rules.py` checks code shape
   at -O0/-O1 alone (`DIRECT_LEVELS`) and `bench/vcc-tail-controls.py` runs with
   `-fno-vir`; -O2/-O3 are compiled and run, their shape unchecked.  Where VIR
   falls short of the rules (2026-11-13; the code is correct in each case):
-  x86-64 makes no sibling calls (`tails`, tail-controls); arm64 leaves a dead
+  arm64 leaves a dead
   `ret` after a sibling call (`tails`: the return block keeps its label, and
   `em_rec_unreachable` treats every label as an entry); x86-64 repeats a zero
   extension (`extensions`, `ke_index`), loads a global through `leaq`+`movl`
