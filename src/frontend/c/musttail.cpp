@@ -4,6 +4,7 @@
  * generation guarantees the jump or gives an error (codegen/musttail.cpp).
  */
 #include "cc-internal.h"
+#include "frontend/c/ast-builder.h"
 
 /* after the attribute list a, in a statement: musttail applies to the return statement that follows */
 CC_PRIVATE void cc_musttail_attribute_note(cc *c, const attrs *a)
