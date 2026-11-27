@@ -35,6 +35,19 @@ dot(__m512i *acc, const __m512i *a, const __m512i *b, long k)
         acc[1] = _mm512_dpbusd_epi32(acc[1], b[i + 1], a[i]);
     }
 }
+__attribute__((noinline, target("avx2,avx512f,avx512bw,avx512vl,avx512vnni")))
+static void dot256(__m256i *acc, const __m256i *a, const __m256i *b, long k)
+{
+    __m256i s = acc[0], t = acc[1];
+
+    for (long i = 0; i < k; i++) {
+        s = _mm256_dpbusd_epi32(s, a[i], b[i]);
+        t = _mm256_dpbusd_epi32(t, b[i + 1], s);
+        s = _mm256_add_epi32(s, _mm256_dpbusd_epi32(a[i], t, a[i]));
+    }
+    acc[0] = s;
+    acc[1] = t;
+}
 static void cpuid7(unsigned *b, unsigned *c)
 {
     unsigned a, d;
@@ -67,6 +80,10 @@ int main(void)
     }
     if (ecx >> 11 & 1) {
         dot(acc, a, b, 8);
+        h = hash(h, acc, sizeof acc);
+    }
+    if ((ecx >> 11 & 1) && (ebx >> 31 & 1)) {
+        dot256((__m256i *)acc, (__m256i *)a, (__m256i *)b, 8);
         h = hash(h, acc, sizeof acc);
     }
     printf("%08x\n", h);

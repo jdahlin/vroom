@@ -239,8 +239,10 @@ VPRIV bool x64_vir_vector_load_fold(x64_vir_context *L, uint32_t b, uint32_t v,
         return false;
     const vir_insn *next = &f->insns[v + 1];
 
+    /* (a 256-bit vpdpbusd is the zmm instruction, which would read 64) */
     if (next->op == VIR_OP_X86_DOT)
-        return next->c == v && next->a != v && next->b != v;
+        return vir_type_size(load->type) == 64 && next->c == v &&
+               next->a != v && next->b != v;
     if (next->op != VIR_OP_X86 || next->type != load->type ||
         (next->c &
          (X64_X86_SHIFT | X64_X86_UNARY | X64_X86_IMMEDIATE | X64_X86_TABLE)))
