@@ -46,7 +46,22 @@ enum {
      (1u << R8) | (1u << R9) | (1u << R10))
 /* floating point temporaries: xmm8-xmm14 (xmm0-7 carry arguments and results, xmm15 is scratch) */
 #define X64_FLOAT_TEMPORARIES (((1u << XMM15) - 1) & ~((1u << XMM8) - 1))
-#define X64_REGISTER_IS_XMM(r) ((r) >= XMM0 && (r) <= XMM15)
+/* xmm16-xmm31 (zmm16-zmm31): records 48-63.  Only VIR gives them out, to
+ * 512-bit values, which only EVEX instructions touch.  No effects mask has
+ * their bits (bit 63 is the flags'): a record writing one is never dead. */
+#define X64_VECTOR_HIGH 48
+#define X64_REGISTER_IS_HIGH_VECTOR(r)                                         \
+    ((r) >= X64_VECTOR_HIGH && (r) < X64_VECTOR_HIGH + 16)
+#define X64_REGISTER_IS_XMM(r)                                                 \
+    (((r) >= XMM0 && (r) <= XMM15) || X64_REGISTER_IS_HIGH_VECTOR(r))
+
+/* the n of xmm n (ymm n, zmm n) */
+static inline int x64_vector_index(int r)
+{
+    if (X64_REGISTER_IS_HIGH_VECTOR(r))
+        return r - X64_VECTOR_HIGH + 16;
+    return r - XMM0;
+}
 
 enum {
     X64_OP_LABEL, /* label */

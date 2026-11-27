@@ -129,7 +129,7 @@ VPRIV void x64_register_name_append(tbuf *b, int r, int sz)
             vtext_string_append(b, "%ymm");
         else
             vtext_string_append(b, "%xmm");
-        vtext_unsigned_append(b, (uint64_t)(r - XMM0));
+        vtext_unsigned_append(b, (uint64_t)x64_vector_index(r));
         return;
     }
     vtext_char_append(b, '%');

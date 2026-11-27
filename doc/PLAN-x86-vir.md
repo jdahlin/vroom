@@ -180,25 +180,29 @@ deleted in the commit that gives it a table row or a generic operation.
     three-operand instructions, the 64-byte ABI in VIR, shift
     operators and shuffles, EVEX rounding and broadcast.  Without VNNI
     Stockfish's `network.cpp` does not compile (a 64-byte argument).
-- **XV5c** `zmm16`-`zmm31` for 512-bit values (in progress).  Why: Stockfish's
-  accumulator refresh keeps 16 vectors live and VIR has 14 registers; vector
-  spills are about 1% of the search, so this is a small gain.
-  - Done: the assembler encodes the EVEX forms with these registers as
-    llvm-mc does (`x86-avx512-high-registers.s`), and `vpbroadcastq` from a
-    64-bit register, so a splat needs no `xmm` step.
-  - Allocator (`vir/register-allocation.cpp`): the target says which
-    registers only `i64x8` values may take.  The masks are 64-bit already
-    (`alloc[1]`), but registers are chosen in several places, some without
-    knowing the value that goes there: `vir_alloc_register_choose`,
-    `..._victim_find`, the scratch of parallel moves, loop-header drops, block
-    parameter votes and hints, tied results, the callee-saved relocations and
-    `vir_alloc_register_displace`.  The x86-64 lowering must also refuse (and
-    leave to the direct emitter) a function where any other value got a high
-    register, so a missed site costs speed, not correctness.
-  - Lowering: record register numbers for them (`XMM0 + 16` is `RIP`; 48-63
-    are free), their text (`a - XMM0` throughout), calls clobbering them,
-    and no VEX or legacy instruction on such a value.
+- **XV5c** (done) `zmm16`-`zmm31` for 512-bit values.  Why: Stockfish's
+  accumulator refresh keeps 16 vectors live and VIR has 14 registers.
+  - The assembler encodes the EVEX forms with these registers as llvm-mc
+    does (`x86-avx512-high-registers.s`), and `vpbroadcastq` from a 64-bit
+    register, so a splat needs no `xmm` step.
+  - Allocator: `vir_target_registers.wide` names registers only 64-byte
+    values may take; every choice of a register keeps others out, and
+    `vir_alloc_check` rejects any that gets in.
+  - Lowering: records 48-63 are `xmm16`-`xmm31`; calls clobber them.  They
+    are offered in an AVX-512BW function whose every instruction on a 512-bit
+    value can name them (loads, stores, splats, `vpdpbusd`, the x86
+    operations on zmm and compares to a general register).  After allocation
+    a guard leaves a function with any other value there to the direct
+    emitter.  An edge exchange of vector registers moves the function's
+    widest size.
   - 256-bit values stay in 0-15 (they would need AVX-512VL forms).
+  - Found on the way: if-conversion made `select` of `i64x8`, wrong code at
+    `-O2` and `-O3` (`test/vcc/avx512-high-registers.c`).
+  - Measured (Stockfish `-O3 -march=native`, `bench 16 1 13`, 2030154
+    nodes, Zen 5, 30 alternating pinned pairs on a loaded machine): vector
+    spills and reloads on the stack from 172 to 10 instructions in the
+    binary, 0.45 % fewer instructions, 1.7 % fewer cycles (paired median;
+    quartiles 0.1 to 2.6 %).
 - **XV6** Delete the stencils and `tools/gen-x86stencils.py`, or keep them
   for the named few the table cannot express.
 

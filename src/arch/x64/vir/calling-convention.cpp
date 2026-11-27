@@ -140,7 +140,7 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
         i->op ==
         VIR_OP_LANDINGPAD) { /* (the unwinder keeps only the callee-saved registers) */
         x->clobbered[0] = UINT16_MAX;
-        x->clobbered[1] = (1u << 14) - 1;
+        x->clobbered[1] = ((1u << 14) - 1) | X64_VIR_HIGH_VECTORS;
     } else if (vir_op_is_call(i->op)) {
         uint32_t n = f->extra[i->c];
         x->operand_count =
@@ -161,17 +161,17 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
             x->mem |= 1;
         x->clobbered[0] =
             r10 ? X64_TEMPORARIES : X64_TEMPORARIES & ~(1u << R10);
-        x->clobbered[1] = (1u << 14) - 1;
+        x->clobbered[1] = ((1u << 14) - 1) | X64_VIR_HIGH_VECTORS;
         if (ms) { /* a Microsoft callee keeps rsi, rdi and xmm6-xmm15 */
             x->clobbered[0] &= ~((1u << RSI) | (1u << RDI));
-            x->clobbered[1] = (1u << 6) - 1;
+            x->clobbered[1] = ((1u << 6) - 1) | X64_VIR_HIGH_VECTORS;
         }
         /* The second return resumes at this call. Keep every live value
 		 * recoverable from its own frame slot or by rematerialization. */
         if (target && target->has_returns_twice &&
             virbuild_call_returns_twice(target->context, callee)) {
             x->clobbered[0] = UINT16_MAX;
-            x->clobbered[1] = (1u << 14) - 1;
+            x->clobbered[1] = ((1u << 14) - 1) | X64_VIR_HIGH_VECTORS;
         }
         /* (an invoke ends its block: its lowering moves the result, 8.8) */
         if (i->type != VIR_TYPE_VOID && i->type != VIR_TYPE_MULTI &&
