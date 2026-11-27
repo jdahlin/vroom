@@ -2011,6 +2011,7 @@ analysis_result semantic_analysis::declare_with_initializer(
        ([dcl.link]/6: a later declaration without one keeps it) */
     if (r == analysis_result::well_formed && c_language && !at_block_scope() &&
         (kind == entity_kind::function || kind == entity_kind::variable) &&
+        !(kind == entity_kind::function && (s.gnu_flags & gnu_overloadable)) &&
         entity_table[declared_entity].linkage_of_name != linkage::internal)
         entity_table.give_c_linkage(declared_entity);
     if (r == analysis_result::well_formed && kind == entity_kind::variable &&
