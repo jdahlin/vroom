@@ -420,7 +420,13 @@ static codegen_value vlane(codegen_context *e, ast_qualified_type t, int r,
     {
         int d = treg(e);
 
-        a64_record_emit_move(e, 1, d, r);
+        /* a narrowing conversion to a char or short may have left the
+           upper bits: extended as a lane's load is */
+        if (!codegen_type_is_float(c, t) && codegen_type_size(c, t) < 4)
+            extend(e, d, r, (int)codegen_type_size(c, t),
+                   codegen_type_is_signed(c, t));
+        else
+            a64_record_emit_move(e, 1, d, r);
         return codegen_value_register(d);
     }
 }
