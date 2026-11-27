@@ -1,72 +1,39 @@
 /* vcc front end: overloadable: Itanium mangling as clang does it for C */
 #include "common/literal.h"
 #include "cc-internal.h"
+#include "frontend/itanium/writer.h"
 
 /* ---------------- overloadable: Itanium mangling as clang does it for C ---------------- */
 
-typedef struct cc_mangler {
-    char b[512];
-    uint32_t n;
-    ast_qualified_type sub
-        [64]; /* substitution candidates, in order: canonical (qualified) types */
-    uint32_t nsub;
-    bool full;
-} cc_mangler;
+/* the writer of the C++ front end's mangler (frontend/itanium/writer.h),
+   with the substitution candidates of a C function's parameter types:
+   canonical (qualified) types, in order ([abi:mangling-compression]) */
+struct cc_mangler {
+    itanium::writer out;
+    ast_qualified_type sub[64];
+    uint32_t nsub = 0;
 
-static void cc_mangle_append(cc_mangler *m, const char *s, size_t l)
-{
-    if (m->n + l >= sizeof(m->b)) {
-        m->full = true;
-        return;
+    explicit cc_mangler(vbuffer *b) : out(b)
+    {
     }
-    memcpy(m->b + m->n, s, l);
-    m->n += (uint32_t)l;
-}
+};
 
-static void cc_mangle_append_text(cc_mangler *m, const char *s)
-{
-    cc_mangle_append(m, s, strlen(s));
-}
-
-static void cc_mangle_append_number(cc_mangler *m, uint64_t v)
-{
-    char t[24];
-
-    cc_mangle_append(
-        m, t, (size_t)snprintf(t, sizeof(t), "%llu", (unsigned long long)v));
-}
-
-static void cc_mangle_append_source_name(cc_mangler *m, uint32_t id)
+static void cc_mangle_source_name(cc_mangler *m, uint32_t id)
 {
     int l;
     const char *s = cc_identifier_name(id, &l);
 
-    cc_mangle_append_number(m, (uint64_t)l);
-    cc_mangle_append(m, s, (size_t)l);
+    m->out.source_name(s, (size_t)l);
 }
 
-/* S_, S0_, S1_ ... SZ_, S10_ for a type seen before; false if t is new */
+/* <substitution> for a type seen before; false if t is new */
 static bool cc_mangle_substitution_find(cc_mangler *m, ast_qualified_type t)
 {
-    for (uint32_t i = 0; i < m->nsub; i++) {
-        char t2[16], d[8];
-        int k = 0, nd = 0;
-
-        if (m->sub[i] != t)
-            continue;
-        t2[k++] = 'S';
-        if (i)
-            for (uint32_t v = i - 1;; v /= 36) {
-                d[nd++] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[v % 36];
-                if (v < 36)
-                    break;
-            }
-        while (nd)
-            t2[k++] = d[--nd];
-        t2[k++] = '_';
-        cc_mangle_append(m, t2, (size_t)k);
-        return true;
-    }
+    for (uint32_t i = 0; i < m->nsub; i++)
+        if (m->sub[i] == t) {
+            m->out.substitution(i);
+            return true;
+        }
     return false;
 }
 
@@ -76,49 +43,80 @@ static void cc_mangle_substitution_add(cc_mangler *m, ast_qualified_type t)
         m->sub[m->nsub++] = t;
 }
 
+/* [abi:mangling-builtin]'s row of a basic type; none for another */
+static itanium::builtin cc_mangle_builtin(int k)
+{
+    switch (k) {
+    case AST_TYPE_VOID:
+        return itanium::builtin::void_;
+    case AST_TYPE_BOOL:
+        return itanium::builtin::bool_;
+    case AST_TYPE_CHAR:
+        return itanium::builtin::char_;
+    case AST_TYPE_SIGNED_CHAR:
+        return itanium::builtin::signed_char;
+    case AST_TYPE_UNSIGNED_CHAR:
+        return itanium::builtin::unsigned_char;
+    case AST_TYPE_SHORT:
+        return itanium::builtin::short_int;
+    case AST_TYPE_UNSIGNED_SHORT:
+        return itanium::builtin::unsigned_short_int;
+    case AST_TYPE_INT:
+        return itanium::builtin::int_;
+    case AST_TYPE_UNSIGNED_INT:
+        return itanium::builtin::unsigned_int;
+    case AST_TYPE_LONG:
+        return itanium::builtin::long_int;
+    case AST_TYPE_UNSIGNED_LONG:
+        return itanium::builtin::unsigned_long_int;
+    case AST_TYPE_LONG_LONG:
+        return itanium::builtin::long_long_int;
+    case AST_TYPE_UNSIGNED_LONG_LONG:
+        return itanium::builtin::unsigned_long_long_int;
+    case AST_TYPE_INT128:
+        return itanium::builtin::int128;
+    case AST_TYPE_UINT128:
+        return itanium::builtin::unsigned_int128;
+    case AST_TYPE_BFLOAT16:
+        return itanium::builtin::bfloat16;
+    case AST_TYPE_FLOAT16:
+        return itanium::builtin::float16;
+    case AST_TYPE_FLOAT:
+        return itanium::builtin::float_;
+    case AST_TYPE_DOUBLE:
+        return itanium::builtin::double_;
+    case AST_TYPE_LONG_DOUBLE:
+        return itanium::builtin::long_double;
+    case AST_TYPE_FLOAT128:
+        return itanium::builtin::float128;
+    default:
+        return itanium::builtin::none;
+    }
+}
+
+/* [abi:mangling-type] of a C type */
 static void cc_mangle_type(cc *c, cc_mangler *m, ast_qualified_type t)
 {
-    static const char *const prim_code[] = {
-        [AST_TYPE_VOID] = "v",
-        [AST_TYPE_BOOL] = "b",
-        [AST_TYPE_CHAR] = "c",
-        [AST_TYPE_SIGNED_CHAR] = "a",
-        [AST_TYPE_UNSIGNED_CHAR] = "h",
-        [AST_TYPE_SHORT] = "s",
-        [AST_TYPE_UNSIGNED_SHORT] = "t",
-        [AST_TYPE_INT] = "i",
-        [AST_TYPE_UNSIGNED_INT] = "j",
-        [AST_TYPE_LONG] = "l",
-        [AST_TYPE_UNSIGNED_LONG] = "m",
-        [AST_TYPE_LONG_LONG] = "x",
-        [AST_TYPE_UNSIGNED_LONG_LONG] = "y",
-        [AST_TYPE_INT128] = "n",
-        [AST_TYPE_UINT128] = "o",
-        [AST_TYPE_BFLOAT16] = "DF16b",
-        [AST_TYPE_FLOAT16] = "DF16_",
-        [AST_TYPE_FLOAT] = "f",
-        [AST_TYPE_DOUBLE] = "d",
-        [AST_TYPE_LONG_DOUBLE] = "e",
-        [AST_TYPE_FLOAT128] = "g",
-    };
+    using itanium::terminal;
     int q = AST_QUALIFIED_TYPE_QUALIFIERS(t), k;
     const ctype *x;
 
     t = canon(c, t); /* keeps the qualifiers */
     k = AST_TYPE_KIND(c, t);
     if (!q && k < AST_TYPE_POINTER) {
-        cc_mangle_append_text(m, prim_code[k]);
+        m->out.write(cc_mangle_builtin(k));
         return;
     }
     if (cc_mangle_substitution_find(m, t))
         return;
     if (q) {
+        /* <qualified-type>, <CV-qualifiers> ::= [r] [V] [K] */
         if (q & AST_QUALIFIER_RESTRICT)
-            cc_mangle_append_text(m, "r");
+            m->out.write(terminal::r_restrict_qualifier);
         if (q & AST_QUALIFIER_VOLATILE)
-            cc_mangle_append_text(m, "V");
+            m->out.write(terminal::V_volatile_qualifier);
         if (q & AST_QUALIFIER_CONST)
-            cc_mangle_append_text(m, "K");
+            m->out.write(terminal::K_const_qualifier);
         cc_mangle_type(c, m, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
         cc_mangle_substitution_add(m, t);
         return;
@@ -126,36 +124,38 @@ static void cc_mangle_type(cc *c, cc_mangler *m, ast_qualified_type t)
     x = AST_TYPE(c, t);
     switch (k) {
     case AST_TYPE_POINTER:
-        cc_mangle_append_text(m, "P");
+        m->out.write(terminal::P_pointer);
         cc_mangle_type(c, m, x->base);
         break;
     case AST_TYPE_ARRAY:
-        cc_mangle_append_text(m, "A");
+        m->out.write(terminal::A_array_type);
         if (!(x->flags & (AST_TYPE_FLAG_INCOMPLETE | AST_TYPE_FLAG_VLA)))
-            cc_mangle_append_number(m, x->n);
-        cc_mangle_append_text(m, "_");
+            m->out.number(x->n);
+        m->out.write(terminal::underscore);
         cc_mangle_type(c, m, x->base);
         break;
     case AST_TYPE_FUNCTION:
-        cc_mangle_append_text(m, "F");
+        m->out.write(terminal::F_function_type);
         cc_mangle_type(c, m, x->base);
         if (!x->n && !(x->flags & AST_TYPE_FLAG_VARIADIC))
-            cc_mangle_append_text(m, "v");
+            m->out.write(itanium::builtin::void_);
         for (uint32_t i = 0; i < x->n; i++)
             cc_mangle_type(
                 c, m, AST_QUALIFIED_TYPE_UNQUALIFIED(c->params[x->aux + i]));
         if (x->flags & AST_TYPE_FLAG_VARIADIC)
-            cc_mangle_append_text(m, "z");
-        cc_mangle_append_text(m, "E");
+            m->out.write(terminal::z_ellipsis);
+        m->out.write(terminal::E_end);
         break;
     default: { /* struct, union, enum */
         const tag *r = &c->tags[x->aux];
         uint32_t id = r->name ? r->name : r->typedef_name;
 
-        if (id)
-            cc_mangle_append_source_name(m, id);
-        else
-            cc_mangle_append_text(m, "Ut_");
+        if (id) {
+            cc_mangle_source_name(m, id);
+        } else {
+            m->out.write(terminal::Ut_unnamed_type);
+            m->out.write(terminal::underscore);
+        }
         break;
     }
     }
@@ -165,30 +165,36 @@ static void cc_mangle_type(cc *c, cc_mangler *m, ast_qualified_type t)
 /* _Z[L]<name><params> as clang mangles an overloadable C function; 0 if it does not fit */
 static uint32_t cc_mangle_overload(cc *c, uint32_t s)
 {
+    using itanium::terminal;
     const sym *y = &c->syms[s];
     const ctype *f = AST_TYPE(c, y->ty);
-    cc_mangler m;
+    char storage[512];
+    vbuffer b;
     uint32_t si;
     char *keep;
 
-    m.n = m.nsub = 0;
-    m.full = false;
-    cc_mangle_append_text(&m, y->sc == AST_STORAGE_STATIC ? "_ZL" : "_Z");
-    cc_mangle_append_source_name(&m, y->name);
+    vbuffer_fixed(&b, storage, sizeof(storage));
+    b.flags |= VBUFFER_STICKY;
+    cc_mangler m(&b);
+    m.out.write(terminal::underscore_Z_mangled_name);
+    if (y->sc == AST_STORAGE_STATIC)
+        m.out.write(terminal::L_internal_linkage);
+    cc_mangle_source_name(&m, y->name);
     if (!f->n && !(f->flags & AST_TYPE_FLAG_VARIADIC))
-        cc_mangle_append_text(&m, "v");
+        m.out.write(itanium::builtin::void_);
     for (uint32_t i = 0; i < f->n; i++)
         cc_mangle_type(c, &m,
                        AST_QUALIFIED_TYPE_UNQUALIFIED(c->params[f->aux + i]));
     if (f->flags & AST_TYPE_FLAG_VARIADIC)
-        cc_mangle_append_text(&m, "z");
-    if (m.full)
+        m.out.write(terminal::z_ellipsis);
+    if (b.failed)
         return 0;
-    keep = (char *)cc_heap_allocate(c, m.n + 1);
-    memcpy(keep, m.b, m.n);
-    keep[m.n] = 0;
+    keep = (char *)cc_heap_allocate(c, b.n + 1);
+    memcpy(keep, b.p, b.n);
+    keep[b.n] = 0;
     si = c->nstr++;
-    c->strs[si] = VCC_LITERAL(cstr, keep, m.n + 1, 1, LEX_TOKEN_STRING);
+    c->strs[si] =
+        VCC_LITERAL(cstr, keep, (uint32_t)b.n + 1, 1, LEX_TOKEN_STRING);
     return si + 1;
 }
 

@@ -175,8 +175,16 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
                                          "an imaginary floating literal");
         m.type = qualified_type::make(type_table.fundamental(k.type), cv_none);
         m.beyond_integral_constant = true;
-        if (!k.value_known || k.type == fundamental_type::long_double)
+        if (!k.value_known)
             return analysis_result::well_formed;
+        if (k.type == fundamental_type::long_double) {
+            /* kept as a double, when a double holds it */
+            if (v.long_double_in_double) {
+                m.evaluation = constness::constant;
+                m.value = v.long_double_bits;
+            }
+            return analysis_result::well_formed;
+        }
         m.evaluation = constness::constant;
         if (k.type == fundamental_type::float_) {
             uint32_t bits = static_cast<uint32_t>(v.floating_bits_low);

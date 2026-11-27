@@ -350,8 +350,18 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 n, "basic.def.odr",
                 "a second definition of a function template");
         /* (default arguments of one declaration, which the other's
-           declarator the specializations are made from has not) */
-        if (defaults || f.default_arguments)
+           declarator the specializations are made from has not; one that
+           adds none and defines nothing leaves that declarator) */
+        /* (the exception: after friend declarations alone, which name
+           none ([dcl.fct.default]/4), the definition's are the template's,
+           its declarator the one specializations are made from) */
+        bool first_defaults = defaults && defines && f.friend_declaration &&
+                              !f.hidden_friend && !f.default_arguments &&
+                              !f.definition && !s.friend_;
+        bool refused = (defaults && !first_defaults) ||
+                       (f.default_arguments &&
+                        (defines || f.hidden_friend || f.friend_declaration));
+        if (refused)
             return not_supported_because(
                 n, "dcl.fct.default",
                 "a redeclared function template with default arguments");
@@ -401,6 +411,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             record.declaration = n;
             record.definition = definition;
             record.declarator = definition;
+            if (first_defaults)
+                record.default_arguments = true;
             if (renamed) {
                 record.first_parameter = first;
                 entity_table[f.entity].type = type;

@@ -276,20 +276,10 @@ uint32_t c_lowering::thunk(entity_index f, int64_t adjustment, token_index at,
         if (t.f == f && t.adjustment == adjustment && t.vcall == vcall &&
             t.variant == variant)
             return t.symbol;
-    owned_buffer function_name;
-    if (!itanium_symbol_name(analysis, tokens.pp, f, function_name.get(),
-                             variant))
-        return fail("a thunk whose function's symbol is not mangled", at);
     owned_buffer name;
-    if (vcall)
-        vbuffer_format_append(name.get(), "_ZTv%lld_n%llu_",
-                              static_cast<long long>(adjustment),
-                              static_cast<unsigned long long>(-vcall));
-    else
-        vbuffer_format_append(name.get(), "_ZThn%llu_",
-                              static_cast<unsigned long long>(-adjustment));
-    vbuffer_append(name.get(), function_name.data() + 2,
-                   function_name.size() - 2);
+    if (!itanium_thunk_name(analysis, tokens.pp, f, variant, adjustment, vcall,
+                            name.get()))
+        return fail("a thunk whose function's symbol is not mangled", at);
     /* f's linkage, as symbol() gives it */
     int storage = AST_STORAGE_NONE;
     uint32_t flags = AST_SYMBOL_FLAG_GLOBAL;
@@ -361,10 +351,8 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
     entity_index f = r.f;
     const entity &x = analysis.entity_table[f];
     const struct type &ft = record(x.type);
-    if (ft.variadic || passed_indirectly(ft.operand))
-        return fail("a thunk of a variadic function or one returning "
-                    "a class by address",
-                    at);
+    if (ft.variadic)
+        return fail("a thunk of a variadic function", at);
     ast_qualified_type function = entity_type(f, at);
     const qualified_type *types =
         analysis.type_table.parameters(x.type.unqualified());
@@ -394,7 +382,13 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
                 r.vcall / static_cast<int64_t>(analysis.pointer_size()), t);
         arguments.append(value);
     }
-    uint32_t target = symbol(f, at, r.variant);
+    uint32_t target = 0;
+    if (x.special == special_member::destructor && r.variant == 1)
+        /* the complete object destructor its calls use: D2 where no D1
+           is made (special_callee) */
+        target = special_callee(f, at);
+    else
+        target = symbol(f, at, r.variant);
     if (!target)
         return false;
     ast_builder_symbol_flags_add(c, target, AST_SYMBOL_FLAG_USED);
@@ -406,8 +400,23 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
         make(AST_NODE_CALL, result, callee,
              ast_builder_list(c, arguments.data(), count), count, 0, 0);
     uint32_t statement_node = 0;
-    if (record(ft.operand).kind == type_kind::fundamental &&
-        AST_QUALIFIED_TYPE_UNQUALIFIED(result) == void_type)
+    if (built_in_place(ft.operand)) {
+        /* [class.copy.elision]/1, [abi:calls]: the function builds its
+           result where the thunk's caller wants it */
+        uint32_t into = store(result, ft.operand, result_node(result), call);
+        if (!into)
+            return false;
+        uint32_t held[2] = {c_statement(c, into),
+                            ast_builder_node(c, AST_NODE_EXPRESSION, result,
+                                             result_node(result), 0, 0, 0, 0)};
+        uint32_t value = statement_expression(result, block(held, 2));
+        if (!value)
+            return false;
+        statement_node =
+            ast_builder_node(c, AST_NODE_RETURN, void_type, value, 0, 0, 0, 0);
+        ast_builder_symbol_flags_add(c, r.symbol, AST_SYMBOL_FLAG_NOINLINE);
+    } else if (record(ft.operand).kind == type_kind::fundamental &&
+               AST_QUALIFIED_TYPE_UNQUALIFIED(result) == void_type)
         statement_node = c_statement(c, call);
     else
         statement_node =

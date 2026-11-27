@@ -457,7 +457,7 @@ analysis_result semantic_analysis::member_template_call(
     const owned_array<SyntaxElement> &arguments,
     owned_array<expression_meaning> &early,
     const owned_array<SyntaxElement> *written, SyntaxRef written_at,
-    expression_meaning &m)
+    expression_meaning &m, entity_index through)
 {
     bool braced = false;
     if (early.empty())
@@ -546,7 +546,7 @@ analysis_result semantic_analysis::member_template_call(
                                 ft.parameter_count, f));
     }
     if (!entity_table[f].nonstatic_member)
-        return static_member_call(n, f, object, arguments, early, m);
+        return static_member_call(n, f, object, arguments, early, m, through);
     if (!object && !current_class() && !defining_class)
         /* [expr.prim.id]/2: "An id-expression that denotes a non-static
            data member or non-static member function of a class can only
@@ -564,7 +564,7 @@ analysis_result semantic_analysis::member_template_call(
         return not_supported_because(
             n, "class.mfct.non-static",
             "a non-static member function template called with no object");
-    return bound_member_call(n, f, *object, arguments, early, m);
+    return bound_member_call(n, f, *object, arguments, early, m, through);
 }
 
 /*
@@ -575,13 +575,17 @@ analysis_result semantic_analysis::member_template_call(
 analysis_result semantic_analysis::static_member_call(
     SyntaxRef n, entity_index f, const expression_meaning *object,
     const owned_array<SyntaxElement> &arguments,
-    owned_array<expression_meaning> &early, expression_meaning &m)
+    owned_array<expression_meaning> &early, expression_meaning &m,
+    entity_index through)
 {
     token_index at = n.first_token();
     entity_index object_class = 0;
     if (object)
         object_class = type_table[object->type.unqualified()].entity;
-    if (!accessible(f, object_class))
+    entity_index named_in = object_class;
+    if (through)
+        named_in = through;
+    if (!accessible(f, named_in))
         /* [class.access]/4: "access control is applied to the function
            selected by overload resolution" */
         return ill_formed(n,
@@ -633,13 +637,17 @@ bool semantic_analysis::has_this_object()
 analysis_result semantic_analysis::bound_member_call(
     SyntaxRef n, entity_index f, const expression_meaning &object,
     const owned_array<SyntaxElement> &arguments,
-    owned_array<expression_meaning> &early, expression_meaning &m)
+    owned_array<expression_meaning> &early, expression_meaning &m,
+    entity_index through)
 {
     token_index at = n.first_token();
     expression_meaning e = object;
     entity_index object_class = type_table[e.type.unqualified()].entity;
     const entity x = entity_table[f];
-    if (!accessible(f, object_class))
+    entity_index named_in = object_class;
+    if (through)
+        named_in = through;
+    if (!accessible(f, named_in))
         /* [class.access]/4: "access control is applied to the function
            selected by overload resolution" */
         return ill_formed(n,

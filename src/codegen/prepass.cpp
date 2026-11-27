@@ -294,7 +294,7 @@ static void codegen_prepass_float_write_note(codegen_prepass_state *P,
                               (CODEGEN_FLOAT_FACT_NONNEGATIVE |
                                CODEGEN_FLOAT_FACT_ZERO)) |
                              (k & CODEGEN_FLOAT_FACT_BAD)
-                       : CODEGEN_FLOAT_FACT_SEEN | k);
+                       : *f | CODEGEN_FLOAT_FACT_SEEN | k);
 }
 
 static void codegen_prepass_assignment_note(codegen_prepass_state *P,
@@ -618,8 +618,12 @@ VPRIV void codegen_function_walk_ensure(codegen_unit *E, cc *c, uint32_t s)
         double t = E->stats ? codegen_clock_seconds() : 0;
         const node *b = &c->nodes[c->syms[s].body];
 
-        for (uint32_t i = 0; i < b->aux; i++) /* params, used or not */
+        for (uint32_t i = 0; i < b->aux; i++) { /* params, used or not */
             codegen_prepass_local_note(&P, c->lists[b->a + i]);
+            /* a parameter's incoming value is a write of any value: the
+               writes seen say nothing of it */
+            E->float_facts[c->lists[b->a + i]] |= CODEGEN_FLOAT_FACT_BAD;
+        }
         codegen_prepass_node_walk(&P, c->syms[s].body);
         if (P.catches) /* (the allocators know no edge from a call to a landing pad) */
             for (uint32_t l = P.llo; l <= P.lhi && l < c->nsym; l++)

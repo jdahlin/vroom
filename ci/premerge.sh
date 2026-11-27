@@ -145,6 +145,7 @@ generic)
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
 	# the C++ front end's citations and quoted grammar against docs/cxx-spec
 	step cxx-spec-refs python3 bench/cxx-spec-refs.py
+	step cxx-mangle-unit python3 bench/cxx-mangle-unit.py --clang -j "$J"
 	# no new analysis function without a citation, no unmarked "as clang"
 	step cxx-spec-anchors python3 bench/cxx-spec-anchors.py --check
 	# the syntax views generated from the grammar (syntax-views.inc)

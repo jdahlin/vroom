@@ -206,6 +206,9 @@ const vir_opcode_info vir_opcode_table[256] = {
     R(VIR_OP_X86, "x86", VIR_FORM_STD,
       VIR_TYPE_MASK_VEC | VIR_TYPE_MASK_I | VIR_TYPE_MASK_WIDE, ANY, ANY, IMM,
       0, VIR_EFFECT_P),
+    /* (not pure, so it stays; it writes nothing, so loads forward past it) */
+    R(VIR_OP_PREFETCH, "prefetch", VIR_FORM_STD, VIR_TYPE_MASK_V, PTR, IMM,
+      NONE, 0, VIR_EFFECT_U),
     R(VIR_OP_X86_DOT, "x86dot", VIR_FORM_STD, VIR_TYPE_MASK_WIDE, T, T, T, 0,
       VIR_EFFECT_P),
     R(VIR_OP_VREDUCE, "vreduce", VIR_FORM_STD, VIR_TYPE_MASK_I, VRED, NONE,

@@ -9,6 +9,9 @@
 #include "../../../codegen/vir/lowering-driver.h"
 #include "vir/layout.h"
 
+/* the allocator's float registers 16-31 */
+#define X64_VIR_HIGH_VECTORS UINT64_C(0xffff0000)
+
 typedef struct x64_vir_context {
     codegen_context *context;
     vir_function *function;
@@ -35,6 +38,7 @@ typedef struct x64_vir_context {
     bool bmi2;        /* shlx, shrx, sarx: a count in any register */
     bool
         uses_ymm; /* 256- or 512-bit values: vzeroupper before calls and returns */
+    int vector_size; /* the widest value's bytes, at least 16 */
     bool
         ms; /* the Microsoft x64 convention (Windows): arguments by position, rcx rdx r8 r9 / xmm0-3, shadow space */
     uint32_t

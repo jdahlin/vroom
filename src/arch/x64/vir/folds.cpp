@@ -60,6 +60,7 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
     case VIR_OP_RET:
     case VIR_OP_TRAP:
     case VIR_OP_BARRIER:
+    case VIR_OP_PREFETCH:
     case VIR_OP_CALL:
     case VIR_OP_INVOKE:
     case VIR_OP_LANDINGPAD:

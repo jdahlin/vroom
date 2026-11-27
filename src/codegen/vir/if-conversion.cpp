@@ -245,8 +245,11 @@ VPRIV bool virbuild_if_convert(codegen_context *e)
             c = virbuild_value_resolve(V, V->extra[V->insns[p].insn.b + jf]);
             if (a == c)
                 continue;
+            /* (no select of a 256- or 512-bit value: VIR has none, and a
+			 * lowering would move 16 bytes of it) */
             if (nsel == 8 || V->insns[p].insn.type == VIR_TYPE_VOID ||
-                V->insns[p].insn.type == VIR_TYPE_MULTI || a == p || c == p) {
+                V->insns[p].insn.type == VIR_TYPE_MULTI ||
+                vir_type_size(V->insns[p].insn.type) > 16 || a == p || c == p) {
                 badsel = true;
                 break;
             }

@@ -117,6 +117,103 @@ static void vx_entry(void *ctx, uint32_t b, uint32_t pred, uint32_t v,
         reg, stored, decision);
 }
 
+/* Whether every instruction that reads or writes a 512-bit value is one whose
+ * x86-64 emission names zmm16-zmm31: loads, stores, splats, vpdpbusd and the
+ * x86 operations on zmm (to a zmm, or a compare to a general register). */
+static bool x64_vir_high_vectors_fit(vir_function *f)
+{
+    for (uint32_t v = f->constant_count; v < f->insn_count; v++) {
+        vir_insn in = f->insns[v];
+        bool result = vir_type_size(in.type) == 64, operand = false;
+        vir_operand_iterator it;
+        uint32_t *p;
+
+        if (in.op == VIR_OP_BR || in.op == VIR_OP_BPARAM)
+            continue; /* the allocator's copies, at the value's width */
+        vir_operand_iterator_init(&it, f, &in, false);
+        while ((p = vir_operand_iterator_next(&it)))
+            operand |= vir_type_size(f->insns[*p].type) == 64;
+        if (!result && !operand)
+            continue;
+        switch (in.op) {
+        case VIR_OP_LOAD:
+        case VIR_OP_STORE:
+        case VIR_OP_X86_DOT:
+        case VIR_OP_VSPLAT:
+            break;
+        case VIR_OP_X86:
+            if (!result && vir_type_is_vector(in.type))
+                return false; /* a narrower vector from a zmm one */
+            break;
+        default:
+            return false;
+        }
+    }
+    return true;
+}
+
+/* register byte r holds v: false when r is zmm16-zmm31 and v is not 512 bits */
+static bool x64_vir_high_vector_fits(const vir_function *f, uint32_t r,
+                                     uint32_t v)
+{
+    if (r >= 128 || !VIR_REGISTER_CLASS(r) || VIR_REGISTER_NUMBER(r) < 16)
+        return true;
+    return vir_type_size(f->insns[v].type) == 64;
+}
+
+/* The guard behind the allocator's rule (vir_target_registers.wide): every
+ * place the allocation names a register.  A site the allocator misses then
+ * costs the function VIR, not its correctness. */
+static bool x64_vir_high_vectors_check(vir_function *f, const vir_alloc_out *o)
+{
+    bool ok = true;
+
+    for (uint32_t b = 0; b < f->block_count; b++) {
+        const vir_block *k = &f->blocks[b];
+        uint32_t at = o->block_offsets[b];
+
+        for (uint32_t i = k->first; i < k->first + k->insn_count; i++) {
+            vir_insn in = f->insns[i];
+
+            if (i < k->first + k->parameter_count) {
+                ok &=
+                    x64_vir_high_vector_fits(f, o->operand_registers[at++], i);
+                continue;
+            }
+            vir_operand_iterator it;
+            uint32_t *p;
+
+            vir_operand_iterator_init(&it, f, &in, false);
+            while ((p = vir_operand_iterator_next(&it)))
+                if (f->insns[*p].type != VIR_TYPE_MULTI)
+                    ok &= x64_vir_high_vector_fits(
+                        f, o->operand_registers[at++], *p);
+            if (in.type != VIR_TYPE_VOID && in.type != VIR_TYPE_MULTI)
+                ok &=
+                    x64_vir_high_vector_fits(f, o->operand_registers[at++], i);
+        }
+    }
+    for (uint32_t k = 0; k < o->edit_count; k++) {
+        const vir_edit *x = &o->edit[k];
+
+        if (x->kind == VIR_EDIT_SWAP)
+            continue;
+        if (x->kind == VIR_EDIT_STORE || x->kind == VIR_EDIT_MOVE)
+            ok &= x64_vir_high_vector_fits(f, x->src, x->value);
+        if (x->kind != VIR_EDIT_STORE)
+            ok &= x64_vir_high_vector_fits(f, x->dst, x->value);
+    }
+    for (uint32_t k = 0; k < o->move_count; k++) {
+        const vir_edge_move *m = &o->move[k];
+
+        if (!(m->dst & VIR_LOCATION_SLOT))
+            ok &= x64_vir_high_vector_fits(f, m->dst, m->value);
+        if (m->kind != VIR_EDIT_REMATERIALIZE && !(m->src & VIR_LOCATION_SLOT))
+            ok &= x64_vir_high_vector_fits(f, m->src, m->value);
+    }
+    return ok;
+}
+
 VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
                                   const char **why)
 {
@@ -152,6 +249,18 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         .callee = {cs, ms ? ((1u << 14) - 1) & ~((1u << 6) - 1) : 0},
         .fixed = x64_vir_fixed_registers_get,
         .context = &L};
+    L.vector_size = 16;
+    for (uint32_t k = 0; k < f->insn_count; k++)
+        if ((int)vir_type_size(f->insns[k].type) > L.vector_size)
+            L.vector_size = (int)vir_type_size(f->insns[k].type);
+    /* zmm16-zmm31, for 512-bit values only; none is kept across a call */
+    if (L.vector_size == 64 &&
+        x86_feature_has(cc_x86_features_get(e->compile_context, sym),
+                        X86_FEATURE_AVX512BW) &&
+        x64_vir_high_vectors_fit(f)) {
+        regs.wide[1] = X64_VIR_HIGH_VECTORS;
+        regs.alloc[1] |= X64_VIR_HIGH_VECTORS;
+    }
     *why = VIRBUILD_FAILURE(x64_unsupported_target_option);
     if (e->unit->options->sprot || x64_target_has_no_simd(e))
         return false;
@@ -307,6 +416,12 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
             return false;
         }
     }
+    if (regs.wide[1] && !x64_vir_high_vectors_check(f, &V->allocation)) {
+        snprintf(V->failure_detail, sizeof V->failure_detail,
+                 "a narrow value in xmm16-xmm31");
+        *why = VIRBUILD_FAILURE(x64_allocation_check_failed);
+        return false;
+    }
     /* No partial function is published before x64_finish; a failed lowering retries the walker. */
     L.edge_labels = V->lowering_edge_labels = (uint32_t *)(vvector_reserve(
         V->lowering_edge_labels, &V->lowering_edge_label_capacity,
@@ -368,9 +483,7 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
                              .offset = L.result_pointer_slot};
         x64_record_emit_memory(e, X64_OP_ST, 8, RDI, &at, false);
     }
-    L.uses_ymm = false;
-    for (uint32_t k = 0; k < f->insn_count; k++)
-        L.uses_ymm |= vir_type_size(f->insns[k].type) > 16;
+    L.uses_ymm = L.vector_size > 16;
     for (uint32_t k = 0; k < f->slot_count; k++)
         L.slot[k] =
             walk_slot_temporary(e, f->slot[k].size ?: 1, f->slot[k].align);

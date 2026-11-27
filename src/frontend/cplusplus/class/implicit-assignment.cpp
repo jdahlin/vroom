@@ -314,9 +314,54 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
         non_throwing = false;
     if (f.access == 2 && !grants(k, c))
         return assignment_use::deleted;
+    /* [class.protected]: a protected operator of a base is accessible to
+       the derived class's implicit one; of a member's class it is not
+       told apart from that here */
+    if (f.access == 1) {
+        bool ambiguous = false;
+        bool member = false;
+        const entity &derived = entity_table[c];
+        for (uint32_t i = 0; i < derived.member_count; i++) {
+            const entity &m =
+                entity_table[class_members[derived.first_member + i]];
+            if (!m.base_subobject && element_class(m.type) == k)
+                member = true;
+        }
+        if (!member && base_step(c, k, ambiguous) && !ambiguous)
+            return assignment_use::usable;
+    }
     if (f.access)
         return assignment_use::unknown;
     return assignment_use::usable;
+}
+
+/* an explicitly defaulted assignment declared protected or private is an
+   entity only when it is not trivial: a trivial one is none, and its
+   access would go unchecked */
+analysis_result semantic_analysis::defaulted_assignment_access(entity_index c,
+                                                               SyntaxRef n)
+{
+    bool copy = entity_table[c].defaulted_copy_access;
+    bool move = entity_table[c].defaulted_move_access;
+    if (!copy && !move)
+        return analysis_result::well_formed;
+    entity_index head =
+        entity_table.find(c, operator_name(preprocessing_op_or_punc::EQUAL));
+    for (entity_index f = head; f && entity_table[f].enclosing == c;
+         f = entity_table[f].next_overload) {
+        if (!entity_table[f].implicit)
+            continue;
+        if (copy_assignment_operator(f, c))
+            copy = false;
+        else if (move_assignment_operator(f, c))
+            move = false;
+    }
+    if (copy || move)
+        return not_supported_because(
+            n, "dcl.fct.def.default",
+            "a defaulted assignment that is not public and is trivial or "
+            "not declared");
+    return analysis_result::well_formed;
 }
 
 /*
@@ -374,6 +419,12 @@ void semantic_analysis::declare_implicit_assignment(entity_index c, bool move,
     f.defined = true;
     f.implicit = true;
     f.deleted = deleted;
+    /* [dcl.fct.def.default]/2: one explicitly defaulted has the access
+       of its declaration */
+    if (move)
+        f.access = entity_table[c].defaulted_move_access;
+    else
+        f.access = entity_table[c].defaulted_copy_access;
     f.linkage_of_name = entity_table[c].linkage_of_name;
     entity_index head = entity_table.find(c, name);
     if (head && entity_table[head].kind == entity_kind::none &&
@@ -704,9 +755,13 @@ semantic_analysis::implicit_assignment(entity_index c, SyntaxRef n,
                 /* no bytes */
                 continue;
             expression_meaning result;
-            VTRY_SET(r, assignment_of(n, at, preprocessing_op_or_punc::EQUAL,
-                                      SyntaxElement(), SyntaxElement(), object,
-                                      from, result));
+            entity_table[k].assigned_by_implicit = true;
+            r = assignment_of(n, at, preprocessing_op_or_punc::EQUAL,
+                              SyntaxElement(), SyntaxElement(), object, from,
+                              result);
+            entity_table[k].assigned_by_implicit = false;
+            if (r != analysis_result::well_formed)
+                return r;
             statements.append(statement_node(
                 semantic_kind::expression_statement, at, result.node));
             continue;

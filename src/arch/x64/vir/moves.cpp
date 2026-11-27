@@ -6,8 +6,10 @@ VPRIV int x64_vir_register_number(uint8_t r)
 {
     return r == VIR_REGISTER_SCRATCH0   ? R11
            : r == VIR_REGISTER_SCRATCH1 ? XMM15
-           : VIR_REGISTER_CLASS(r)      ? XMM0 + VIR_REGISTER_NUMBER(r)
-                                        : VIR_REGISTER_NUMBER(r);
+           : VIR_REGISTER_CLASS(r) && VIR_REGISTER_NUMBER(r) >= 16
+               ? X64_VECTOR_HIGH + VIR_REGISTER_NUMBER(r) - 16
+           : VIR_REGISTER_CLASS(r) ? XMM0 + VIR_REGISTER_NUMBER(r)
+                                   : VIR_REGISTER_NUMBER(r);
 }
 
 VPRIV int x64_vir_type_size(uint32_t t)
@@ -147,8 +149,8 @@ VPRIV void x64_vir_x86_wide_emit(x64_vir_context *L, uint32_t code, int d,
             snprintf(text, sizeof text,
                      "\tv%s\t%%zmm%d, %%zmm%d, %%k1\n"
                      "\tvpmovm2%c\t%%k1, %%zmm%d\n",
-                     mnemonic, b - XMM0, a - XMM0,
-                     mnemonic[strlen(mnemonic) - 1], d - XMM0);
+                     mnemonic, x64_vector_index(b), x64_vector_index(a),
+                     mnemonic[strlen(mnemonic) - 1], x64_vector_index(d));
             x64_vir_text_append(L, text);
             return;
         }
@@ -159,27 +161,32 @@ VPRIV void x64_vir_x86_wide_emit(x64_vir_context *L, uint32_t code, int d,
         x64_x86_shift_immediate_code(code, 0, &immediate))
         /* a shift by a count: the count in an xmm register */
         snprintf(text, sizeof text, "\tv%s\t%%xmm%d, %%%cmm%d, %%%cmm%d\n",
-                 mnemonic, b - XMM0, r, a - XMM0, r, d - XMM0);
+                 mnemonic, x64_vector_index(b), r, x64_vector_index(a), r,
+                 x64_vector_index(d));
     else if (code & X64_X86_SHIFT)
         snprintf(text, sizeof text, "\tv%s\t$%u, %%%cmm%d, %%%cmm%d\n",
-                 mnemonic, code >> 16 & 0xff, r, a - XMM0, r, d - XMM0);
+                 mnemonic, code >> 16 & 0xff, r, x64_vector_index(a), r,
+                 x64_vector_index(d));
     else if (code & X64_X86_UNARY) {
         if (code & X64_X86_IMMEDIATE)
             snprintf(text, sizeof text, "\tv%s\t$%u, %%%cmm%d, %%%cmm%d\n",
-                     mnemonic, code >> 16 & 0xff, r, a - XMM0, r, d - XMM0);
+                     mnemonic, code >> 16 & 0xff, r, x64_vector_index(a), r,
+                     x64_vector_index(d));
         else
             snprintf(text, sizeof text, "\tv%s\t%%%cmm%d, %%%cmm%d\n", mnemonic,
-                     r, a - XMM0, r, d - XMM0);
+                     r, x64_vector_index(a), r, x64_vector_index(d));
     } else if (code & X64_X86_IMMEDIATE) {
         snprintf(text, sizeof text,
                  "\tv%s\t$%u, %%%cmm%d, %%%cmm%d, %%%cmm%d\n", mnemonic,
-                 code >> 16 & 0xff, r, b - XMM0, r, a - XMM0, r, d - XMM0);
+                 code >> 16 & 0xff, r, x64_vector_index(b), r,
+                 x64_vector_index(a), r, x64_vector_index(d));
     } else if (memory) {
         snprintf(text, sizeof text, "\tv%s\t%s, %%%cmm%d, %%%cmm%d\n", mnemonic,
-                 memory, r, a - XMM0, r, d - XMM0);
+                 memory, r, x64_vector_index(a), r, x64_vector_index(d));
     } else {
         snprintf(text, sizeof text, "\tv%s\t%%%cmm%d, %%%cmm%d, %%%cmm%d\n",
-                 mnemonic, r, b - XMM0, r, a - XMM0, r, d - XMM0);
+                 mnemonic, r, x64_vector_index(b), r, x64_vector_index(a), r,
+                 x64_vector_index(d));
     }
     x64_vir_text_append(L, text);
 }
@@ -280,6 +287,28 @@ static void x64_vir_value_move(x64_vir_context *L, int d, int s, uint32_t v)
         x64_mov(L->context, d, s);
 }
 
+/* d and s trade places through tmp.  value is one of the two: the other may
+   be a wider vector, so vector registers move at the function's widest */
+static void x64_vir_exchange(x64_vir_context *L, uint8_t tmp, uint8_t d,
+                             uint8_t s, uint32_t value)
+{
+    int t = x64_vir_register_number(tmp), x = x64_vir_register_number(d),
+        y = x64_vir_register_number(s);
+
+    if (VIR_REGISTER_CLASS(d) && L->vector_size > 16) {
+        x64_record_emit_three_registers(L->context, X64_OP_MOV, L->vector_size,
+                                        t, x, X64_REGISTER_NONE);
+        x64_record_emit_three_registers(L->context, X64_OP_MOV, L->vector_size,
+                                        x, y, X64_REGISTER_NONE);
+        x64_record_emit_three_registers(L->context, X64_OP_MOV, L->vector_size,
+                                        y, t, X64_REGISTER_NONE);
+        return;
+    }
+    x64_vir_value_move(L, t, x, value);
+    x64_vir_value_move(L, x, y, value);
+    x64_vir_value_move(L, y, t, value);
+}
+
 VPRIV void vx_edit(x64_vir_context *L, const vir_edit *x)
 {
     unsigned bit = x->kind == VIR_EDIT_RELOAD          ? 0
@@ -344,12 +373,7 @@ VPRIV void vx_edge_moves(x64_vir_context *L, uint32_t g)
                 x64_vir_slot_access(L, false, tmp, d);
         } else if (m->kind == VIR_EDIT_EXCHANGE) {
             /* Exchanges are register-only; use the second reserved scratch. */
-            x64_vir_value_move(L, x64_vir_register_number(tmp),
-                               x64_vir_register_number((uint8_t)d), m->value);
-            x64_vir_value_move(L, x64_vir_register_number((uint8_t)d),
-                               x64_vir_register_number((uint8_t)s), m->value);
-            x64_vir_value_move(L, x64_vir_register_number((uint8_t)s),
-                               x64_vir_register_number(tmp), m->value);
+            x64_vir_exchange(L, tmp, (uint8_t)d, (uint8_t)s, m->value);
         } else if (ds && ss) {
             x64_vir_slot_access(L, true, tmp, s);
             x64_vir_slot_access(L, false, tmp, d);

@@ -256,6 +256,23 @@ vir_alloc_value_block(const vir_function *f,
                                                            : VIR_BLOCK_NONE;
 }
 
+/* the registers of class c that v may not take (vir_target_registers.wide) */
+static inline uint64_t vir_alloc_registers_barred(const vir_allocator *a,
+                                                  uint32_t v, uint32_t c)
+{
+    if (vir_type_size(a->function->insns[v].type) == 64)
+        return 0;
+    return a->registers->wide[c];
+}
+
+static inline bool vir_alloc_register_may_hold(const vir_allocator *a,
+                                               uint32_t r, uint32_t v)
+{
+    return !(vir_alloc_registers_barred(a, v, VIR_REGISTER_CLASS(r)) >>
+                 VIR_REGISTER_NUMBER(r) &
+             1);
+}
+
 /* ---------------- webs ---------------- */
 
 static inline bool vir_alloc_web_has_member(const vir_allocator *a, uint32_t n,
@@ -1033,7 +1050,7 @@ static int vir_alloc_register_choose(vir_allocator *a, uint32_t v, uint32_t c,
                                      uint64_t avoid)
 {
     uint64_t m = ax.fr[c] & a->registers->alloc[c] & ~avoid &
-                 ~a->parallel_avoid[c],
+                 ~a->parallel_avoid[c] & ~vir_alloc_registers_barred(a, v, c),
              cs = a->registers->callee[c];
     uint32_t h = ax.hint[v];
 
@@ -1092,11 +1109,13 @@ static int vir_alloc_register_choose(vir_allocator *a, uint32_t v, uint32_t c,
     return VIR_REGISTER_MAKE(c, vir_alloc_mask_lowest_bit(m));
 }
 
-/* the register to evict in class c (not in avoid), or -1 */
-static int vir_alloc_register_victim_find(vir_allocator *a, uint32_t c,
-                                          uint64_t avoid, uint32_t p)
+/* the register to evict for value n in class c (not in avoid), or -1 */
+static int vir_alloc_register_victim_find(vir_allocator *a, uint32_t n,
+                                          uint32_t c, uint64_t avoid,
+                                          uint32_t p)
 {
-    uint64_t m = a->registers->alloc[c] & ~avoid & ~ax.fr[c];
+    uint64_t m = a->registers->alloc[c] & ~avoid & ~ax.fr[c] &
+                 ~vir_alloc_registers_barred(a, n, c);
     int best = -1;
     uint64_t bd = 0;
 
@@ -1126,7 +1145,7 @@ static int vir_alloc_register_get(vir_allocator *a, uint32_t v, uint32_t c,
 
     if (r >= 0)
         return r;
-    r = vir_alloc_register_victim_find(a, c, avoid, p);
+    r = vir_alloc_register_victim_find(a, v, c, avoid, p);
     if (r < 0)
         return -1;
     evict(a, (uint32_t)r, p);
@@ -1304,23 +1323,23 @@ static void vir_alloc_moves_sequence(vir_allocator *a, uint32_t n,
         h = nr = 0;
         /* a cycle: every pending destination is read by another pending move */
         for (uint32_t i = 0; i < n; i++) {
-            uint32_t d, c, t = VIR_REGISTER_NONE;
+            uint32_t d, c, held, t = VIR_REGISTER_NONE;
 
             if (pm[i].kind == 0xff)
                 continue;
             d = vir_alloc_location_index(pm[i].dst);
-            c = vir_alloc_value_class(a->function, pm[i].value);
+            held = pm[i].value;
             for (uint32_t j = 0; j < n; j++)
                 if (pm[j].kind != 0xff &&
                     pm[j].kind != VIR_EDIT_REMATERIALIZE &&
                     vir_alloc_location_index(pm[j].src) == d) {
-                    c = vir_alloc_value_class(
-                        a->function,
-                        pm[j].value); /* the class of what d holds */
+                    held = pm[j].value; /* what d holds */
                     break;
                 }
+            c = vir_alloc_value_class(a->function, held);
             {
-                uint64_t m = a->registers->alloc[c] & ~nmask[c];
+                uint64_t m = a->registers->alloc[c] & ~nmask[c] &
+                             ~vir_alloc_registers_barred(a, held, c);
 
                 while (m) {
                     uint32_t r =
@@ -1335,7 +1354,9 @@ static void vir_alloc_moves_sequence(vir_allocator *a, uint32_t n,
             }
             if (t == VIR_REGISTER_NONE && !(pm[i].dst & VIR_LOCATION_SLOT) &&
                 !(pm[i].src & VIR_LOCATION_SLOT) &&
-                pm[i].kind == VIR_EDIT_MOVE) {
+                pm[i].kind == VIR_EDIT_MOVE &&
+                /* (an exchange puts d's value where s is) */
+                vir_alloc_register_may_hold(a, pm[i].src, held)) {
                 uint32_t s = vir_alloc_location_index(pm[i].src);
 
                 /* exchange: d gets s's value (this move is done), s gets d's: d's readers read s */
@@ -1884,6 +1905,7 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
                 h = (uint32_t)vr;
             if (h < 128 && VIR_REGISTER_CLASS(h) == c &&
                 (ax.fr[c] >> VIR_REGISTER_NUMBER(h) & 1) &&
+                vir_alloc_register_may_hold(a, h, q) &&
                 !vir_alloc_hint_prefers_callee_saved(
                     a, q, c, ax.fr[c] & a->registers->alloc[c], h))
                 r = (int)h;
@@ -1917,6 +1939,7 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
                                 r = -1;
                                 decision = "match-header-slot";
                             } else if (VIR_REGISTER_CLASS(pr) == c &&
+                                       vir_alloc_register_may_hold(a, pr, q) &&
                                        (ax.fr[c] >> VIR_REGISTER_NUMBER(pr) &
                                         1)) {
                                 r = pr;
@@ -2241,7 +2264,8 @@ static bool vir_alloc_insn_assign(vir_allocator *a, uint32_t b, uint32_t i,
             /* (not in place in a caller-saved register when the result lives across a call
 			 * and a callee-saved one is free: one move here, not one at every call) */
             uint64_t fm = ax.fr[c] & a->registers->alloc[c] & ~lock[c] &
-                          ~a->parallel_avoid[c];
+                          ~a->parallel_avoid[c] &
+                          ~vir_alloc_registers_barred(a, i, c);
             bool xc =
                 byte[0] != VIR_REGISTER_NONE &&
                 (ax.vfl[i] &
@@ -2262,18 +2286,21 @@ static bool vir_alloc_insn_assign(vir_allocator *a, uint32_t b, uint32_t i,
             if (hx)
                 r = (int)(h & 0xff);
             else if (!xc && byte[0] != VIR_REGISTER_NONE &&
-                     ax.dmark[ops[0]] == i && !ax.regval[byte[0]])
+                     ax.dmark[ops[0]] == i && !ax.regval[byte[0]] &&
+                     vir_alloc_register_may_hold(a, byte[0], i))
                 r = byte[0];
             else if (!xc && (fx.flags & VIR_CONSTRAINT_FLAG_COMMUTATIVE) &&
                      n >= 2 && byte[1] != VIR_REGISTER_NONE &&
                      ax.dmark[ops[1]] == i && ops[1] != ops[0] &&
-                     !ax.regval[byte[1]]) {
+                     !ax.regval[byte[1]] &&
+                     vir_alloc_register_may_hold(a, byte[1], i)) {
                 vir_alloc_edit_add(a, i, VIR_EDIT_SWAP, VIR_REGISTER_NONE,
                                    VIR_REGISTER_NONE, i);
                 r = byte[1];
             } else {
                 r = vir_alloc_register_get(a, i, c, lock[c], i);
-                if (r < 0 && byte[0] != VIR_REGISTER_NONE) {
+                if (r < 0 && byte[0] != VIR_REGISTER_NONE &&
+                    vir_alloc_register_may_hold(a, byte[0], i)) {
                     /* every register holds an operand: the first one leaves for its slot (or is
 					 * dropped, a constant) and the result is computed in place */
                     evict(a, byte[0], i);

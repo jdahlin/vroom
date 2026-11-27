@@ -711,7 +711,19 @@ analysis_result semantic_analysis::overloaded_operator(
                     "an operator whose associated namespaces could not be "
                     "determined");
             size_t kept = 0;
+            size_t extra = 0;
+            if (postfix)
+                extra = 1;
             for (entity_index e : others) {
+                /* [over.match.oper]/3.2 (below): without a class operand
+                   it is no candidate, declared early or late */
+                if (!any_class && !takes_enumeration(entity_table[e].type))
+                    continue;
+                /* [over.oper]: nor is one of another arity (the binary
+                   operator& of a flag enumeration for a unary &) viable */
+                if (type_table[entity_table[e].type.unqualified()]
+                        .parameter_count != count + extra)
+                    continue;
                 uint32_t d = entity_table[e].first_declaration;
                 if (entity_table[e].enclosing != found.found_in || !d ||
                     entity_table.declaration(d).node.first_token() <=
@@ -1245,9 +1257,15 @@ analysis_result semantic_analysis::overloaded_operator(
         /* [over.built]/14: a member operator[] binds the object better
            than the built-in subscript, which converts it, and beats it
            when its index converts no worse than to std::ptrdiff_t */
+        bool index = false;
+        if (arguments.size() == 2) {
+            const struct type &t = type_table[arguments[1].type.unqualified()];
+            index = is_integral(arguments[1].type) ||
+                    (t.kind == type_kind::enumeration &&
+                     !entity_table[t.entity].scoped);
+        }
         if (!beats_builtin && op == preprocessing_op_or_punc::LEFT_BRACKET &&
-            win.member && arguments.size() == 2 && ft.parameter_count == 1 &&
-            is_integral(arguments[1].type)) {
+            win.member && ft.parameter_count == 1 && index) {
             conversion_sequence seq =
                 implicit_conversion_sequence(arguments[1], params[0], false);
             conversion_sequence builtin = implicit_conversion_sequence(

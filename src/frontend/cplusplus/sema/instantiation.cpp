@@ -1375,7 +1375,9 @@ void semantic_analysis::instantiate_pending(bool at_end)
                 progress = true;
                 continue;
             }
-            if (!b.c || (b.function &&
+            /* (a virtual function's body waits for no use of its own: its
+               class's virtual table needs it, [temp.inst]/11) */
+            if (!b.c || (b.function && !entity_table[b.function].virtual_ &&
                          !entity_table[b.function].member_definition_needed &&
                          explicitly_instantiated(b.function) !=
                              instantiation_kind::definition))

@@ -47,6 +47,14 @@ relative to it); `TODO.md` stays at the top.
   `CC_OPTIMIZATIONS` (`include/frontend/c/cc.h`) and a line in that document.
 - `PLAN-vir-inline.md` (steps I0-I5, a proposal): inlining on VIR instead of
   in the walker; what today's limit and clang's threshold measure.
+- `PLAN-mangling.md` (steps M0-M8, done): restructuring the Itanium
+  mangler (`frontend/cplusplus/abi/itanium/mangling/`, internal header
+  `mangling-internal.h`): files by ABI section, a builder apart from the
+  encoder, each encoding letter in one table; the tables and the byte
+  writer are `include/frontend/itanium/` (`writer.h`, `operators.inc`,
+  `builtin-types.inc`, `productions.inc`), which the C front end's
+  `overloadable` mangler (`frontend/c/mangle.cpp`) uses too.  vcc builds as
+  C++ only (no `VCC_LANG=c`, no `make self`).
 - `PLAN-vir-eh.md` (steps E0-E8): Itanium exceptions in VIR, both lowerings and
   the direct emitter (`invoke`, landing pads, LSDA), and the AST nodes the C++
   front end will produce; RTTI and modules need nothing from VIR.
@@ -89,8 +97,8 @@ relative to it); `TODO.md` stays at the top.
   (`PLAN-cxx-spec.md`, `PLAN-cxx-parse.md`, then `PLAN-cxx-sema.md`: semantics and
   lowering to codegen, steps S0-S9, a plan under review).  The driver compiles
   C++ through it (`lower/compile.cpp`, `include/frontend/cplusplus/compile.h`;
-  the lowering to C's AST is `lower/`, files by topic sharing `lower-internal.h`;
-  a C-hosted vcc has none): what the analysis or lowering does not handle yet
+  the lowering to C's AST is `lower/`, files by topic sharing `lower-internal.h`):
+  what the analysis or lowering does not handle yet
   is an error with the reason.  There are no separate C++ tools: the front
   end's developer outputs (tokens, syntax tree, analysis, the claims the
   harnesses have clang check) are driver options, `vpp -x c++ -fsyntax-only
@@ -303,7 +311,6 @@ relative to it); `TODO.md` stays at the top.
 ## Build and test
 ```
 make -C src -j 6 vcc                # all vcc tools, hosted in GNU C++20
-make -C src -j 6 vcc VCC_LANG=c     # build the implementation as C11
 make -C src -j 6 vcc VCC_UNITY= OUT=../build/src-parts   # file by file: each file compiles alone
 make -C src -k -j 6 cplusplus-check # the C++ front end's files, each alone with its flags (CPLUSPLUS_FLAGS: no RTTI, no C++ library, -Werror; ~3 s)
 bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
@@ -366,6 +373,8 @@ bench/cxx-run.py -j 6 [-O 0123] [PAT]  # src/test/cxx/run: vpp -c (the driver: f
 bench/cxx-depfile.py                # C++ -MD/-MMD/-MP depfiles byte for byte vs clang++, also run from another directory as vccd does (<2 s)
 bench/cxx-include-guard.py [-v]      # the C++ preprocessor's multiple-include guard skip: src/test/cxx/include-guard, text and diagnostics vs clang -E -P (<1 s)
 bench/cxx-thread.py [-v] [PAT]     # src/test/cxx/thread: C++ programs that need threads, built by vpp, linked by clang++ -pthread, self-checking (a variable that should be thread-local or a local emitted as a shared static; <5 s)
+bench/cxx-mangle-unit.py [--clang] [-v] [PAT]   # the mangler's unit tests (src/test/cxx/mangle, a file per ABI section): every `// MANGLE: SYMBOL` in vpp -c's object; --clang: and in clang++'s, so the expectations are clang's (<2 s)
+bench/cxx-mangle-same.py -j 6 --save F | --against F   # the mangler's identity gate (doc/PLAN-mangling.md M0): every -fcxx-dump=symbols symbol and refusal and vpp -c's symbols over cxx/run, clang's mangling tests, json, Stockfish, byte for byte against a saved run (~2.5 min at -j 12)
 bench/cxx-mangle.py -j 3 [-v] [--bless] [PAT]   # clang's Itanium mangling tests (CodeGenCXX/*mangl*.cpp, not Microsoft's; fetch-testsuites.sh llvm): per file vpp -c's _Z symbols = clang++ -O0's, or the first refusal; per symbol -fcxx-dump=symbols verified/refuted/unsupported/missing; passing list bench/cxx-mangle.passing, a lost pass is an error; cache build/cxx-mangle.json; not in CI (needs work/testsuites)
 bench/cxx-c-suites.py -j 6 [-O 02] [--bless] [PAT]   # C5.1: the C suites' programs as C++ (those clang++ -O0 builds): vpp -x c++ -c runs as clang++ -O2's under qemu, -O0 symbols clang++'s; passing list bench/cxx-c-suites.passing, a lost pass is an error; what is missing by subclause (~3 min cold, ~25 s warm)
 bench/cxx-syntax-audit.py [-j N]    # clang-tidy custom checks (src/frontend/cplusplus/syntax-audit.clang-tidy): an element's index() as a condition, a view stored in a field (~2 s; the net behind them is -DVCC_CHECK_SYNTAX_VIEWS in cxx-run/cxx-sema)

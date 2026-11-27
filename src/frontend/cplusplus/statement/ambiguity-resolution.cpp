@@ -95,11 +95,48 @@ parser::reading parser::reading_at(unsigned ahead)
         case name_class::none:
             return reading::expression;
         case name_class::unknown:
+            if (call_of_undeclared_name(ahead))
+                return reading::expression;
+            return reading::unknown;
         case name_class::constructor:
             return reading::unknown;
         }
     }
     return reading::expression;
+}
+
+/*
+ * [basic.lookup.argdep]: a call of a hidden friend's name, which only
+ * argument-dependent lookup finds.  As a declaration, T(x); would need
+ * T declared and would declare x anew, hiding the object x: not read so.
+ */
+bool parser::call_of_undeclared_name(unsigned ahead)
+{
+    /* (not in a template: a call that depends on nothing is bound at its
+       definition, which analysis does not check) */
+    if (names.within_template() || !at_identifier(ahead) ||
+        !at(preprocessing_op_or_punc::LEFT_PARENTHESIS, ahead + 1))
+        return false;
+    uint32_t name = tokens.identifier(position + ahead);
+    bool befriended = false;
+    for (uint32_t declared : friend_names)
+        befriended = befriended || declared == name;
+    scope_index found = 0;
+    bool dependent = false;
+    if (!befriended || names.lookup_unqualified(name, &found, &dependent) !=
+                           name_kind::not_declared)
+        return false;
+    for (unsigned i = ahead + 2;; i += 2) {
+        unsigned length = 0;
+        if (!at_identifier(i) ||
+            classify_name(i, &length, false) != name_class::not_a_type ||
+            length != 1)
+            return false;
+        if (at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, i + 1))
+            return at(preprocessing_op_or_punc::SEMICOLON, i + 2);
+        if (!at(preprocessing_op_or_punc::COMMA, i + 1))
+            return false;
+    }
 }
 
 } // namespace cplusplus

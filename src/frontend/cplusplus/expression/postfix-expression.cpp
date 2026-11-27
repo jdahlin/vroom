@@ -848,22 +848,31 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
            definition) to *((E1)+(E2)), except that in the case of an array
            operand, the result is an lvalue if that operand is an lvalue and
            an xvalue otherwise." */
-        if (!sub.index() || sub.index().is(syntax_kind::braced_init_list,
-                                           syntax_kind::initializer_list))
+        if (!sub.index() || sub.index().is(syntax_kind::initializer_list))
             return not_supported_because(
                 n, "expr.sub", "a subscript without a single expression");
         expression_meaning a, i;
         analysis_result r = expression(sub.operand(), a);
-        if (r == analysis_result::well_formed)
+        bool listed = sub.index().is(syntax_kind::braced_init_list);
+        if (r == analysis_result::well_formed && !listed)
             VTRY_SET(r, expression(sub.index(), i));
         /* [over.sub]/1: "the operator function is selected by overload
            resolution ([over.match.oper])" */
         bool handled = false;
-        r = binary_operator_function(
-            n, sub.bracket().token(), preprocessing_op_or_punc::LEFT_BRACKET,
-            sub.operand(), a, sub.index(), i, handled, m);
+        if (r == analysis_result::well_formed)
+            r = binary_operator_function(n, sub.bracket().token(),
+                                         preprocessing_op_or_punc::LEFT_BRACKET,
+                                         sub.operand(), a, sub.index(), i,
+                                         handled, m);
         if (r != analysis_result::well_formed || handled)
             return r;
+        /* [over.match.oper]/2, [expr.sub]/1: a braced-init-list is the
+           argument of an operator function only */
+        if (listed)
+            return not_supported_because(
+                n, "expr.sub",
+                "a braced-init-list subscript with no handled operator "
+                "function");
         expression_meaning *base = &a, *index = &i;
         auto is_vector = [&](const expression_meaning &x) {
             return is_vector_kind(type_table[x.type.unqualified()].kind);
@@ -1095,8 +1104,24 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                template's, whose explicit instantiation is analysed after
                its point of instantiation ([temp.point]) */
             entity_index named = arguments[0].entity;
-            if (!named ||
-                !entity_table[entity_table[named].enclosing].parameter_scope)
+            /* (or a prvalue, whose class is made where it is) */
+            /* (not in a function template or a specialization, whose
+               arguments may be dependent) */
+            bool made = !named && function_state.active &&
+                        !entity_table[function_state.function].instantiation &&
+                        arguments[0].category == value_category::prvalue;
+            /* (in a specialization's own body, an expression of a type
+               that depends on nothing is what it is) */
+            /* (a glvalue: a prvalue there may be a deduction of a
+               template's own definition, analysed with it) */
+            if (!named && function_state.active && instantiation_depth &&
+                arguments[0].category != value_category::prvalue &&
+                entity_table[function_state.function].instantiation &&
+                !depends_on_template_parameter(arguments[0].type))
+                made = true;
+            if (!made &&
+                (!named ||
+                 !entity_table[entity_table[named].enclosing].parameter_scope))
                 return not_supported_because(
                     n, "over.match.class.deduct",
                     "class template argument deduction from a specialization "
@@ -1781,6 +1806,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         if (r != analysis_result::well_formed)
             return r;
         expression_meaning object = member_template_object;
+        entity_index through = member_template_through;
+        member_template_through = 0;
         owned_array<SyntaxElement> written;
         for (SyntaxElement w : member_template_written)
             written.append(w);
@@ -1791,7 +1818,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         if (written_at)
             as_written = &written;
         return member_template_call(n, held, &object, arguments, early,
-                                    as_written, written_at, m);
+                                    as_written, written_at, m, through);
     }
     if (r != analysis_result::well_formed)
         return r;
@@ -1926,6 +1953,12 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
         }
         function_type = f.type;
+        if (!member && f.node &&
+            semantics[f.node].kind == semantic_kind::bound_member_function) {
+            /* (resolve_call's implied (*this)) */
+            object = semantics[f.node].a;
+            member = semantics[f.node].b;
+        }
         if (member) {
             if (semantics[f.node].kind ==
                 semantic_kind::bound_member_function) {

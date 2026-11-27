@@ -470,6 +470,10 @@ struct literal_value {
     /* the bits of a floating-point literal's value in its format
        (binary16/32/64/128) */
     uint64_t floating_bits_low = 0, floating_bits_high = 0;
+    /* a long double literal whose value in the target's format a double
+       holds: that double's bits */
+    uint64_t long_double_bits = 0;
+    bool long_double_in_double = false;
     /* a string literal: its code units in lexer::string_code_units(),
        without the terminating '\0' of [lex.string]/12 */
     uint32_t string_offset = 0, string_length = 0;

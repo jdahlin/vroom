@@ -772,7 +772,7 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                     bool maybe_template =
                         (x.kind == type_kind::pointer ||
                          x.kind == type_kind::pointer_to_member) &&
-                        has_conversion_function_templates(c2);
+                        has_implicit_conversion_function_templates(c2);
                     if (found && !several && !cannot_tell && !maybe_template) {
                         expression_meaning value =
                             conversion_function_result(found);

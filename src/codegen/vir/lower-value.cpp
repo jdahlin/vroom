@@ -957,7 +957,7 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
                            .register_number =
                                (uint8_t)WALK_LOWER(laddr)(e, &d));
     }
-    if (crossing >= 9) { /* a compare of 16 dwords to a mask */
+    if (crossing >= 9 && crossing <= 11) { /* 16 dwords compared to a mask */
         const uint32_t *argument = &c->lists[x->b];
         uint32_t value[2];
         const char *mnemonic = "pcmpgtd";
@@ -986,7 +986,7 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
         return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
                            .register_number = (uint8_t)result);
     }
-    if (crossing >= 4) { /* pext and pdep of 4 or 8 bytes */
+    if (crossing >= 4 && crossing <= 7) { /* pext, pdep of 4 or 8 bytes */
         const uint32_t *argument = &c->lists[x->b];
         uint32_t type = VIR_TYPE_I32, value[2];
         const char *mnemonic = "pext";
@@ -1055,7 +1055,18 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
         codegen_lvalue out = {.kind = CODEGEN_LVALUE_FRAME,
                               .align = 16,
                               .offset = walk_slot_temporary(e, 32, 16)};
-        virbuild_vector_permute(e, ra, rb, &out);
+        if ((crossing == 2 || crossing == 12) && virbuild_wide_type(e, 32)) {
+            const char *permute = "permd";
+
+            if (crossing == 12)
+                permute = "permps";
+            /* the indices, then the vector they pick from */
+            virbuild_vector_binary(e, VIR_OP_X86,
+                                   x64_x86_operator_code(permute),
+                                   VIR_TYPE_I64X4, 8, rb, ra, &out, 0);
+        } else {
+            virbuild_vector_permute(e, ra, rb, &out);
+        }
         WALK_LOWER(tfree)(e, ra);
         WALK_LOWER(tfree)(e, rb);
         return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,

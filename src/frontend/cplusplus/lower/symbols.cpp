@@ -79,6 +79,11 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
         storage = AST_STORAGE_STATIC;
         flags = AST_SYMBOL_FLAG_GLOBAL;
     }
+    if (x.defined && analysis.unit_local(e))
+        storage = AST_STORAGE_STATIC;
+    /* a local symbol is nothing another unit's replaces */
+    if (storage == AST_STORAGE_STATIC)
+        flags = AST_SYMBOL_FLAG_GLOBAL;
 }
 
 /* [abi:rtti]: the std::type_info objects of the fundamental types and of

@@ -46,7 +46,22 @@ enum {
      (1u << R8) | (1u << R9) | (1u << R10))
 /* floating point temporaries: xmm8-xmm14 (xmm0-7 carry arguments and results, xmm15 is scratch) */
 #define X64_FLOAT_TEMPORARIES (((1u << XMM15) - 1) & ~((1u << XMM8) - 1))
-#define X64_REGISTER_IS_XMM(r) ((r) >= XMM0 && (r) <= XMM15)
+/* xmm16-xmm31 (zmm16-zmm31): records 48-63.  Only VIR gives them out, to
+ * 512-bit values, which only EVEX instructions touch.  No effects mask has
+ * their bits (bit 63 is the flags'): a record writing one is never dead. */
+#define X64_VECTOR_HIGH 48
+#define X64_REGISTER_IS_HIGH_VECTOR(r)                                         \
+    ((r) >= X64_VECTOR_HIGH && (r) < X64_VECTOR_HIGH + 16)
+#define X64_REGISTER_IS_XMM(r)                                                 \
+    (((r) >= XMM0 && (r) <= XMM15) || X64_REGISTER_IS_HIGH_VECTOR(r))
+
+/* the n of xmm n (ymm n, zmm n) */
+static inline int x64_vector_index(int r)
+{
+    if (X64_REGISTER_IS_HIGH_VECTOR(r))
+        return r - X64_VECTOR_HIGH + 16;
+    return r - XMM0;
+}
 
 enum {
     X64_OP_LABEL, /* label */
@@ -307,6 +322,7 @@ VPRIV bool x64_x86_shift_code(codegen_context *e, int op, ast_qualified_type vt,
 VPRIV bool x64_x86_shuffle_code(codegen_context *e, const int *bytes,
                                 x64_x86_shuffle *shuffle);
 VPRIV bool x64_x86_code_exists_on_zmm(uint32_t code);
+VPRIV const char *x64_prefetch_name(int kind); /* (WALK_LOWER(prefetch)) */
 VPRIV bool x64_x86_halved_code(codegen_context *e, uint32_t n, uint32_t *code,
                                bool *count);
 /* an AVX2 builtin that crosses the halves: 1 movmskps256, 2 permvarsi256

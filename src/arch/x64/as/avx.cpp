@@ -42,6 +42,8 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
             {"vpmuludq", 1, 1, 0xf4, 0, 0, 0, 0},
             {"vpmulld", 1, 2, 0x40, 0, 0, 0, 0},
             {"vpshufb", 1, 2, 0x00, 0, 0, 0, 0},
+            {"vpermd", 1, 2, 0x36, 0, 0, 0, 0},
+            {"vpermps", 1, 2, 0x16, 0, 0, 0, 0},
             {"vpunpcklqdq", 1, 1, 0x6c, 0, 0, 0, 0},
             {"vpunpckhqdq", 1, 1, 0x6d, 0, 0, 0, 0},
             {"vpunpckldq", 1, 1, 0x62, 0, 0, 0, 0},
@@ -379,7 +381,8 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         MOVE_SHIFT,   /* shift by an immediate: the digit in `digit` */
         COUNT_SHIFT,  /* shift by the count in an xmm register */
         FROM_MASK,    /* a mask register's bits to a vector's lanes */
-        K_TO_GENERAL  /* a mask register to a 32-bit general register */
+        K_TO_GENERAL /* a mask register to a 32-bit general register */,
+        BROADCAST_GENERAL /* a 64-bit general register to every lane */
     };
     static const struct {
         const char *name;
@@ -422,6 +425,7 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         {"vmovdqu64", VECTOR_STORE, 1, 0x7f, 2, 1, 64},
         {"vmovdqa64", VECTOR_STORE, 1, 0x7f, 1, 1, 64},
         {"vpbroadcastq", BROADCAST, 2, 0x59, 1, 1, 8},
+        {"vpbroadcastq", BROADCAST_GENERAL, 2, 0x7c, 1, 1, 8},
         {"vpbroadcastd", BROADCAST, 2, 0x58, 1, 0, 4},
         {"vpbroadcastw", BROADCAST, 2, 0x79, 1, 0, 2},
         {"vpbroadcastb", BROADCAST, 2, 0x78, 1, 0, 1},
@@ -488,7 +492,12 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         if (form == BROADCAST &&
             !(n == 2 && o[0].kind == XK_REG && o[0].cls == XR_XMM))
             continue;
-        if (form == VECTOR_STORE || form == BROADCAST) {
+        if (form == BROADCAST_GENERAL &&
+            !(n == 2 && o[0].kind == XK_REG && o[0].cls == XR_GPR &&
+              o[0].size == 8))
+            continue;
+        if (form == VECTOR_STORE || form == BROADCAST ||
+            form == BROADCAST_GENERAL) {
             XOp *reg = &o[1], *mem = &o[0];
 
             if (form == VECTOR_STORE)

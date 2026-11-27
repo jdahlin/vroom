@@ -359,6 +359,18 @@ analysis_result semantic_analysis::friend_elaborated_class(entity_index c,
             n, "class.friend",
             "a friend class in a namespace with names that are not known");
     lookup_result found = lookup_unqualified(name, lookup_filter::types);
+    /* in a specialization, lookup does not see what was declared after the
+       template ([temp.res]): a class declared there, or by an earlier
+       friend declaration, is the friend by its name ([temp.friend]) */
+    entity_index later = entity_table.find(space, name);
+    bool being_defined = later &&
+                         entity_table[later].kind == entity_kind::class_type &&
+                         !entity_table[later].size;
+    if (found.unknown && !found.ambiguous && instantiation_depth && !local &&
+        !found.entity && !being_defined) {
+        befriend_by_name(c, space, name);
+        return analysis_result::well_formed;
+    }
     if (found.unknown || found.ambiguous)
         return not_supported_because(
             n, "class.friend",
@@ -388,6 +400,16 @@ analysis_result semantic_analysis::friend_elaborated_class(entity_index c,
         bool considered = !is_namespace(found.found_in) ||
                           (x.enclosing == space && found.found_in == space &&
                            !entity_table.bound_by_using(space, name));
+        /* ... a base's injected-class-name is a member of those classes
+           ([class.pre]/2), whichever namespace the base is of */
+        for (entity_index k = c;
+             k && entity_table[k].kind == entity_kind::class_type;
+             k = entity_table[k].enclosing) {
+            bool ambiguous = false;
+            if (class_member_lookup(k, name, ambiguous) == found.entity &&
+                !ambiguous)
+                considered = true;
+        }
         if (x.kind == entity_kind::class_type && considered) {
             /* [dcl.type.elab]/3: "the union class-key shall be used to
                refer to a union, and either the class or struct class-key

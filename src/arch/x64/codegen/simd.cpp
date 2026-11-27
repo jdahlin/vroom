@@ -168,6 +168,26 @@ VPRIV bool x64_vector_operation_exists(codegen_context *e, int op,
     return x64_simd_plan_for(e, op, vt, a_vector, b_vector, unary).op != NULL;
 }
 
+VPRIV const char *x64_prefetch_name(int kind)
+{
+    static const char *const names[] = {
+        "prefetchnta", "prefetcht2", "prefetcht1", "prefetcht0", "prefetchw"};
+
+    return names[kind];
+}
+
+static void x64_simd_text(codegen_context *e, const char *text);
+
+/* prefetch the line register r points at (the direct emitter) */
+VPRIV void x64_prefetch(codegen_context *e, int r, int kind)
+{
+    char text[64];
+
+    snprintf(text, sizeof text, "\t%s\t(%%%s)\n", x64_prefetch_name(kind),
+             x64_register_names_64[r]);
+    x64_simd_text(e, text);
+}
+
 static void x64_simd_text(codegen_context *e, const char *text)
 {
     record *r = x64_record_emit(e, X64_OP_RAW);
@@ -1059,21 +1079,22 @@ VPRIV codegen_value x64_x86_instruction(codegen_context *e, uint32_t n)
 
 /* the lane-wise operators' single instructions */
 static const char *const x64_x86_operators[] = {
-    "paddb",      "paddw",       "paddd",       "paddq",      "psubb",
-    "psubw",      "psubd",       "psubq",       "pmullw",     "pand",
-    "por",        "pxor",        "pcmpeqb",     "pcmpeqw",    "pcmpeqd",
-    "pcmpgtb",    "pcmpgtw",     "pcmpgtd",     "addps",      "addpd",
-    "subps",      "subpd",       "mulps",       "mulpd",      "divps",
-    "divpd",      "cmpeqps",     "cmpeqpd",     "cmpneqps",   "cmpneqpd",
-    "cmpltps",    "cmpltpd",     "cmpleps",     "cmplepd",    "psllw",
-    "pslld",      "psllq",       "psraw",       "psrad",      "psrlw",
-    "psrld",      "psrlq",       "punpcklbw",   "punpcklwd",  "punpckldq",
-    "punpcklqdq", "punpckhbw",   "punpckhwd",   "punpckhdq",  "punpckhqdq",
-    "pshufd",     "shufps",      "pshuflw",     "pshufhw",    "psrldq",
-    "pslldq",     "packuswb",    "packssdw",    "packsswb",   "packusdw",
-    "pmaddubsw",  "pmaddwd",     "pmulhw",      "pmulhuw",    "pmulhrsw",
-    "pshufb",     "pminsw",      "pmaxsw",      "movmskps",   "pext",
-    "pdep",       "pbroadcastb", "pbroadcastw", "pbroadcastd"};
+    "paddb",      "paddw",       "paddd",       "paddq",       "psubb",
+    "psubw",      "psubd",       "psubq",       "pmullw",      "pand",
+    "por",        "pxor",        "pcmpeqb",     "pcmpeqw",     "pcmpeqd",
+    "pcmpgtb",    "pcmpgtw",     "pcmpgtd",     "addps",       "addpd",
+    "subps",      "subpd",       "mulps",       "mulpd",       "divps",
+    "divpd",      "cmpeqps",     "cmpeqpd",     "cmpneqps",    "cmpneqpd",
+    "cmpltps",    "cmpltpd",     "cmpleps",     "cmplepd",     "psllw",
+    "pslld",      "psllq",       "psraw",       "psrad",       "psrlw",
+    "psrld",      "psrlq",       "punpcklbw",   "punpcklwd",   "punpckldq",
+    "punpcklqdq", "punpckhbw",   "punpckhwd",   "punpckhdq",   "punpckhqdq",
+    "pshufd",     "shufps",      "pshuflw",     "pshufhw",     "psrldq",
+    "pslldq",     "packuswb",    "packssdw",    "packsswb",    "packusdw",
+    "pmaddubsw",  "pmaddwd",     "pmulhw",      "pmulhuw",     "pmulhrsw",
+    "pshufb",     "pminsw",      "pmaxsw",      "movmskps",    "pext",
+    "pdep",       "pbroadcastb", "pbroadcastw", "pbroadcastd", "permd",
+    "permps",     "pblendd"};
 
 /* whether the operator can be emitted on zmm registers: a byte or word
    compare, through a mask register; no other compare, and no shuffle */
@@ -1436,9 +1457,10 @@ VPRIV int x64_x86_crossing_builtin(codegen_context *e, uint32_t n)
         return 0;
     if (!strcmp(name, "ia32_movmskps256"))
         return 1;
-    if (!strcmp(name, "ia32_permvarsi256") ||
-        !strcmp(name, "ia32_permvarsf256"))
+    if (!strcmp(name, "ia32_permvarsi256"))
         return 2;
+    if (!strcmp(name, "ia32_permvarsf256"))
+        return 12;
     if (!strcmp(name, "ia32_extract128i256"))
         return 3;
     return 0;

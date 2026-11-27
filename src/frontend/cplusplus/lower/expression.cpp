@@ -235,6 +235,8 @@ uint32_t c_lowering::expression(uint32_t index)
            place and destroyed as one object, not built of temporaries
            copied in as bytes */
         qualified_type element;
+        if (static_backing == &node(n.a))
+            return static_array(n.a);
         if (collecting && !static_glvalue &&
             node(n.a).kind == semantic_kind::initializer_list &&
             record(node(n.a).type).kind == type_kind::array &&

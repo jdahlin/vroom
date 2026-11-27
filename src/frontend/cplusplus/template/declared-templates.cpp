@@ -1105,7 +1105,20 @@ bool semantic_analysis::depends_on_parameter_from(qualified_type t,
         const instantiation_record &x =
             instantiations[entity_table[r.entity].instantiation - 1];
         auto depends_on = [&](const template_argument &a) {
-            return a.kind != template_argument::kind_t::type ||
+            if (a.kind == template_argument::kind_t::type)
+                return depends_on_parameter_from(a.type, from);
+            if (a.kind == template_argument::kind_t::pack)
+                return true;
+            /* a template-parameter named (its position value), else a
+               constant (SkSpan<T>'s defaulted extent) */
+            /* (a dependent expression, of no position: a defaulted
+               argument's, TArray<T>'s bool, which the arguments it names
+               stand for) */
+            if (a.template_entity && a.value == UINT32_MAX)
+                return false;
+            if (a.template_entity)
+                return a.value >= from;
+            return a.kind != template_argument::kind_t::value ||
                    made_of_template_parameter(type_table, a.type, &entity_table,
                                               from);
         };
@@ -1545,11 +1558,13 @@ bool semantic_analysis::same_dependent_parameter_type(SyntaxRef a, SyntaxRef b)
  */
 bool semantic_analysis::equivalent_template(const function_template &f,
                                             SyntaxRef n, uint32_t first,
-                                            uint32_t count, qualified_type type)
+                                            uint32_t count, qualified_type type,
+                                            bool signature_only)
 {
     if (f.parameter_count != count ||
-        !same_template_parameters(first, f.first_parameter, count) ||
-        !same_constraints(f.declaration, n))
+        (!signature_only &&
+         (!same_template_parameters(first, f.first_parameter, count) ||
+          !same_constraints(f.declaration, n))))
         return false;
     /* two definitions: [impl.clang] clang reports a redefinition; analysis
        does not claim it for a non-type parameter (a refusal holds the name) */

@@ -293,19 +293,10 @@ enum class entity_kind : uint8_t {
        a template's own declaration; the template_argument's
        template_entity, its value no parameter's position (UINT32_MAX).
        An instantiation analyses the argument again with its arguments.
-       What mangling knows of it: for [!] Q<args>::name written so, type
-       the dependent Q<args>, name the member's identifier, value 1 (3 if
-       negated), one entity for the same three ([temp.over.link]); else
-       value 0, an entity of its own.  An operator's operands are entities of
-       this kind too (template-argument.cpp, dependent_value_entity): value
-       8 &&, 9 ||, 10 >, 15 <, 16 <=, 17 >=, 18 == and 19 != with the
-       operands enclosing and name; 11 sizeof(type); 12 a literal; 13
-       Q::f(); 14 ! of enclosing; 20 a static data member no longer
-       dependent (name the member); 21 Q::template f<args>() (type Q, name
-       f, the arguments dependent_value_arguments'); value 1 or 3 with
-       0x10000 set: Q an alias template's specialization as written (the
-       alias's identifier plus one in the upper half, its arguments
-       dependent_value_arguments', type the class it denotes) */
+       What mangling knows of it is its value, a dependent_value_form and
+       what goes with it (below); value 0: an entity of its own, of no
+       form.  An operator's operands are entities of this kind too
+       (template-argument.cpp, dependent_value_entity). */
     dependent_value,
     /* not an entity: a dependent type in a template's own declaration
        known only by how it is written: [temp.dep.type]/10.3
@@ -319,6 +310,95 @@ enum class entity_kind : uint8_t {
        ([basic.scope.block], [basic.scope.param]), the scope the names
        declared in it are bound in */
     block_scope,
+};
+
+/*
+ * What [abi:mangle.template-arg] spells of a value-dependent argument
+ * (entity_kind::dependent_value), in the entity's value: the form in the
+ * low byte (dependent_value_negated set in it for one written with !), the
+ * number of namespaces written before a qualifier in bits 8-15
+ * (dependent_value_namespaces), dependent_value_alias, and an identifier plus
+ * one in the upper half (dependent_value_identifier).  One entity for the
+ * same value, type, name and enclosing ([temp.over.link]).
+ */
+enum class dependent_value_form : uint8_t {
+    none = 0,
+    /* [!] Q<args>::name: type the dependent Q<args>, name the member's
+       identifier, enclosing the namespace written before Q; with
+       dependent_value_alias, Q an alias template's specialization as
+       written (the alias's identifier in the upper half, its arguments
+       dependent_value_arguments', type the class it denotes); else the
+       upper half a member class's between Q<args> and name */
+    member = 1,
+    negated_member = 3,
+    /* [!] [ns::] v<args>, a variable template's specialization: type it,
+       enclosing ns */
+    variable_specialization = 4,
+    negated_variable_specialization = 6,
+    /* a binary operator (dependent_value_operators): its operands
+       enclosing and name */
+    logical_and = 8,
+    logical_or = 9,
+    greater = 10,
+    /* sizeof(type): type it */
+    sizeof_type = 11,
+    /* a decimal integer-literal: name its value */
+    integer_literal = 12,
+    /* Q::f(): type Q, name f */
+    member_call = 13,
+    /* ! of enclosing */
+    logical_not = 14,
+    less = 15,
+    less_equal = 16,
+    greater_equal = 17,
+    equal = 18,
+    not_equal = 19,
+    /* a static data member no longer dependent: name the member */
+    static_member = 20,
+    /* Q::template f<args>(): type Q, name f, the arguments
+       dependent_value_arguments' */
+    member_template_call = 21,
+};
+constexpr uint64_t dependent_value_negated = 2;
+constexpr uint64_t dependent_value_alias = 0x10000;
+
+constexpr uint64_t dependent_value_code(dependent_value_form f)
+{
+    return static_cast<uint64_t>(f);
+}
+
+constexpr dependent_value_form dependent_value_form_of(uint64_t value)
+{
+    return static_cast<dependent_value_form>(value & 0xff);
+}
+
+constexpr uint32_t dependent_value_namespaces(uint64_t value)
+{
+    return static_cast<uint32_t>((value >> 8) & 0xff);
+}
+
+/* the identifier in the upper half, plus one (0: none) */
+constexpr uint32_t dependent_value_identifier(uint64_t value)
+{
+    return static_cast<uint32_t>(value >> 32);
+}
+
+/* the binary operator forms and the operator each is written with */
+inline constexpr struct {
+    dependent_value_form form;
+    preprocessing_op_or_punc op;
+} dependent_value_operators[] = {
+    {dependent_value_form::logical_and,
+     preprocessing_op_or_punc::AMPERSAND_AMPERSAND},
+    {dependent_value_form::logical_or, preprocessing_op_or_punc::BAR_BAR},
+    {dependent_value_form::greater, preprocessing_op_or_punc::GREATER},
+    {dependent_value_form::less, preprocessing_op_or_punc::LESS},
+    {dependent_value_form::less_equal, preprocessing_op_or_punc::LESS_EQUAL},
+    {dependent_value_form::greater_equal,
+     preprocessing_op_or_punc::GREATER_EQUAL},
+    {dependent_value_form::equal, preprocessing_op_or_punc::EQUAL_EQUAL},
+    {dependent_value_form::not_equal,
+     preprocessing_op_or_punc::EXCLAMATION_EQUAL},
 };
 
 /* [basic.link]/2 */
@@ -691,6 +771,9 @@ struct entity {
     bool explicit_default_constructor = false;
     /* X& operator=(const X&) = default (defaulted_copy_assignment) */
     bool defaulted_copy_assignment = false;
+    /* ... and the access of one declared protected or private, which the
+       entity declared at the class's end takes */
+    uint8_t defaulted_copy_access = 0, defaulted_move_access = 0;
     /* X(X&&) = default and X& operator=(X&&) = default, trivial
        ([class.copy.ctor]/11, [class.copy.assign]/9): no entity; the move
        constructor copies the bytes (construct) */
@@ -738,6 +821,9 @@ struct entity {
        ([temp.friend]/4): clang does not check access to its members
        (-Wunsupported-friend, "turning off access control") */
     bool access_unchecked = false;
+    /* a class: the implicit assignment being defined assigns a subobject
+       of it, its operator= accessible as subobject_assignment decided */
+    bool assigned_by_implicit = false;
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
@@ -1350,16 +1436,16 @@ uint32_t cv_of(const types &table, qualified_type t);
    ([dcl.fct]/4) */
 bool same_parameters(const types &table, type_index a, type_index b);
 /* the function whose definition a block-scope entity is declared in, 0
-   for an entity not in a function (abi/itanium/mangling.cpp) */
+   for an entity not in a function (abi/itanium/mangling/scopes.cpp) */
 entity_index enclosing_function(const entities &table, entity_index e);
 /* the function a member of a local class (or of a class nested in one)
    is in (for a member function of a local class: the next function out),
-   0 for any other entity (abi/itanium/mangling.cpp) */
+   0 for any other entity (abi/itanium/mangling/scopes.cpp) */
 entity_index next_enclosing_function(const entities &table, entity_index f);
 /* [impl.clang] (clang's VisibleNoLinkage): whether c, a local class or
    closure type (or a class nested in one), is named in other translation
    units: the outermost function it is in is inline or a template's
-   specialization (abi/itanium/mangling.cpp) */
+   specialization (abi/itanium/mangling/scopes.cpp) */
 bool visible_local_class(const entities &table, entity_index c);
 
 /* [basic.lval]/1: "Every expression belongs to exactly one of the
@@ -2687,6 +2773,8 @@ class semantic_analysis
                              lookup_filter filter) const;
     /* one more declaration found for a name: r's entity if it is the same
        entity or the first, else ambiguous or unknown */
+    bool all_past_horizon(entity_index e) const;
+    bool declared_around(entity_index space, uint32_t name) const;
     void found_also(lookup_result &r, entity_index e, entity_index in) const;
     /* [basic.lookup.argdep]: the functions named name in the namespaces
        associated with arguments of these types, added to found (each
@@ -2988,6 +3076,7 @@ class semantic_analysis
     analysis_result using_enum_declaration(UsingEnumDeclaration n);
     analysis_result using_declarator(UsingDeclarator n, bool if_exists = false);
     analysis_result using_typename(UsingDeclarator n);
+    analysis_result using_conversion(UsingDeclarator n, SyntaxRef id);
     /* [temp.variadic]/5: in a using-declaration the pattern is a
        using-declarator: one followed by an ellipsis, once for each element
        of the packs it names */
@@ -3110,6 +3199,9 @@ class semantic_analysis
     bool names_nothing_dependent(SyntaxRef x);
     void collect_written_casts(SyntaxElement x,
                                owned_array<written_binding> &found);
+    bool ends_in_ellipsis(SyntaxElement a) const;
+    bool collect_written_expansion(SyntaxElement a,
+                                   owned_array<written_binding> &found);
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(SyntaxRef op, qualified_type &type,
@@ -3547,6 +3639,15 @@ class semantic_analysis
     /* [expr.prim.id.qual] */
     analysis_result qualified_id(QualifiedId n, expression_meaning &m);
     analysis_result qualified_template_id(SyntaxRef n, expression_meaning &m);
+    /* [namespace.udecl]: the qualified-ids naming a member through a
+       member using-declaration, by token, and their naming class, whose
+       access the declaration gives */
+    struct using_named {
+        token_index at = 0;
+        entity_index naming = 0;
+    };
+    owned_array<using_named> using_named_members;
+    entity_index using_naming_class(token_index t) const;
     analysis_result class_member_value(SyntaxRef n, token_index t,
                                        entity_index e, expression_meaning &m);
     /* [expr.prim.id]: the expression that names the entity e, found by
@@ -3687,6 +3788,9 @@ class semantic_analysis
     analysis_result lambda_expression_analysed(LambdaExpression n,
                                                expression_meaning &m);
     bool names_init_capture(SyntaxElement part, const lambda_context &l) const;
+    analysis_result
+    lambda_default_arguments(SyntaxRef n, entity_index f,
+                             const owned_array<parameter_meaning> &list);
     analysis_result
     lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                      qualified_type &type,
@@ -4751,6 +4855,9 @@ class semantic_analysis
                                  owned_array<SyntaxElement> &clauses,
                                  owned_array<uint32_t> *packs = nullptr,
                                  designation_set *designated = nullptr);
+    /* [over.ics.list]/5: no expression in list is without an implicit
+       conversion to the class target */
+    bool list_elements_convert(SyntaxRef list, qualified_type target);
     /* [over.ics.list]/5 and /8: whether the braced-init-list list can
        convert to the parameter type target (a class, an array): for
        std::initializer_list<X> and arrays of X with X an array, each
@@ -4914,7 +5021,8 @@ class semantic_analysis
     analysis_result named_member_type(SyntaxRef n, token_index t,
                                       entity_index e, const char *citation,
                                       type_index &type, uint32_t &cv,
-                                      bool allow_placeholder = false);
+                                      bool allow_placeholder = false,
+                                      entity_index naming = 0);
     analysis_result qualified_type_name(SyntaxRef n, type_index &type,
                                         uint32_t &cv,
                                         bool allow_placeholder = false);
@@ -4945,29 +5053,35 @@ class semantic_analysis
        for member_template_call to deduce from the arguments */
     entity_index member_template_name = 0;
     expression_meaning member_template_object;
+    /* x.B::f<T>(): the object's class, whose member naming B it is for
+       access ([class.access.base]/5); 0 when not qualified */
+    entity_index member_template_through = 0;
     owned_array<SyntaxElement> member_template_written;
     SyntaxRef member_template_written_at = 0;
     /* the call of the functions and function templates held names
        ([over.call.func]/2, /3): object is the implied object argument
        (none: a static member's context), written the explicit template
        arguments of f<T>(...) */
-    analysis_result
-    member_template_call(SyntaxRef n, entity_index held,
-                         const expression_meaning *object,
-                         const owned_array<SyntaxElement> &arguments,
-                         owned_array<expression_meaning> &early,
-                         const owned_array<SyntaxElement> *written,
-                         SyntaxRef written_at, expression_meaning &m);
-    analysis_result bound_member_call(
-        SyntaxRef n, entity_index f, const expression_meaning &object,
+    analysis_result member_template_call(
+        SyntaxRef n, entity_index held, const expression_meaning *object,
         const owned_array<SyntaxElement> &arguments,
-        owned_array<expression_meaning> &early, expression_meaning &m);
+        owned_array<expression_meaning> &early,
+        const owned_array<SyntaxElement> *written, SyntaxRef written_at,
+        expression_meaning &m, entity_index through = 0);
+    analysis_result
+    bound_member_call(SyntaxRef n, entity_index f,
+                      const expression_meaning &object,
+                      const owned_array<SyntaxElement> &arguments,
+                      owned_array<expression_meaning> &early,
+                      expression_meaning &m, entity_index through = 0);
     /* [over.match.funcs]/4: a static member function f called, the object
        expression (if any) evaluated and discarded */
-    analysis_result static_member_call(
-        SyntaxRef n, entity_index f, const expression_meaning *object,
-        const owned_array<SyntaxElement> &arguments,
-        owned_array<expression_meaning> &early, expression_meaning &m);
+    analysis_result
+    static_member_call(SyntaxRef n, entity_index f,
+                       const expression_meaning *object,
+                       const owned_array<SyntaxElement> &arguments,
+                       owned_array<expression_meaning> &early,
+                       expression_meaning &m, entity_index through = 0);
     /* [temp.arg.explicit]: the template-arguments of a simple-template-id
        (pack expansions marked in expansion) */
     SyntaxElement member_template_id(SyntaxRef n) const;
@@ -5204,6 +5318,7 @@ class semantic_analysis
     void declare_implicit_assignment(entity_index c, bool move, bool deleted,
                                      bool non_throwing, bool nonconst = false);
     analysis_result implicit_assignments(entity_index c);
+    analysis_result defaulted_assignment_access(entity_index c, SyntaxRef n);
     analysis_result implicit_assignment_definitions(entity_index c,
                                                     SyntaxRef n);
     analysis_result defaulted_assignment_definition(SyntaxRef n,
@@ -6288,7 +6403,7 @@ class semantic_analysis
                                             bool require_trailing_defaults);
     bool equivalent_template(const function_template &f, SyntaxRef n,
                              uint32_t first, uint32_t count,
-                             qualified_type type);
+                             qualified_type type, bool signature_only = false);
     /* [temp.mem.func]/1: a member function of a class template (or of a
        partial specialization, [temp.class.spec.mfunc]/1) defined outside
        it: the definition, analysed per specialization of the class
@@ -6463,8 +6578,8 @@ class semantic_analysis
     /* a type partial ordering compares with deduce_type's rules alone;
        pack_argument set when a specialization in it has a pack of
        arguments */
-    bool orderable(qualified_type t, bool packs,
-                   bool *pack_argument = nullptr) const;
+    bool orderable(qualified_type t, bool packs, bool *pack_argument = nullptr,
+                   unsigned *value_kinds = nullptr) const;
     bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
                                  bool &unknown, bool f_reversed = false,
                                  bool g_reversed = false);
@@ -6944,6 +7059,15 @@ class semantic_analysis
     entity_index constraint_own_type_parameter(entity_index t,
                                                uint64_t position) const;
     bool constraint_parameter_is_own(entity_index t, entity_index p) const;
+    /* [abi:mangle.template-arg] whether clang writes a template-param-decl
+       before a template argument (named) whose template-parameter-list is
+       not its template template-parameter's (parameter i of function
+       template t): declared that parameter, whose parameters (types only)
+       the decl lists, or 0 when they agree.  False when it has no rule for
+       it */
+    bool template_argument_declaration(entity_index t, uint32_t i,
+                                       entity_index named,
+                                       entity_index &declared) const;
     /* the type a type-id written in t's requires-clause names, analysed in
        t's template-parameter scope (what [abi:mangle.template-args] spells) */
     bool constraint_type(entity_index t, SyntaxElement written,
@@ -6984,6 +7108,8 @@ class semantic_analysis
        classes or closure types other translation units name too: its
        symbol has its template's linkage (basic/translation-unit.cpp) */
     bool specialization_visible(entity_index e) const;
+    bool unit_local(entity_index e) const;
+    bool argument_unit_local(const template_argument &a) const;
     bool type_without_external_linkage(qualified_type t, bool visible = false,
                                        bool arguments = false) const;
     uint32_t specialization_argument_count(entity_index e) const
@@ -7299,6 +7425,9 @@ class semantic_analysis
        parameter of the member function f */
     conversion_sequence object_sequence(const expression_meaning &object,
                                         entity_index f) const;
+    /* whether a conversion function template of c may be a candidate of a
+       copy-initialization: not declared explicit */
+    bool has_implicit_conversion_function_templates(entity_index c);
     /* whether class c or a base class of it declares a conversion
        function ([class.conv.fct]/4: "Conversion functions are
        inherited") */
@@ -7380,9 +7509,10 @@ class semantic_analysis
     conversion_sequence list_scalar_sequence(SyntaxElement list,
                                              qualified_type to);
     /* [over.ics.list]/6 */
-    conversion_sequence list_array_sequence(SyntaxElement list,
-                                            qualified_type array,
-                                            bool user_defined);
+    conversion_sequence
+    list_array_sequence(SyntaxElement list, qualified_type array,
+                        bool user_defined,
+                        const expression_meaning *known = nullptr);
     int compare_standard_conversions(const conversion_sequence &a,
                                      const conversion_sequence &b) const;
     /* [over.match.viable], [over.match.best]: the best viable function of
@@ -7804,6 +7934,24 @@ bool itanium_construction_vtable_name(const semantic_analysis &analysis,
                                       const preprocessor &pp, entity_index c,
                                       uint64_t offset, entity_index base,
                                       vbuffer *out);
+/* [abi:mangling-special-guards]: the guard variable of variable e's
+   initialization (_ZGV <encoding>) */
+bool itanium_guard_variable_name(const semantic_analysis &analysis,
+                                 const preprocessor &pp, entity_index e,
+                                 vbuffer *out);
+/* [abi:mangling-special-thunks]: a this-adjusting thunk of function f (a
+   constructor's or destructor's variant as itanium_symbol_name's), by
+   adjustment and, for a virtual one, the vcall offset's offset (0: none):
+   _ZTh <adjustment> _ or _ZTv <adjustment> _ <vcall> _, then f's
+   encoding */
+bool itanium_thunk_name(const semantic_analysis &analysis,
+                        const preprocessor &pp, entity_index f, int variant,
+                        int64_t adjustment, int64_t vcall, vbuffer *out);
+/* [abi:rtti-layout]: the virtual table of the run-time library's
+   std::type_info class __cxxabiv1::NAME (_ZTVN10__cxxabiv1 ... E) */
+void itanium_runtime_vtable_name(const semantic_analysis &analysis,
+                                 const preprocessor &pp, const char *name,
+                                 vbuffer *out);
 
 } // namespace cplusplus
 

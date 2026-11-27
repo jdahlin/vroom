@@ -3151,16 +3151,21 @@ static codegen_value walk_statement_expression_emit(codegen_context *e,
 
     int cmark = e->walk_state->cleanup_count;
     codegen_value v = codegen_value_constant(0);
+    /* (as an inlined call's body: walk_call_inline) */
+    bool condition_jumped = e->walk_state->condition_jumped;
 
     for (uint32_t i = 0; i + 1 < b->c; i++)
         walk_statement_emit(e, c->lists[b->b + i]);
+    e->walk_state->condition_jumped = condition_jumped;
     if (b->c) {
         uint32_t last = c->lists[b->b + b->c - 1];
 
         if (N(last)->op == AST_NODE_EXPRESSION && N(last)->a)
             v = walk_value_emit(e, N(last)->a);
-        else
+        else {
             walk_statement_emit(e, last);
+            e->walk_state->condition_jumped = condition_jumped;
+        }
     }
     if (e->walk_state->cleanup_count > cmark) {
         /* (a register value survives the calls: they save the live temporaries) */
@@ -3992,7 +3997,34 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
     case CC_BUILTIN_PREFETCH: {
         codegen_value v = walk_value_emit(e, arg[0]);
 
-        walk_value_free(e, &v);
+        if (!CODEGEN_IS_X64(c)) {
+            walk_value_free(e, &v);
+            return codegen_value_constant(0);
+        }
+        /* the address, whether for a write (0) and the locality (3): as clang
+         * picks the instruction */
+        int64_t hint[2] = {0, 3};
+
+        for (uint32_t i = 1; i < x->c && i < 3; i++) {
+            cc_value constant;
+
+            if (cc_eval(c, arg[i], &constant) &&
+                constant.kind == CC_VALUE_INTEGER)
+                hint[i - 1] = (int64_t)constant.i;
+        }
+        uint32_t function = e->walk_state->function_symbol;
+
+        if (e->walk_state->inline_call)
+            function = e->walk_state->inline_call->function;
+        int kind = (int)(hint[1] & 3);
+
+        if ((hint[0] & 1) && x86_feature_has(cc_x86_features_get(c, function),
+                                             X86_FEATURE_PRFCHW))
+            kind = WALK_PREFETCH_WRITE;
+        int r = walk_value_to_register(e, &v);
+
+        WALK_LOWER(prefetch)(e, r, kind);
+        WALK_LOWER(tfree)(e, r);
         return codegen_value_constant(0);
     }
     case CC_BUILTIN_UNREACHABLE:

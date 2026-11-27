@@ -84,6 +84,12 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
     } else {
         return true;
     }
+    /* /5: each element of an initializer_list of a class converts to it
+       by itself, where the initialization of the backing array could elide
+       braces (set::insert({point, upper}) of a set of aggregates) */
+    if (t.kind == type_kind::class_type &&
+        type_table[element.unqualified()].kind == type_kind::class_type)
+        return list_elements_convert(list, element);
     if (type_table[element.unqualified()].kind != type_kind::array)
         return true;
     owned_array<SyntaxElement> clauses;
@@ -100,6 +106,35 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
             tokens[clauses[i].token()].kind == token_kind::literal &&
             tokens[clauses[i].token()].literal == literal_kind::string_literal;
         if (!string)
+            return false;
+    }
+    return true;
+}
+
+/* whether no element of list that is an expression has no implicit
+   conversion to the class target ([over.ics.list]/5) */
+bool semantic_analysis::list_elements_convert(SyntaxRef list,
+                                              qualified_type target)
+{
+    owned_array<SyntaxElement> clauses;
+    if (list_clauses(list, clauses) != analysis_result::well_formed)
+        return true;
+    for (size_t i = 0; i < clauses.size(); i++) {
+        if (clauses[i].is(syntax_kind::braced_init_list) ||
+            clauses[i].is(syntax_kind::designated_initializer_clause))
+            continue;
+        substitution_mark mark = mark_substitution();
+        expression_meaning e;
+        substituting++;
+        analysis_result r = expression(clauses[i], e);
+        conversion_sequence s;
+        s.kind = conversion_sequence::form::unknown;
+        if (r == analysis_result::well_formed && e.node)
+            s = implicit_conversion_sequence(
+                e, qualified_type::make(target.unqualified(), cv_none), true);
+        substituting--;
+        undo_substitution(mark);
+        if (s.kind == conversion_sequence::form::bad)
             return false;
     }
     return true;
@@ -202,8 +237,15 @@ semantic_analysis::list_scalar_sequence(SyntaxElement list, qualified_type to)
  */
 semantic_analysis::conversion_sequence
 semantic_analysis::list_array_sequence(SyntaxElement list, qualified_type array,
-                                       bool user_defined)
+                                       bool user_defined,
+                                       const expression_meaning *known)
 {
+    /* (the elements as template argument deduction analysed them: a copy,
+       the analyses below add to braced_elements) */
+    owned_array<expression_meaning> analysed;
+    if (known && known->braced_known)
+        for (uint32_t i = 0; i < known->braced_count; i++)
+            analysed.append(braced_elements[known->braced_first + i]);
     conversion_sequence unknown;
     unknown.kind = conversion_sequence::form::unknown;
     const struct type t = type_table[array.unqualified()];
@@ -229,9 +271,24 @@ semantic_analysis::list_array_sequence(SyntaxElement list, qualified_type array,
         return unknown;
     conversion_sequence worst;
     worst.kind = conversion_sequence::form::standard;
-    for (SyntaxElement clause : clauses) {
+    for (size_t at = 0; at < clauses.size(); at++) {
+        SyntaxElement clause = clauses[at];
         if (clause.is(syntax_kind::designated_initializer_clause))
             return unknown;
+        if (analysed.size() == clauses.size() && analysed[at].node &&
+            !clause.is(syntax_kind::braced_init_list)) {
+            /* analysed once, outside any substitution (a lambda there
+               makes its closure type once) */
+            conversion_sequence s = implicit_conversion_sequence(
+                analysed[at], t.operand, user_defined);
+            if (s.kind == conversion_sequence::form::unknown)
+                return unknown;
+            if (s.kind == conversion_sequence::form::bad)
+                return bad;
+            if (compare_conversions(s, worst) > 0)
+                worst = s;
+            continue;
+        }
         substitution_mark mark = mark_substitution();
         if (clause.is(syntax_kind::braced_init_list)) {
             if (!of_class)
@@ -499,15 +556,17 @@ analysis_result semantic_analysis::best_viable_function(
                     } else if (type_table[list_target.unqualified()].kind ==
                                type_kind::array) {
                         a = list_array_sequence((*written_arguments)[k],
-                                                list_target, user_defined);
+                                                list_target, user_defined,
+                                                &argument);
                     } else if (argument.node) {
                         a = implicit_conversion_sequence(argument, target,
                                                          user_defined);
-                    } else if (list_class) {
-                        /* (T{{0}} to T(int): the constructor that is left
-                           when T's copy constructors take no list) */
+                    } else if (list_class ||
+                               scalar_type(list_target.unqualified())) {
+                        /* a scalar parameter's list: {} for an enumeration,
+                           T{{0}} to T(int) */
                         a = list_scalar_sequence((*written_arguments)[k],
-                                                 target);
+                                                 list_target);
                     }
                 } else if (argument.overload_name) {
                     a = overload_set_sequence(argument, target);
@@ -785,7 +844,25 @@ analysis_result semantic_analysis::best_viable_function(
             candidates[i].rewritten == candidates[w].rewritten &&
             candidates[i].reversed == candidates[w].reversed)
             continue;
-        if (!better(w, i) &&
+        /* a member that is no template against a non-member candidate:
+           [over.match.best]/2 prefers neither unless its conversions are
+           no worse, so crosswise ones are an ambiguity (clang's error too,
+           reversed or not, as in libc++'s optional == against a class
+           derived from optional with a member operator==, where it makes a
+           constraint unsatisfied) */
+        bool member_against_free = false;
+        if (candidates[w].function && candidates[i].function) {
+            auto member = [&](size_t k) {
+                entity_index in =
+                    entity_table[candidates[k].function].enclosing;
+                return entity_table[in].kind == entity_kind::class_type;
+            };
+            member_against_free =
+                member(w) != member(i) &&
+                ((member(w) && !candidates[w].template_index) ||
+                 (member(i) && !candidates[i].template_index));
+        }
+        if (!better(w, i) && !member_against_free &&
             (candidates[w].rewritten || candidates[i].rewritten))
             /* [impl.clang] an ambiguity a reversed candidate makes is
                resolved for the non-reversed one with a warning
@@ -793,7 +870,7 @@ analysis_result semantic_analysis::best_viable_function(
             return not_supported_because(
                 at, "over.match.oper",
                 "an ambiguity involving a rewritten operator candidate");
-        if (!better(w, i) &&
+        if (!better(w, i) && !member_against_free &&
             (candidates[w].template_index || candidates[i].template_index) &&
             !unconstrained_tie(w, i))
             /* two specializations neither more specialized (or partial

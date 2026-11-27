@@ -88,7 +88,29 @@ void c_lowering::static_initialization(entity_index e, uint32_t init,
 {
     collection k = collect();
     owned_array<uint32_t> after;
+    uint32_t list = init;
+    if (list && node(list).kind == semantic_kind::bind_reference)
+        list = node(list).a;
+    static_backing = nullptr;
+    if (list)
+        static_backing = backing_array(list);
+    /* [class.temporary]/6: a local static reference's temporary has static
+       storage as a namespace-scope one's does */
+    bool local =
+        !static_owner && init &&
+        (node(init).kind == semantic_kind::bind_reference || static_backing);
+    if (local) {
+        static_owner = e;
+        static_temporaries = 0;
+        if (node(init).kind == semantic_kind::bind_reference)
+            static_root = init;
+    }
     uint32_t done = initialization(e, init, at);
+    if (local) {
+        static_owner = 0;
+        static_root = 0;
+    }
+    static_backing = nullptr;
     collected(k, out, after);
     if (!done)
         return;
@@ -211,8 +233,8 @@ uint32_t c_lowering::destructor_registration(uint32_t d, ast_qualified_type f,
  * through its declaration ... If control enters the declaration
  * concurrently while the variable is being initialized, the concurrent
  * execution shall wait for completion of the initialization."
- * [abi:guards]: a 64-bit guard variable _ZGV<the variable's mangled name
- * without _Z>, its first byte read with acquire semantics, then
+ * [abi:guards]: a 64-bit guard variable (itanium_guard_variable_name), its
+ * first byte read with acquire semantics, then
  * __cxa_guard_acquire, the initialization, the destructor's registration
  * and __cxa_guard_release, as clang does at -O0.  A constant-initialized
  * object with a destructor is guarded for its registration alone.
@@ -229,7 +251,8 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     }
     bool weak_guard =
         analysis.entity_table[function].inline_ &&
-        analysis.entity_table[function].linkage_of_name != linkage::internal;
+        analysis.entity_table[function].linkage_of_name != linkage::internal &&
+        !analysis.unit_local(function);
     bool constant = !n.b || constant_initializer(n.b);
     uint32_t s = symbol(e, n.at);
     if (!s)
@@ -244,15 +267,12 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     ast_builder_symbol_keep(c, s);
     if (data)
         ast_builder_symbol_body(c, s, data);
-    owned_buffer name;
-    if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), 0) ||
-        name.size() < 2) {
+    owned_buffer guard_name;
+    if (!itanium_guard_variable_name(analysis, tokens.pp, e,
+                                     guard_name.get())) {
         fail("an entity whose symbol is not mangled", n.at);
         return;
     }
-    owned_buffer guard_name;
-    vbuffer_string_append(guard_name.get(), "_ZGV");
-    vbuffer_append(guard_name.get(), name.data() + 2, name.size() - 2);
     owned_buffer written;
     if (target_id == PP_DARWIN)
         vbuffer_string_append(written.get(), "_");
@@ -379,16 +399,14 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
     in_function = false;
     if (failure.what || statements.empty())
         return false;
-    if (x.inline_ && x.linkage_of_name != linkage::internal) {
+    if (x.inline_ && x.linkage_of_name != linkage::internal &&
+        !analysis.unit_local(e)) {
         /* [basic.start.dynamic]/1, [abi:guards]: guard an inline variable's
-           dynamic initialization with weak _ZGV<mangled without _Z> */
-        owned_buffer name;
-        if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), 0) ||
-            name.size() < 2)
-            return fail("an entity whose symbol is not mangled", init.at);
+           dynamic initialization with a weak guard variable */
         owned_buffer guard_name;
-        vbuffer_string_append(guard_name.get(), "_ZGV");
-        vbuffer_append(guard_name.get(), name.data() + 2, name.size() - 2);
+        if (!itanium_guard_variable_name(analysis, tokens.pp, e,
+                                         guard_name.get()))
+            return fail("an entity whose symbol is not mangled", init.at);
         ast_qualified_type guard_type =
             ast_builder_type_basic(AST_TYPE_LONG_LONG);
         uint32_t guard = ast_builder_symbol(

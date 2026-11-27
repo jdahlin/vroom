@@ -484,18 +484,30 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
     case VIR_OP_CRC32C64:
         x64_record_emit_three_registers(e, X64_OP_CRC32, 8, d, a, c);
         return;
+    case VIR_OP_PREFETCH: {
+        char text[64];
+
+        snprintf(text, sizeof text, "\t%s\t(%%%s)\n",
+                 x64_prefetch_name((int)i->b), x64_register_names_64[a]);
+        x64_vir_text_append(L, text);
+        return;
+    }
     case VIR_OP_X86:
         if (vir_type_is_vector(i->type) &&
             !vir_type_is_vector(L->function->insns[i->a].type)) {
             /* a broadcast of a general register, through an xmm one */
             char text[96], r = 'y';
+            int through = x64_vector_index(d);
 
             if (i->type == VIR_TYPE_I64X8)
                 r = 'z';
+            if (X64_REGISTER_IS_HIGH_VECTOR(d))
+                through = 14;
             snprintf(text, sizeof text,
                      "\tvmovd\t%%%s, %%xmm%d\n\tv%s\t%%xmm%d, %%%cmm%d\n",
-                     x64_register_names_32[a], d - XMM0,
-                     x64_x86_code_mnemonic(i->c), d - XMM0, r, d - XMM0);
+                     x64_register_names_32[a], through,
+                     x64_x86_code_mnemonic(i->c), through, r,
+                     x64_vector_index(d));
             x64_vir_text_append(L, text);
             return;
         }
@@ -523,8 +535,8 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
 
             snprintf(text, sizeof text,
                      "\tv%s\t%%zmm%d, %%zmm%d, %%k1\n\tkmovw\t%%k1, %%%s\n",
-                     x64_x86_code_mnemonic(i->c), c - XMM0, a - XMM0,
-                     x64_register_names_32[d]);
+                     x64_x86_code_mnemonic(i->c), x64_vector_index(c),
+                     x64_vector_index(a), x64_register_names_32[d]);
             x64_vir_text_append(L, text);
             return;
         }
@@ -1137,21 +1149,23 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             into = XMM0 + 15;
         if (into != a) {
             snprintf(text, sizeof text, "\tvmovdqa64\t%%zmm%d, %%zmm%d\n",
-                     a - XMM0, into - XMM0);
+                     x64_vector_index(a), x64_vector_index(into));
             x64_vir_text_append(L, text);
         }
         if (memory)
             snprintf(text, sizeof text, "\tvpdpbusd\t%s, %%zmm%d, %%zmm%d\n",
-                     L->vector_address, c - XMM0, into - XMM0);
+                     L->vector_address, x64_vector_index(c),
+                     x64_vector_index(into));
         else
             snprintf(text, sizeof text,
-                     "\tvpdpbusd\t%%zmm%d, %%zmm%d, %%zmm%d\n", third - XMM0,
-                     c - XMM0, into - XMM0);
+                     "\tvpdpbusd\t%%zmm%d, %%zmm%d, %%zmm%d\n",
+                     x64_vector_index(third), x64_vector_index(c),
+                     x64_vector_index(into));
         L->vector_load = 0;
         x64_vir_text_append(L, text);
         if (into != d) {
             snprintf(text, sizeof text, "\tvmovdqa64\t%%zmm%d, %%zmm%d\n",
-                     into - XMM0, d - XMM0);
+                     x64_vector_index(into), x64_vector_index(d));
             x64_vir_text_append(L, text);
         }
         return;
@@ -1214,8 +1228,12 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         if (vir_type_size(i->type) > 16) { /* the 64 bits to all lanes */
             char r = 'y';
 
-            if (i->type == VIR_TYPE_I64X8)
-                r = 'z';
+            if (i->type == VIR_TYPE_I64X8) {
+                snprintf(s, sizeof s, "\tvpbroadcastq\t%%%s, %%zmm%d\n",
+                         x64_register_names_64[a], x64_vector_index(d));
+                x64_vir_text_append(L, s);
+                return;
+            }
             x64_record_emit_three_registers(e, X64_OP_MOV, 8, d, a,
                                             X64_REGISTER_NONE);
             snprintf(s, sizeof s, "\tvpbroadcastq\t%%xmm%d, %%%cmm%d\n",

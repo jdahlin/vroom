@@ -703,11 +703,14 @@ VPRIV void dyn_after_scan(struct ld_context *ctx)
                 ctx->symbols.globals[ld_global_name_find(ctx, "_fini")].state ==
                     LD_SYMBOL_STATE_OBJECT;
 
-    ctx->dyn.nxdyn = ctx->dyn.needed.n + 1 /* DEBUG */ + 3 /* RELA */ +
-                     4 /* PLT */ + 4 /* SYMTAB.. */ + 2 /* hashes */ +
-                     3 /* versions */ + (init ? 1 : 0) + (fini ? 1 : 0) +
-                     6 /* (pre)init/fini arrays */ + 2 /* FLAGS, FLAGS_1 */ +
-                     1 /* NULL */;
+    ctx->dyn.rpath = 0;
+    if (ctx->options.rpath)
+        ctx->dyn.rpath = xstr_add(ctx, ctx->options.rpath);
+    ctx->dyn.nxdyn =
+        ctx->dyn.needed.n + (ctx->options.rpath != NULL) + 1 /* DEBUG */ +
+        3 /* RELA */ + 4 /* PLT */ + 4 /* SYMTAB.. */ + 2 /* hashes */ +
+        3 /* versions */ + (init ? 1 : 0) + (fini ? 1 : 0) +
+        6 /* (pre)init/fini arrays */ + 2 /* FLAGS, FLAGS_1 */ + 1 /* NULL */;
 
     ctx->inputs.sections.v[ctx->output.dynsym_section].size =
         (uint64_t)(n + 1) * sizeof(elf_symbol);
@@ -1011,7 +1014,9 @@ VPRIV void dyn_write(struct ld_context *ctx)
     } while (0)
     for (uint32_t k = 0; k < ctx->dyn.needed.n; k++)
         XDYN(1, ctx->dyn.needed.v[k]); /* DT_NEEDED */
-    XDYN(21, 0);                       /* DT_DEBUG */
+    if (ctx->options.rpath)
+        XDYN(29, ctx->dyn.rpath); /* DT_RUNPATH */
+    XDYN(21, 0);                  /* DT_DEBUG */
     if (ld_input_section_is_live(ctx, ctx->output.rela_dyn_section) &&
         ctx->inputs.sections.v[ctx->output.rela_dyn_section].size) {
         XDYN(7, ld_input_section_address(ctx, ctx->output.rela_dyn_section,

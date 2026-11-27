@@ -709,8 +709,10 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     } else if (init.is(syntax_kind::braced_init_list) && !value_initialized) {
         r = list_initialization(init, type, true, value);
     } else if (init.is(syntax_kind::new_initializer) || value_initialized) {
+        /* (a lone braced-init-list is no initializer-list node) */
         bool has_list =
-            init.size() == 3 && init[1].is(syntax_kind::initializer_list);
+            init.size() == 3 && (init[1].is(syntax_kind::initializer_list) ||
+                                 init[1].is(syntax_kind::braced_init_list));
         owned_array<expression_meaning> list;
         /* [over.best.ics]/1: a braced-init-list argument of a constructor,
            converted by [over.ics.list], kept as written; as in a
@@ -722,19 +724,30 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         for (const SyntaxElement &w : written)
             if (w.is(syntax_kind::braced_init_list))
                 braced = true;
-        if (braced &&
-            (!c ||
-             (!entity_table[c].first_constructor &&
-              !entity_table[c].constructor_templates) ||
-             is_aggregate(c) ||
-             (list.size() == 1 &&
-              written[0].end_token() <= written[0].first_token() + 2 &&
-              may_be_default_constructible(c))))
+        /* [dcl.init]: an aggregate's parenthesized braced-init-list, the
+           copy of the prvalue it makes elided (clang's): the list
+           initializes the object */
+        bool listed = braced && c && list.size() == 1 && written.size() == 1 &&
+                      written[0].is(syntax_kind::braced_init_list) &&
+                      written[0].end_token() > written[0].first_token() + 2 &&
+                      is_aggregate(c) && !value_initialized;
+        if (listed) {
+            VTRY_SET(r, list_initialization(written[0], type, false, value));
+        } else if (braced &&
+                   (!c ||
+                    (!entity_table[c].first_constructor &&
+                     !entity_table[c].constructor_templates) ||
+                    is_aggregate(c) ||
+                    (list.size() == 1 &&
+                     written[0].end_token() <= written[0].first_token() + 2 &&
+                     may_be_default_constructible(c))))
             return not_supported_because(
                 n, "over.match.list",
                 "a braced-init-list argument of a new-initializer that is "
                 "not a constructor's");
-        if (init.size() == 2 || (has_list && list.empty())) {
+        if (listed) {
+            /* initialized above */
+        } else if (init.size() == 2 || (has_list && list.empty())) {
             /* [dcl.init]/11: "An object whose initializer is an empty set
                of parentheses, i.e., (), shall be value-initialized."; /8:
                (8.3) "Otherwise, the object is zero-initialized." */

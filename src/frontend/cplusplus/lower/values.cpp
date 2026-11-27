@@ -195,7 +195,7 @@ uint32_t c_lowering::constant(const semantic_node &n)
         return fail("a constant of this type", n.at);
     if (f == fundamental_type::long_double) {
         if (n.evaluation == constness::constant)
-            return ast_builder_floating(c, t, static_cast<double>(n.value));
+            return ast_builder_floating(c, t, floating_value(n.value));
         owned_buffer sp;
         analysis.token_spelling(n.at, sp.get());
         if (sp.size()) {

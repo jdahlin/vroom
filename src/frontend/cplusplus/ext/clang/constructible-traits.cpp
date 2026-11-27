@@ -238,6 +238,8 @@ analysis_result semantic_analysis::aggregate_paren_initialization(
     if (arguments.size() > elements.size())
         return analysis_result::well_formed;
     owned_array<uint32_t> nodes;
+    /* an element left to value-initialization that cannot be, or throws */
+    bool rest = true;
     for (size_t i = 0; i < elements.size(); i++) {
         const entity &m = entity_table[elements[i]];
         if (i >= arguments.size()) {
@@ -247,6 +249,15 @@ analysis_result semantic_analysis::aggregate_paren_initialization(
             if (kind == type_kind::lvalue_reference ||
                 kind == type_kind::rvalue_reference)
                 return analysis_result::well_formed;
+            if ((kind == type_kind::class_type || kind == type_kind::array) &&
+                !m.default_initializer) {
+                bool one = false;
+                VTRY(r,
+                     constructible_types(n, m.type, nullptr, 0, nothrow, one));
+                if (!one)
+                    rest = false;
+                continue;
+            }
             if (kind == type_kind::class_type || kind == type_kind::array ||
                 (m.default_initializer && nothrow))
                 return not_supported_because(
@@ -290,8 +301,8 @@ analysis_result semantic_analysis::aggregate_paren_initialization(
             return analysis_result::well_formed;
         nodes.append(made.node);
     }
-    value = true;
-    if (!nothrow)
+    value = rest;
+    if (!value || !nothrow)
         return analysis_result::well_formed;
     for (uint32_t node : nodes) {
         bool throwing = false;

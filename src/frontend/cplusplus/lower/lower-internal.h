@@ -665,6 +665,15 @@ class c_lowering
        the reference it initializes (a declared variable's), not to the
        end of the full-expression */
     const semantic_node *extended_temporary = nullptr;
+    /* [dcl.init.list]/6: the backing array of the std::initializer_list a
+       variable is (or is bound to by reference): the array's initializer,
+       0 if init makes none */
+    const semantic_node *backing_array(uint32_t init) const;
+    /* ... of a variable of static storage being initialized: its array
+       has static storage too */
+    const semantic_node *static_backing = nullptr;
+    uint32_t reference_temporary_symbol(ast_qualified_type t, token_index at);
+    uint32_t static_array(uint32_t n);
     /* [basic.stc.static]: the namespace-scope variable whose dynamic
        initialization is being lowered and the initializer's root node: a
        prvalue bound to the reference initialized there has static storage
