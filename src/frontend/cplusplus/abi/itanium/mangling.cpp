@@ -151,8 +151,11 @@ class itanium_mangler
         qualified_type type;
         entity_index scope = 0;
         entity_index member_class = 0;
+        /* Dp <type>, the expansion of the pattern type */
+        bool expansion = false;
     };
     owned_array<candidate> candidates;
+    bool own_pack_expansion(qualified_type pattern);
     /* the function template whose specialization's encoding is being
        mangled: what its function parameters' names are */
     entity_index encoding_template = 0;
@@ -584,6 +587,19 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             entity_index pe = analysis.constraint_parameter(t, a.token());
             text("st");
             return pe && constraint_parameter(t, pe);
+        }
+        /* sizeof ... ( P ), P a template parameter pack: sZ
+           <template-param> */
+        if (c.size() == 5 && c[0].is(standard_keyword::sizeof_) &&
+            c[1].is(preprocessing_op_or_punc::ELLIPSIS) &&
+            c[3].is_identifier()) {
+            entity_index pe = analysis.constraint_parameter(t, c[3].token());
+            /* (an expression's <template-param>: no candidate) */
+            if (!pe || !analysis.constraint_parameter_is_own(t, pe))
+                return false;
+            text("sZ");
+            template_param(analysis.entity_table[pe].value);
+            return true;
         }
         if (c.size() != 2 ||
             !punctuator(c[0], preprocessing_op_or_punc::EXCLAMATION))
@@ -2761,8 +2777,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
                 if (analysis.entity_table[own].kind !=
                     entity_kind::typedef_name)
                     return false;
-                text("Dp");
-                if (!type(analysis.entity_table[own].type))
+                if (!own_pack_expansion(analysis.entity_table[own].type))
                     return false;
                 continue;
             }
@@ -2773,6 +2788,37 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
             text("E");
     }
     text("E");
+    return true;
+}
+
+/*
+ * [abi:mangle.function-type]'s <type> ::= Dp <type> of a template's own
+ * pack, a candidate after its pattern ([abi:mangling-compression])
+ */
+bool itanium_mangler::own_pack_expansion(qualified_type pattern)
+{
+    for (size_t i = 0; i < candidates.size(); i++) {
+        const candidate &c = candidates[i];
+        if (c.scope || c.member_class)
+            continue;
+        bool same = false;
+        if (c.expansion)
+            same = same_candidate(c.type, pattern);
+        else if (!c.type.cv() && c.type.unqualified() &&
+                 record(c.type).kind == type_kind::pack_expansion)
+            same = same_candidate(record(c.type).operand, pattern);
+        if (same) {
+            substitution_at(i);
+            return true;
+        }
+    }
+    text("Dp");
+    if (!type(pattern))
+        return false;
+    candidate c;
+    c.type = pattern;
+    c.expansion = true;
+    candidates.append(c);
     return true;
 }
 
@@ -4064,7 +4110,7 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
             uint64_t param_pos = analysis.entity_table[r.entity].value;
             for (size_t i = 0; i < candidates.size(); i++) {
                 if (candidates[i].type.unqualified() &&
-                    !candidates[i].type.cv() &&
+                    !candidates[i].expansion && !candidates[i].type.cv() &&
                     record(candidates[i].type).kind ==
                         type_kind::template_parameter &&
                     analysis.entity_table[record(candidates[i].type).entity]
@@ -4660,7 +4706,11 @@ bool itanium_mangler::substitution(qualified_type t, entity_index member_class)
     for (size_t i = 0; i < candidates.size(); i++)
         if (!candidates[i].scope &&
             candidates[i].member_class == member_class &&
-            same_candidate(candidates[i].type, t)) {
+            ((!candidates[i].expansion &&
+              same_candidate(candidates[i].type, t)) ||
+             (candidates[i].expansion && !t.cv() &&
+              record(t).kind == type_kind::pack_expansion &&
+              same_candidate(candidates[i].type, record(t).operand)))) {
             substitution_at(i);
             return true;
         }

@@ -118,6 +118,9 @@ analysis_result semantic_analysis::alias_template_specialization(
        again with the elements when the enclosing template is
        instantiated ([temp.variadic]/5) */
     owned_array<entity_index> forwarded;
+    /* the dependent template-id, whose type-id with the patterns of the
+       expansions in its place is only mangled */
+    bool opaque = false;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
         const template_argument &a = arguments[i];
         entity_index whole = 0;
@@ -134,11 +137,16 @@ analysis_result semantic_analysis::alias_template_specialization(
                     (entity_table[x.template_entity].type ==
                          entity_table[parameter].type ||
                      contains_placeholder(entity_table[parameter].type));
-                if (a.count != 1 ||
-                    !template_parameter_is_pack(ft.first_parameter + i) ||
-                    (entity_table[x.template_entity].kind !=
-                         entity_kind::typedef_name &&
-                     !same_non_type)) {
+                bool pattern = entity_table[x.template_entity].kind ==
+                               entity_kind::dependent_written;
+                if (pattern && a.count == 1 &&
+                    template_parameter_is_pack(ft.first_parameter + i))
+                    opaque = true;
+                else if (a.count != 1 ||
+                         !template_parameter_is_pack(ft.first_parameter + i) ||
+                         (entity_table[x.template_entity].kind !=
+                              entity_kind::typedef_name &&
+                          !same_non_type)) {
                     type = dependent_specialization(ft.entity, arguments);
                     return analysis_result::well_formed;
                 }
@@ -184,10 +192,24 @@ analysis_result semantic_analysis::alias_template_specialization(
     expanding = false;
     qualified_type t;
     size_t entities_before = entity_table.size();
-    r = alias_type(ft.definition, t);
+    size_t refusals_before = unsupported.size();
+    {
+        diagnostics_suppressed_if hush(diagnostics, opaque);
+        r = alias_type(ft.definition, t);
+    }
     current_scope = saved_scope;
     lookup_horizon = saved_horizon;
     expanding = saved_expanding;
+    if (opaque) {
+        /* [temp.alias]/2: equivalent to the associated type, which
+           [impl.clang] clang mangles; where it is not formed here, the
+           template-id alone */
+        unsupported.resize(refusals_before);
+        type = dependent_specialization(ft.entity, arguments);
+        if (r == analysis_result::well_formed && !t.cv())
+            entity_table[type_table[type].entity].alias_expansion = t;
+        return analysis_result::well_formed;
+    }
     /* [impl.clang] a closure type created by substituting an alias template
        belongs to the function that substituted it; a closure type the
        alias only names (an argument, as __decay_t<_Poll>) keeps its

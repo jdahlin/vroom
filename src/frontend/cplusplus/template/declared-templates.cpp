@@ -1397,6 +1397,27 @@ analysis_result semantic_analysis::template_id_arguments(
                    element of unknown count, the pattern's dependent
                    written type, analysed again with the elements when
                    the template is instantiated */
+                /* an alias's pack bound to such a pattern, to mangle its
+                   type-id (alias_template_specialization): the element */
+                entity_index bound_pattern = 0;
+                if (end == first + 1 &&
+                    tokens[first].kind == token_kind::identifier)
+                    bound_pattern = lookup_unqualified(tokens.identifier(first),
+                                                       lookup_filter::any)
+                                        .entity;
+                if (bound_pattern &&
+                    entity_table[bound_pattern].kind ==
+                        entity_kind::dependent_written &&
+                    pack < count && arguments.size() >= pack) {
+                    template_argument v;
+                    v.kind = template_argument::kind_t::pack;
+                    v.type = entity_table[bound_pattern].type;
+                    v.template_entity = bound_pattern;
+                    v.value = UINT32_MAX;
+                    v.count = UINT32_MAX;
+                    elements.append(v);
+                    continue;
+                }
                 bool own_pattern = false;
                 if (!expansion_count(first, end, times, &own_pattern) ||
                     own_pattern) {
