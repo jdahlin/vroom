@@ -187,6 +187,12 @@ class itanium_mangler
     bool integer_literal(token_index token);
     bool enumerator_literal(entity_index e);
     bool constraint_parameter(entity_index t, entity_index parameter);
+    uint64_t constraint_level(entity_index t) const;
+    bool type_constraint_concept(entity_index t, SyntaxElement q);
+    /* while a type analysed in the parameter scope of a member template of
+       a specialization is mangled: that template, whose own parameters the
+       type's template parameter types are */
+    entity_index leveled_template = 0;
     bool constraint_template_args(entity_index t, SyntaxElement c);
     bool compound_requirement(entity_index t, SyntaxElement req);
     bool constraint_namespace_member(entity_index t, SyntaxElement qualifier,
@@ -714,16 +720,8 @@ bool itanium_mangler::compound_requirement(entity_index t, SyntaxElement req)
         if (!q.is(syntax_kind::type_constraint) || !q.size() ||
             !q[0].is_identifier())
             return false;
-        entity_index found = analysis.constraint_name(
-            analysis.entity_table[t].enclosing, q[0].token());
-        if (!found)
-            return false;
         text("R");
-        if (!name(found))
-            return false;
-        if (q.size() > 1 &&
-            (q.size() < 3 || !q[1].is(preprocessing_op_or_punc::LESS) ||
-             !constraint_template_args(t, q)))
+        if (!type_constraint_concept(t, q))
             return false;
     }
     return true;
@@ -801,10 +799,25 @@ bool itanium_mangler::constraint_template_args(entity_index t, SyntaxElement c)
             qualified_type argument;
             if (!analysis.constraint_type(t, written[wi], argument))
                 return false;
+            /* (an enclosing template's parameter there is bound to its
+               argument: clang mangles the parameter) */
+            bool leveled = constraint_level(t) != 0;
+            for (token_index k = a.first_token(); leveled && k < a.end_token();
+                 k++) {
+                entity_index pe = analysis.constraint_parameter(t, k);
+                if (pe && !analysis.constraint_parameter_is_own(t, pe))
+                    return refuse("a type of a constraint that names an "
+                                  "enclosing template's parameter");
+            }
             entity_index saved = encoding_template;
+            entity_index saved_leveled = leveled_template;
             encoding_template = t;
+            leveled_template = 0;
+            if (leveled)
+                leveled_template = t;
             bool ok = type(argument);
             encoding_template = saved;
+            leveled_template = saved_leveled;
             if (!ok)
                 return false;
             continue;
@@ -853,13 +866,71 @@ bool itanium_mangler::constraint_template_args(entity_index t, SyntaxElement c)
                 continue;
             }
         }
-        /* a class of the template's scope */
+        /* a class of the template's scope, or a typedef-name there that
+           no template parameter's argument gave its type */
         entity_index k = analysis.constraint_class(
             analysis.entity_table[t].enclosing, a.token());
+        if (!k)
+            k = analysis.constraint_plain_typedef(t, a.token());
         if (!k || !type(analysis.entity_table[k].type))
             return false;
     }
     text("E");
+    return true;
+}
+
+/* the number of class template specializations t is a member of */
+uint64_t itanium_mangler::constraint_level(entity_index t) const
+{
+    const entities &table = analysis.entity_table;
+    uint64_t level = 0;
+    for (entity_index s = table[t].enclosing; s; s = table[s].enclosing)
+        if (table[s].kind == entity_kind::class_type && table[s].instantiation)
+            level++;
+    return level;
+}
+
+/* [impl.clang]: a type-constraint of t's: its concept as a <name>, with
+   the template-args written, the concept then a substitution candidate
+   ([abi:mangling-compression]'s template-prefix) */
+bool itanium_mangler::type_constraint_concept(entity_index t, SyntaxElement q)
+{
+    entity_index found = analysis.constraint_name(
+        analysis.entity_table[t].enclosing, q[0].token());
+    if (!found)
+        return false;
+    if (q.size() == 1)
+        return name(found);
+    if (q.size() < 3 || !punctuator(q[1], preprocessing_op_or_punc::LESS))
+        return false;
+    /* (a substituted template-prefix of a namespace's member is still a
+       nested-name's) */
+    entity_index scope = analysis.entity_table[found].enclosing;
+    bool wrapped = scope && !is_std(scope);
+    size_t before = out->n;
+    if (wrapped)
+        text("N");
+    if (substitution(found)) {
+        if (!constraint_template_args(t, q))
+            return false;
+        if (wrapped)
+            text("E");
+        return true;
+    }
+    out->n = before;
+    if (!name(found))
+        return false;
+    /* (a nested-name's E closes after the arguments) */
+    bool nested = out->n && out->p[out->n - 1] == 'E';
+    if (nested)
+        out->n--;
+    candidate y;
+    y.scope = found;
+    candidates.append(y);
+    if (!constraint_template_args(t, q))
+        return false;
+    if (nested)
+        text("E");
     return true;
 }
 
@@ -883,10 +954,7 @@ bool itanium_mangler::constraint_parameter(entity_index t,
                                            entity_index parameter)
 {
     const entities &table = analysis.entity_table;
-    uint64_t level = 0;
-    for (entity_index s = table[t].enclosing; s; s = table[s].enclosing)
-        if (table[s].kind == entity_kind::class_type && table[s].instantiation)
-            level++;
+    uint64_t level = constraint_level(t);
     if (!level || !analysis.constraint_parameter_is_own(t, parameter)) {
         /* a non-type parameter (its type is the value's, not the
            parameter's): T_ or T <n> _ alone */
@@ -2762,12 +2830,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
             if (pack || !q.size() || !q[0].is_identifier())
                 return false;
             text("Tk");
-            if (!source_name(analysis.token_identifier(q[0].token())))
-                return false;
-            if (q.size() > 1 &&
-                (q.size() < 3 ||
-                 !punctuator(q[1], preprocessing_op_or_punc::LESS) ||
-                 !constraint_template_args(function, q)))
+            if (!type_constraint_concept(function, q))
                 return false;
         }
         if (!pack) {
@@ -4348,7 +4411,13 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
                r.kind == type_kind::enumeration ||
                r.kind == type_kind::dependent)
         done = class_enum_type(t);
-    else if (r.kind == type_kind::template_parameter) {
+    else if (r.kind == type_kind::template_parameter && leveled_template) {
+        entity_index own = analysis.constraint_own_type_parameter(
+            leveled_template, analysis.entity_table[r.entity].value);
+        if (!own || t.cv())
+            return refuse("a template parameter in a constraint's type");
+        return constraint_parameter(leveled_template, own);
+    } else if (r.kind == type_kind::template_parameter) {
         /* [abi:mangle.template-param]:
                <template-param> ::= T_
                <template-param> ::= T <parameter-2 non-negative number> _
