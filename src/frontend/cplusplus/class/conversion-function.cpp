@@ -525,6 +525,39 @@ bool semantic_analysis::has_conversion_function_templates(entity_index c)
            !templates.empty();
 }
 
+/* whether one of them may be a candidate of a copy-initialization
+   ([over.match.copy]/1.2): not declared explicit (an explicit(bool) may be
+   either) */
+bool semantic_analysis::has_implicit_conversion_function_templates(
+    entity_index c)
+{
+    owned_array<entity_index> functions, templates;
+    if (!visible_conversion_functions(c, functions, &templates))
+        return true;
+    for (entity_index held : templates) {
+        owned_array<uint32_t> group;
+        function_template_overloads(held, group);
+        for (uint32_t g : group) {
+            bool explicit_ = false;
+            SyntaxRef d = function_templates[g - 1].declaration;
+            for (token_index t = d.first_token(); t + 1 < d.end_token(); t++) {
+                standard_keyword k = standard_keyword::none;
+                if (tokens[t].kind == token_kind::keyword)
+                    k = syntax_parser.keyword_of(tokens[t]);
+                if (k == standard_keyword::operator_)
+                    break;
+                if (k == standard_keyword::explicit_ &&
+                    !is_operator(tokens[t + 1],
+                                 preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                    explicit_ = true;
+            }
+            if (!explicit_)
+                return true;
+        }
+    }
+    return false;
+}
+
 entity_index
 semantic_analysis::conversion_function_for(const expression_meaning &m,
                                            qualified_type to, bool direct,

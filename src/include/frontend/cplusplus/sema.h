@@ -7311,6 +7311,7 @@ class semantic_analysis
     /* whether class c or a base class of it declares a conversion
        function ([class.conv.fct]/4: "Conversion functions are
        inherited") */
+    bool has_implicit_conversion_function_templates(entity_index c);
     bool has_conversion_function_templates(entity_index c);
     bool has_conversion_functions(entity_index c) const;
     /* whether a conversion function of class c, or a specialization of one
