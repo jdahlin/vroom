@@ -192,7 +192,12 @@ analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
                 n, "ext.gnu",
                 "a vector operator with a non-arithmetic scalar operand");
         bool fits = true;
-        if (!shift && !vector_scalar_fits(*scalar, element, fits))
+        /* [ext:clang_ext_vector_type] clang converts any integer that is
+           no constant to an extended vector's integer element, truncated */
+        bool truncated = record.kind == type_kind::ext_vector &&
+                         scalar->evaluation == constness::not_constant &&
+                         is_integral(element) && is_integral(scalar->type);
+        if (!shift && !truncated && !vector_scalar_fits(*scalar, element, fits))
             return not_supported_because(
                 n, "ext.gnu",
                 "a vector operator with a scalar whose fit in the element type "
