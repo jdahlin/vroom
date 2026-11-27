@@ -549,28 +549,15 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
         no_storage = unevaluated > default_argument_unevaluated &&
                      !entity_table[object.entity].destructor;
     /* an array's or scalar's list temporary is a literal object (static at
-       namespace scope), unless elements need destroying */
-    bool destroyed_elements = false;
-    if (object.kind == type_kind::array) {
-        qualified_type element = m.type;
-        while (type_table[element.unqualified()].kind == type_kind::array)
-            element = type_table[element.unqualified()].operand;
-        const struct type &last = type_table[element.unqualified()];
-        if (last.kind == type_kind::class_type) {
-            const entity &c = entity_table[last.entity];
-            /* (or an element class that is not complete) */
-            destroyed_elements = c.destructor || (!c.defined && !c.size);
-        }
-    }
-    bool no_room =
-        destroyed_elements || (object.kind == type_kind::class_type &&
-                               !at_block_scope() && !binding_extends);
+       namespace scope); one whose elements have destructors is the
+       lowering's array_temporary */
+    bool no_room = object.kind == type_kind::class_type && !at_block_scope() &&
+                   !binding_extends;
     if (aggregate_prvalue(m) && !closure_prvalue_binding(m) && !no_storage &&
         no_room)
         return not_supported_because(
             at, "class.temporary",
-            "an array's or scalar's list temporary, or a temporary of a call's "
-            "argument at namespace scope");
+            "a temporary of a call's argument at namespace scope");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const lvalue or rvalue reference is bound to a
        temporary holding its value ([conv.lval]) */

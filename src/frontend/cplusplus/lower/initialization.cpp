@@ -591,6 +591,20 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
             return 0;
         return address_of(held, pointer);
     }
+    qualified_type element;
+    if (record(bound.type).kind == type_kind::array &&
+        element_destructor(bound.type, element)) {
+        /* [class.temporary]/4: an array whose elements have destructors,
+           destroyed as one object */
+        if (!collecting)
+            return fail("an array temporary with destructors outside a "
+                        "statement",
+                        n.at);
+        uint32_t held = array_temporary(n.a);
+        if (!held)
+            return 0;
+        return address_of(held, pointer);
+    }
     uint32_t literal = compound_literal(n.a);
     if (!literal)
         return 0;
@@ -605,6 +619,12 @@ uint32_t c_lowering::static_temporary(const semantic_node &n,
                                       ast_qualified_type pointer)
 {
     const semantic_node &bound = node(n.a);
+    qualified_type element;
+    if (record(bound.type).kind == type_kind::array &&
+        element_destructor(bound.type, element))
+        return fail("a static reference to an array temporary with "
+                    "destructors",
+                    n.at);
     owned_buffer zgr;
     if (!itanium_reference_temporary_name(analysis, tokens.pp, static_owner,
                                           static_temporaries, zgr.get()))
