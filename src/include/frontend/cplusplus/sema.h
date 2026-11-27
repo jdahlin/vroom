@@ -4804,6 +4804,8 @@ class semantic_analysis
     analysis_result omitted_element_checks(SyntaxRef list,
                                            qualified_type element,
                                            bool has_default);
+    /* the lookup_horizon for a default member initializer of cls */
+    token_index member_initializer_horizon(entity_index cls) const;
     analysis_result member_default_in_aggregate(SyntaxRef list,
                                                 entity_index owner,
                                                 SyntaxRef default_initializer,

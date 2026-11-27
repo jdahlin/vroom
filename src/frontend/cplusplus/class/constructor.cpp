@@ -547,7 +547,12 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
                           "within itself",
                           "class.mem");
     entity_table[e].initializer_active = true;
-    r = initializer(init, type, value);
+    {
+        scoped_value<token_index> horizon(
+            lookup_horizon,
+            member_initializer_horizon(entity_table[e].enclosing));
+        r = initializer(init, type, value);
+    }
     entity_table[e].initializer_active = false;
     initialized_member = outer_member;
     if (r == analysis_result::ill_formed)

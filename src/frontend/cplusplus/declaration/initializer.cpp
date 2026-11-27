@@ -2668,6 +2668,20 @@ analysis_result semantic_analysis::omitted_element_checks(
     return analysis_result::well_formed;
 }
 
+/* [temp.res]/10 hides from an instantiation's names what is declared
+   after the template; a default member initializer of a class that is not
+   templated is not part of any template, though one analysed where it is
+   first needed may be inside an instantiation ([class.mem]/7: it is a
+   complete-class context of its class) */
+token_index
+semantic_analysis::member_initializer_horizon(entity_index cls) const
+{
+    for (entity_index c = cls; c; c = entity_table[c].enclosing)
+        if (entity_table[c].instantiation)
+            return lookup_horizon;
+    return 0;
+}
+
 /* [dcl.init.aggr]/5.1, [class.mem]/6: a default member initializer that
    names members is a complete-class context whose `this` is the aggregate
    being initialized: analysed in the class's scope with a `this` of its
@@ -2715,6 +2729,8 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     uint32_t locations_before = source_location_uses;
     uint32_t nodes_before = static_cast<uint32_t>(semantics.size());
     member_defaults_analysed.append(default_initializer);
+    scoped_value<token_index> horizon(lookup_horizon,
+                                      member_initializer_horizon(owner));
     analysis_result r = initializer(default_initializer, member_type, one);
     member_defaults_analysed.resize(member_defaults_analysed.size() - 1);
     function_state = static_cast<function_context &&>(outer);
