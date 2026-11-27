@@ -35,6 +35,54 @@ VPRIV bool virbuild_value_integer_constant(const virbuild_context *V,
     return true;
 }
 
+/* v is 0 or 1: a comparison, those constants, or what only chooses between
+ * or combines such values (depth bounds the search, round a loop too) */
+VPRIV bool virbuild_value_is_boolean(const virbuild_context *V, uint32_t v,
+                                     unsigned depth)
+{
+    uint32_t at = v;
+
+    while (V->forward[at] != at)
+        at = V->forward[at];
+    const virbuild_preir_insn *x = &V->insns[at];
+    const vir_insn *in = &x->insn;
+    int64_t k;
+
+    if (vir_type_is_vector(in->type))
+        return false;
+    if (in->op == VIR_OP_ICMP || in->op == VIR_OP_FCMP)
+        return true;
+    if (virbuild_value_integer_constant(V, at, &k))
+        return k == 0 || k == 1;
+    if (!depth--)
+        return false;
+    switch (in->op) {
+    case VIR_OP_SELECT:
+        return virbuild_value_is_boolean(V, in->b, depth) &&
+               virbuild_value_is_boolean(V, in->c, depth);
+    case VIR_OP_AND:
+        return virbuild_value_is_boolean(V, in->a, depth) ||
+               virbuild_value_is_boolean(V, in->b, depth);
+    case VIR_OP_OR:
+    case VIR_OP_XOR:
+        return virbuild_value_is_boolean(V, in->a, depth) &&
+               virbuild_value_is_boolean(V, in->b, depth);
+    case VIR_OP_EXT:
+    case VIR_OP_TRUNC:
+        return virbuild_value_is_boolean(V, in->a, depth);
+    case VIR_OP_BPARAM:
+        if (in->b == VIRBUILD_BLOCK_NONE || x->block == VIRBUILD_BLOCK_NONE ||
+            !V->blocks[x->block].predecessor_count)
+            return false;
+        for (uint32_t j = 0; j < V->blocks[x->block].predecessor_count; j++)
+            if (!virbuild_value_is_boolean(V, V->extra[in->b + j], depth))
+                return false;
+        return true;
+    default:
+        return false;
+    }
+}
+
 /* bytes v is zero-extended from (its type's size: nothing known) */
 static uint32_t virbuild_value_zero_extended_bytes(const virbuild_context *V,
                                                    uint32_t v)
@@ -58,6 +106,10 @@ static uint32_t virbuild_value_zero_extended_bytes(const virbuild_context *V,
     case VIR_OP_ICMP:
     case VIR_OP_FCMP:
         return 1;
+    case VIR_OP_SELECT:
+    case VIR_OP_BPARAM:
+    case VIR_OP_TRUNC:
+        return virbuild_value_is_boolean(V, v, 4) ? 1 : sz;
     case VIR_OP_AND:
         if (virbuild_value_integer_constant(V, in->b, &k) && k >= 0)
             return k <= 0xff ? 1 : k <= 0xffff ? 2 : k <= 0xffffffffll ? 4 : sz;
@@ -268,14 +320,35 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
                                            V->insns[in.a].insn.type, k, k2));
             return false;
         }
-        /* Comparisons already produce an i32 zero or one. This also
+        /* A value that is 0 or 1 is its own comparison with zero. This also
 		 * preserves unordered floating comparison results verbatim. */
         if ((in.flags & 15) == 1 /* ne */ &&
             virbuild_value_integer_constant(V, in.b, &k) && !k &&
-            (V->insns[in.a].insn.op == VIR_OP_ICMP ||
-             V->insns[in.a].insn.op == VIR_OP_FCMP))
+            V->insns[in.a].insn.type == VIR_TYPE_I32 &&
+            virbuild_value_is_boolean(V, in.a, 4))
             *r = in.a;
         return false;
+    case VIR_OP_SELECT: {
+        /* c ? 1 : 0 and c ? 0 : 1 are comparisons of c with zero (c itself
+		 * when it is 0 or 1 already) */
+        if (in.type != VIR_TYPE_I32 ||
+            !virbuild_value_integer_constant(V, in.b, &k) ||
+            !virbuild_value_integer_constant(V, in.c, &k2) || (k | k2) != 1 ||
+            (k & k2) != 0 || V->insns[in.a].insn.type != VIR_TYPE_I32)
+            return false;
+        if (k && virbuild_value_is_boolean(V, in.a, 4)) {
+            *r = in.a;
+            return false;
+        }
+        uint32_t zero = virbuild_constant_integer(e, VIR_TYPE_I32, 0);
+
+        virbuild_use_count_decrement(V, S, in.b),
+            virbuild_use_count_decrement(V, S, in.c),
+            virbuild_use_count_increment(V, S, zero);
+        V->insns[q].insn = VCC_LITERAL(vir_insn, VIR_OP_ICMP, VIR_TYPE_I32,
+                                       (uint16_t)(k != 0), in.a, zero, 0);
+        return true;
+    }
     case VIR_OP_X86: {
         if (virbuild_minmax_simplify(V, S, q))
             return true;
