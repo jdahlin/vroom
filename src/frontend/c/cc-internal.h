@@ -714,6 +714,9 @@ CC_PRIVATE const struct cc_body_binding *
 cc_builtin_body_find(const cc *c, const cc_builtin *b);
 CC_PRIVATE uint32_t cc_builtin_abs_build(cc *c, const char *name, size_t length,
                                          uint32_t arg, uint32_t loc);
+CC_PRIVATE uint32_t cc_builtin_math_inline_build(cc *c, const char *name,
+                                                 size_t length, uint32_t call,
+                                                 uint32_t loc);
 CC_PRIVATE uint32_t cc_x86_header_call_build(cc *c, const char *name,
                                              size_t length,
                                              const uint32_t *args, uint32_t n,

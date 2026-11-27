@@ -212,6 +212,10 @@ uint32_t ast_builder_x86_header_call(cc *c, const char *name, size_t length,
    (the __builtin_ name was called) */
 uint32_t ast_builder_abs_call(cc *c, const char *name, size_t length,
                               uint32_t arg, bool builtin);
+/* the call `call` of sqrt, fmin or fmax computed in place; 0 as for
+   ast_builder_abs_call */
+uint32_t ast_builder_math_call(cc *c, const char *name, size_t length,
+                               uint32_t call, bool builtin);
 /* the C library function the builtin __builtin_NAME (name[0..length) is
    NAME) declares implicitly, as clang does: its prototype in the front
    end's builtin table letters (*clang_encoding false) or in clang's

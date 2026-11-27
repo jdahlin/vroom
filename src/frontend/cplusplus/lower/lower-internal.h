@@ -747,8 +747,10 @@ class c_lowering
                        uint32_t argument);
     /* x86-64: the instruction in place of a call of a function clang's
        headers only declare; 0 if the call is of another */
+    const char *library_name(uint32_t function, size_t &length, bool &builtin);
     uint32_t abs_call(uint32_t function,
                       const owned_array<uint32_t> &arguments);
+    uint32_t math_call(uint32_t function, uint32_t call);
     uint32_t x86_header_call(uint32_t function,
                              const owned_array<uint32_t> &arguments);
     uint32_t special_builtin(builtin_lowering lowering, const semantic_node &n,

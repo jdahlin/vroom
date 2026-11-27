@@ -591,6 +591,15 @@ uint32_t ast_builder_abs_call(cc *c, const char *name, size_t length,
     return cc_builtin_abs_build(c, name, length, arg, 0);
 }
 
+uint32_t ast_builder_math_call(cc *c, const char *name, size_t length,
+                               uint32_t call, bool builtin)
+{
+    if (!builtin && (c->o->no_builtin ||
+                     cc_library_builtin_is_disabled(c->o, name, length)))
+        return 0;
+    return cc_builtin_math_inline_build(c, name, length, call, 0);
+}
+
 uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
                                     uint32_t b, const int32_t *indices,
                                     uint32_t count)

@@ -314,6 +314,7 @@ static void driver_job_compile(struct driver_job *job, pp *p,
         .general_regs_only = job->general_regs_only ||
                              (job->target_x64 && (job->no_sse || job->no_sse2)),
         .fast_math = job->fast_math && (job->math_flags & 7) == 7,
+        .no_math_errno = !!(job->math_flags & 2),
         .no_fp_contract = job->no_fp_contract,
         .no_jump_tables = job->no_jump_tables,
         .no_builtin = job->freestanding || job->no_builtin,

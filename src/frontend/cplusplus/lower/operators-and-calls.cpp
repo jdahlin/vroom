@@ -549,31 +549,51 @@ uint32_t c_lowering::x86_header_call(uint32_t function,
                                        static_cast<uint32_t>(arguments.size()));
 }
 
-/* [ext:gnu_library_builtins] a call of abs, labs or llabs, the C library's
-   (C language linkage, no definition) or the __builtin_ name, is computed
-   in place */
-uint32_t c_lowering::abs_call(uint32_t function,
-                              const owned_array<uint32_t> &arguments)
+/* [ext:gnu_library_builtins] the name of the library function the callee is:
+   the C library's (C language linkage, no definition) or a __builtin_ one,
+   without the prefix; null if it is neither */
+const char *c_lowering::library_name(uint32_t function, size_t &length,
+                                     bool &builtin)
 {
     if (node(function).kind == semantic_kind::conversion &&
         static_cast<conversion_kind>(node(function).op) ==
             conversion_kind::function_to_pointer)
         function = node(function).a;
-    if (node(function).kind != semantic_kind::entity || arguments.size() != 1)
-        return 0;
+    if (node(function).kind != semantic_kind::entity)
+        return nullptr;
     const entity &f = analysis.entity_table[node(function).a];
     if (f.kind != entity_kind::function || f.defined || !f.name)
-        return 0;
-    size_t length = 0;
+        return nullptr;
     const char *name = tokens.pp.identifier_spelling(f.name - 1, &length);
-    bool builtin = length > 10 && !memcmp(name, "__builtin_", 10);
+    builtin = length > 10 && !memcmp(name, "__builtin_", 10);
     if (builtin) {
         name += 10;
         length -= 10;
     } else if (!f.c_language_linkage) {
-        return 0;
+        return nullptr;
     }
+    return name;
+}
+
+uint32_t c_lowering::abs_call(uint32_t function,
+                              const owned_array<uint32_t> &arguments)
+{
+    size_t length = 0;
+    bool builtin = false;
+    const char *name = library_name(function, length, builtin);
+    if (!name || arguments.size() != 1)
+        return 0;
     return ast_builder_abs_call(c, name, length, arguments[0], builtin);
+}
+
+uint32_t c_lowering::math_call(uint32_t function, uint32_t call)
+{
+    size_t length = 0;
+    bool builtin = false;
+    const char *name = library_name(function, length, builtin);
+    if (!name)
+        return 0;
+    return ast_builder_math_call(c, name, length, call, builtin);
 }
 
 uint32_t c_lowering::special_builtin(builtin_lowering lowering,
@@ -1094,6 +1114,8 @@ uint32_t c_lowering::call(const semantic_node &n)
                 make(AST_NODE_CALL, t, callee,
                      ast_builder_list(c, arguments.data(), count), count, 0, 0);
             psabi_call(n, made);
+            if (uint32_t computed = math_call(n.a, made))
+                made = computed;
         }
     }
     if (member_pointer_call) {

@@ -160,3 +160,84 @@ CC_PRIVATE uint32_t cc_builtin_abs_build(cc *c, const char *name, size_t length,
     }
     return 0;
 }
+
+/* [sqrt, fmin, fmax] of float or double computed here, as clang does when
+   optimizing: call is the library call already built, name the function it
+   calls.  sqrt keeps it for a negative argument, which sets errno; 0 if the
+   call is not one of these */
+CC_PRIVATE uint32_t cc_builtin_math_inline_build(cc *c, const char *name,
+                                                 size_t length, uint32_t call,
+                                                 uint32_t loc)
+{
+    if (!c->o->opt || c->o->general_regs_only ||
+        (!CC_X86_64(c) && c->o->target != PP_LINUX_AARCH64) ||
+        AST_NODE(call)->op != AST_NODE_CALL)
+        return 0;
+    bool single = length && name[length - 1] == 'f';
+    size_t stem = length - (size_t)single;
+    bool root = stem == 4 && !memcmp(name, "sqrt", 4);
+    bool low = stem == 4 && !memcmp(name, "fmin", 4);
+    bool high = stem == 4 && !memcmp(name, "fmax", 4);
+    uint32_t count = 2;
+
+    if (root)
+        count = 1;
+    if ((!root && !low && !high) || AST_NODE(call)->c != count)
+        return 0;
+    int kind = AST_TYPE_DOUBLE;
+
+    if (single)
+        kind = AST_TYPE_FLOAT;
+    ast_qualified_type t = cc_type_basic(kind),
+                       truth = cc_type_basic(AST_TYPE_INT);
+    uint32_t first = AST_NODE(call)->b, arg[2] = {0, 0};
+
+    if (AST_TYPE_KIND(c, AST_NODE(call)->ty) != kind)
+        return 0;
+    for (uint32_t i = 0; i < count; i++) {
+        arg[i] = c->lists[first + i];
+        if (AST_TYPE_KIND(c, AST_NODE(arg[i])->ty) != kind)
+            return 0;
+    }
+    cc_value constant;
+
+    if (root) {
+        /* (a constant argument stays a call, which constant evaluation
+           folds) */
+        if (cc_eval(c, arg[0], &constant))
+            return 0;
+        uint32_t pre, x = cc_lowering_once(c, arg[0], &pre);
+        cc_id_list one;
+
+        cc_id_list_init(&one);
+        cc_id_list_append(c, &one, x);
+        uint32_t result =
+            cc_builtin_node_new(c, CC_BUILTIN_FAST_SQRT, t, loc, &one);
+
+        if (!c->o->no_math_errno) {
+            c->lists[first] = x;
+            uint32_t negative =
+                cc_node_binary_new(c, LEX_TOKEN_LESS, truth, x,
+                                   cc_node_float_new(c, 0.0, t, loc), loc);
+
+            result = cc_conditional_build(c, negative, call, result, loc);
+        }
+        return cc_lowering_sequence(c, pre, result);
+    }
+    /* a NaN argument gives the other one:
+       x != x ? y : y < x ? y : x (fmax: y > x) */
+    uint32_t pre_x, pre_y, x = cc_lowering_once(c, arg[0], &pre_x),
+                           y = cc_lowering_once(c, arg[1], &pre_y);
+    int better = LEX_TOKEN_LESS;
+
+    if (high)
+        better = LEX_TOKEN_GREATER;
+    uint32_t pick = cc_conditional_build(
+        c, cc_node_binary_new(c, better, truth, y, x, loc), y, x, loc);
+    uint32_t result = cc_conditional_build(
+        c, cc_node_binary_new(c, LEX_TOKEN_EXCLAMATION_EQUAL, truth, x, x, loc),
+        y, pick, loc);
+
+    return cc_lowering_sequence(c, pre_x,
+                                cc_lowering_sequence(c, pre_y, result));
+}
