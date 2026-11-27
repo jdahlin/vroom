@@ -4924,29 +4924,35 @@ class semantic_analysis
        for member_template_call to deduce from the arguments */
     entity_index member_template_name = 0;
     expression_meaning member_template_object;
+    /* x.B::f<T>(): the object's class, whose member naming B it is for
+       access ([class.access.base]/5); 0 when not qualified */
+    entity_index member_template_through = 0;
     owned_array<SyntaxElement> member_template_written;
     SyntaxRef member_template_written_at = 0;
     /* the call of the functions and function templates held names
        ([over.call.func]/2, /3): object is the implied object argument
        (none: a static member's context), written the explicit template
        arguments of f<T>(...) */
-    analysis_result
-    member_template_call(SyntaxRef n, entity_index held,
-                         const expression_meaning *object,
-                         const owned_array<SyntaxElement> &arguments,
-                         owned_array<expression_meaning> &early,
-                         const owned_array<SyntaxElement> *written,
-                         SyntaxRef written_at, expression_meaning &m);
-    analysis_result bound_member_call(
-        SyntaxRef n, entity_index f, const expression_meaning &object,
+    analysis_result member_template_call(
+        SyntaxRef n, entity_index held, const expression_meaning *object,
         const owned_array<SyntaxElement> &arguments,
-        owned_array<expression_meaning> &early, expression_meaning &m);
+        owned_array<expression_meaning> &early,
+        const owned_array<SyntaxElement> *written, SyntaxRef written_at,
+        expression_meaning &m, entity_index through = 0);
+    analysis_result
+    bound_member_call(SyntaxRef n, entity_index f,
+                      const expression_meaning &object,
+                      const owned_array<SyntaxElement> &arguments,
+                      owned_array<expression_meaning> &early,
+                      expression_meaning &m, entity_index through = 0);
     /* [over.match.funcs]/4: a static member function f called, the object
        expression (if any) evaluated and discarded */
-    analysis_result static_member_call(
-        SyntaxRef n, entity_index f, const expression_meaning *object,
-        const owned_array<SyntaxElement> &arguments,
-        owned_array<expression_meaning> &early, expression_meaning &m);
+    analysis_result
+    static_member_call(SyntaxRef n, entity_index f,
+                       const expression_meaning *object,
+                       const owned_array<SyntaxElement> &arguments,
+                       owned_array<expression_meaning> &early,
+                       expression_meaning &m, entity_index through = 0);
     /* [temp.arg.explicit]: the template-arguments of a simple-template-id
        (pack expansions marked in expansion) */
     SyntaxElement member_template_id(SyntaxRef n) const;

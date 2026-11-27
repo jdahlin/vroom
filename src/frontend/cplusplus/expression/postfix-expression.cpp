@@ -1781,6 +1781,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         if (r != analysis_result::well_formed)
             return r;
         expression_meaning object = member_template_object;
+        entity_index through = member_template_through;
+        member_template_through = 0;
         owned_array<SyntaxElement> written;
         for (SyntaxElement w : member_template_written)
             written.append(w);
@@ -1791,7 +1793,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         if (written_at)
             as_written = &written;
         return member_template_call(n, held, &object, arguments, early,
-                                    as_written, written_at, m);
+                                    as_written, written_at, m, through);
     }
     if (r != analysis_result::well_formed)
         return r;
