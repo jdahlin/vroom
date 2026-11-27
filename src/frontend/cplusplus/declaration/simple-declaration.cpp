@@ -2223,6 +2223,12 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r != analysis_result::well_formed)
         return r;
     entity_table[declared_entity].bound_unknown = false;
+    if (!(before == type)) {
+        /* [dcl.array]/7: an array of unknown bound completed by its
+           initializer, whether or not what follows is analysed */
+        entity_table[declared_entity].type = type;
+        declared_names.back().type = type;
+    }
     /* [stmt.ranged]/1: "= *begin" reads the variable begin, which is not
        usable in constant expressions ([expr.const]) */
     if (supplied && !s.constexpr_)
@@ -2353,12 +2359,6 @@ analysis_result semantic_analysis::declare_with_initializer(
         d2.declaration = current_declaration;
         d2.entity = declared_entity;
         definitions.append(d2);
-    }
-    if (!(before == type)) {
-        /* [dcl.array]/7: an array of unknown bound completed by its
-           initializer */
-        e.type = type;
-        declared_names.back().type = type;
     }
     /* [dcl.constinit]/2: "If a variable declared with the constinit
        specifier has dynamic initialization, the program is ill-formed."
