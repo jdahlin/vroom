@@ -18,6 +18,52 @@ site, with a profile or block frequencies; 45 cold; +50% single block; up to
 +150% vector code; 15000 for the last call of a static function; 5 per
 instruction, 25 per call).
 
+## What gcc and clang do
+
+Read from their sources on 2026-11-27 (gcc master, llvm release/23.x); gcc's
+badness formula and its instruction weights were not read.
+
+**gcc** has two inliners.  An *early* one runs callees first, on already
+optimized callees, with a tiny growth budget (`early-inlining-insns` 6, 14 at
+`-O3`).  The *IPA* one works on per-function summaries and takes the best call
+of the whole unit first (a heap keyed by "badness", roughly cost over benefit;
+ties by id), then inlines functions called once.
+
+- Limits depend on the `inline` keyword: `max-inline-insns-single` 70 (200 at
+  `-O3`) for declared-inline or hot callees, `max-inline-insns-auto` 15 (30)
+  for others.  A cold call that grows code is refused.
+- A summary keeps size and time per pair of *predicates* on the parameters
+  (when the code runs; when it survives specialization), so a constant argument
+  shrinks the estimate without looking at the body again.
+- Hints (known loop bounds or strides, indirect calls made direct) and an
+  estimated speedup over `inline-min-speedup` (30%, 15%) raise the limits.
+- Growth budgets: the unit 40% (`inline-unit-growth`), a large function 100%
+  past 2700 instructions, the stack frame past 256 bytes.
+
+**LLVM**'s main inliner walks the call graph's SCCs callees first and decides
+each call alone:
+
+- Cost is 5 per instruction that stays.  Folded constants, branches that die
+  with the arguments, phis, most casts and loads from an argument that will
+  become registers are free; if such an argument's slot turns out to escape,
+  its savings are charged back.  The cost starts negative by what the call
+  itself costs.  The walk stops as soon as the threshold is passed.
+- The threshold is raised for `inline`, hot call sites and single-block or
+  vector callees, and set low for cold call sites.
+- The function clean-up passes run after each SCC's calls are inlined, not
+  between two inlines.
+- Recursion: no direct self-inlining, a history per copied call, and a cost
+  multiplier for calls that stay inside an SCC.
+- The splice hoists static allocas to the entry, saves the stack around
+  dynamic ones, turns calls into invokes under a landing pad, merges returns
+  into a phi, and gives debug locations an `inlinedAt`.
+
+**Taken over here:** callees first; free-if-it-folds costing with an early
+stop; a higher limit for `inline`; little room for calls that run seldom (the
+walker now does this by loop depth); a per-function growth cap.  **Not:** a
+unit-wide heap (it needs every function built before any is emitted) and
+profile-based hotness.
+
 ## What there is to gain
 
 Measured on this branch's base (x86-64 host, Stockfish x86-64-v2 `-O2`
@@ -98,7 +144,7 @@ replaces a call with a copy of the callee's pre-IR.
 | Step | Content | Done when |
 |---|---|---|
 | I0 | `bench/inline-measure.py`: the tables above for Stockfish, SQLite, zlib, PostgreSQL (speed, text, compile instructions) at a given policy | numbers reproduced |
-| I1 | Tune the walker's policy: a limit for `inline` and one for others, loop depth of the call site | no benchmark slower, SQLite text not larger; a table in this file |
+| I1 (done: the loop-depth limit, `WALK_INLINE_VIR_OUTSIDE_LOOP_MAX`) | Tune the walker's policy: a limit for `inline` and one for others, loop depth of the call site | no benchmark slower, SQLite text not larger; a table in this file |
 | I2 | Snapshot and splice for leaf, straight-line callees, behind `-fvir-passes`; verifier after every splice | suites green with `-fvir-verify -fvir-check`; output identical for every `-j` |
 | I3 | Any control flow, loops, slots, calls (bottom-up) | I2's gate, `inline` suite |
 | I4 | Cost model on snapshots; the walker keeps only the list above | speed no worse on every benchmark, SQLite text and compile instructions lower than today |
