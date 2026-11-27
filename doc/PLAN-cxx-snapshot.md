@@ -584,8 +584,8 @@ CS3's at -O0 and -O2, one child at a time and 16, also under ASan+UBSan.
 - 1.1 M minor faults, 1.0 s of system time in the 4.7 s of one run (the 23
   processes without a prefix: 1.4 M faults, 1.7 s).
 - Not measured: a child's Private_Dirty, fork latency, macOS.
-**The gate (under 4 s CPU) is met only in the best runs.**  CS5-CS7 wait for
-the user's decision.
+The gate (under 4 s CPU) was met only in the best runs before the change
+below.
 `vpp --cxx-prefix-batch JOBS -j N`: one process takes the first job to the
 boundary, then forks a child per job, N at a time; the child retargets the
 job (6.3) and finishes.  Files: `src/bin/vpp/vpp.cpp`, `src/driver/job.cpp`
@@ -601,19 +601,23 @@ Risk: something of the job depends on the main file before the boundary
 (debug name, `-MT` default, `__BASE_FILE__`): CS2d's comparison with a
 *different* main file per TU finds it.
 
-**The work each child repeats** (looked at 2026-11-27, nothing kept).  A
-child compiling an empty file runs 0.32G instructions beyond the parent.
-callgrind (its child stops in code generation, so these are of the front end):
-`instantiate_pending` 192M, lowering 91M of which mangling 57M.
-- Draining the wanted work before the fork (`instantiate_pending` keeping its
-  queues): 37.2G to 33.1G, 3.5 s CPU, but the objects are no longer
-  `-include`'s: 4 TUs differ in symbol sizes at -O0 and -O2.  Of its parts,
-  `postponed_bodies` and `pending_definitions` cause it (the other two change
-  nothing and save nothing).  A body instantiated early is compiled
-  differently (`allocation_result<char*>`'s constructor spills its parameters).
-  Why is not known; until it is, nothing is drained at the boundary.
-- No symbol for a function only declared (CS8's first part): 37.2G to 37.0G,
-  and objects change.  Not worth it.
+**The work each child repeats** (2026-11-27).  `instantiate_pending` was the
+largest part; the prefix now drains what it already wants before the stop,
+keeping the queues (`instantiate_so_far`): 37.2G to 33.1G at -O2, 35.6G to
+31.5G at -O0, forked CPU 3.6-3.8 s one at a time, so the 4 s gate is met.
+- It first changed symbol sizes.  The cause was a code generator bug, since
+  fixed: the prepass took a function's locals to be a range of symbol numbers,
+  which C++'s lowering does not keep, so with a `catch` in one function
+  others' parameters lost their registers, by the order of lowering.
+- Now all 1554 functions of the 23 objects have the instructions and
+  relocations of `-include`'s (-O2; nops and pc-relative distances apart),
+  and the defined symbols and sizes are the own includes' at -O0 and -O2.
+  The bytes differ (order), so CS3's byte comparison with `-include` is now one
+  of symbols and sizes; sharing against not sharing the stop stays exact.
+- Not checked: a TU whose own declarations should change what a prefix's
+  pending instantiation means (a specialization declared after the prefix).
+- Rejected: no symbol for a function only declared (CS8's first part):
+  0.4 %, and objects change.
 
 ### CS5. Key and validation.  Status: not started.
 The recorded reads of 6.5 in the worker, the check, and the refusals (date,

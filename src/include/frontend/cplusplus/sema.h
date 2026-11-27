@@ -1895,6 +1895,10 @@ class semantic_analysis
     void begin_translation_unit();
     void analyse_declarations(const node_index *first, size_t count);
     void end_translation_unit();
+    void instantiate_so_far()
+    {
+        instantiate_pending(false);
+    }
     void tree_grew()
     {
         syntax_cx.nodes = tree.node_data();
@@ -5847,7 +5851,7 @@ class semantic_analysis
     analysis_result need_specialization_definition(SyntaxRef at,
                                                    entity_index f);
     /* the definitions pending_definitions waits for */
-    void instantiate_pending();
+    void instantiate_pending(bool at_end = true);
     /* a lazily named specialization (instantiation_record::lazy) defined
        now: a use that needs the class complete (a call's result, a member
        lookup, its size); nothing for any other class */

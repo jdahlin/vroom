@@ -232,6 +232,10 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
     else {
         analysis.begin_translation_unit();
         analysis.analyse_declarations(prefix_nodes.data(), prefix_nodes.size());
+        /* what the prefix already wants, once rather than in every child of
+           a fork: functions are emitted in another order than with -include
+           (doc/PLAN-cxx-snapshot.md CS4) */
+        analysis.instantiate_so_far();
         uint32_t answered = analysis.allocation_names_answered;
         if (o->boundary)
             o->boundary(o->boundary_context, &path);

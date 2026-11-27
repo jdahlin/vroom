@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """doc/PLAN-cxx-snapshot.md on Stockfish: a prefix of the system headers its
-files name.  Per TU, `-fcxx-prefix=P` (the front end stops after P) must give
-the object `-include P` gives, byte for byte; then both against the TU with its
-own includes only, by defined symbols and sizes.
+files name.  Per TU, `-fcxx-prefix=P` (the front end stops after P and
+instantiates what P already wants) must define the symbols `-include P` does,
+with the same sizes, and those of the TU with its own includes only.  The
+bytes differ: functions are emitted in another order.
 
   bench/stockfish/prefix.py [-O 0|2] [--src DIR] [--bin-dir DIR] [--fork]
 --fork (CS4): one vpp analyses P and forks a child per TU
@@ -95,9 +96,9 @@ def main():
         print('%-8s %6.2fG instructions, %5.2fs CPU' % (mode, ins / 1e9, cpu))
     if failed:
         return 1
-    differ = [s for s in tus if not filecmp.cmp(
-        obj('include', s), obj('stop', s), shallow=False)]
-    print('stop against -include: %d of %d objects differ' %
+    differ = [s for s in tus
+              if symbols(obj('include', s)) != symbols(obj('stop', s))]
+    print('stop against -include: symbols or sizes differ in %d of %d' %
           (len(differ), len(tus)), ' '.join(differ))
     changed = [s for s in tus
                if symbols(obj('own', s)) != symbols(obj('stop', s))]

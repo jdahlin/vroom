@@ -468,7 +468,7 @@ bench/cxx-json.py [-v] [--force] [PAT]     # nlohmann/json's 71 test TUs (work/c
 bench/stockfish/run.py [--arch sse2|avx2] [-O 0123] [--depth N] [--mix] [-v]   # Stockfish 17.1 (work/stockfish, 23 TUs, libc++) by vpp -x c++ -c, first error per TU; once all compile, linked by clang++ and `bench` node count = clang++'s, with both nodes/second (--mix: one vcc object among clang's; --arch sse2: the SIMD build; ~20 s)
 bench/stockfish/threads.py [-j N] [--warm N] [--bin-dir build/linux/src-tsan]   # proof of concept: its TUs on threads of one process = one process each, byte for byte
 bench/stockfish/vccd.py             # ... concurrently through the vcc shim and one vccd (after threads.py)
-bench/stockfish/prefix.py [--fork]  # ... -fcxx-prefix= (the system headers; PLAN-cxx-snapshot.md): objects = -include's, symbols = own includes'; --fork: one process forks a child per TU
+bench/stockfish/prefix.py [--fork]  # ... -fcxx-prefix= (the system headers; PLAN-cxx-snapshot.md): symbols and sizes = -include's and own includes'; --fork: one process forks a child per TU
 bench/cxx-prefix.py -j 6            # -fcxx-prefix=P = -include P over src/test/cxx/run: status, diagnostics, object (~1 min)
 bench/stockfish/cache.py            # ... a result cache keyed on command, compiler and inputs: cold, unchanged, one header edited
 bench/highway/run.py [-O 0123] [-j N] [--bless] [-v] [PAT]   # Google Highway (work/highway, pinned commit in the file's header; x86-64 host, static SSE2 target, libc++): each TU by vpp -x c++ -c, the tests linked by clang++ (library objects vcc's where it compiles them) and run; a test lost from bench/highway/passing-O2 is an error, refusals grouped by first error (~1 min cold)

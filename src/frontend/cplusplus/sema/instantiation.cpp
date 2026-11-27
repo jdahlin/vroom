@@ -1349,7 +1349,7 @@ bool semantic_analysis::emitted_functions_needed()
 
 /* [temp.point]/7: the definitions of the specializations used, after the
    translation unit's declarations (each may use more) */
-void semantic_analysis::instantiate_pending()
+void semantic_analysis::instantiate_pending(bool at_end)
 {
     size_t next_definition = 0;
     bool progress;
@@ -1430,6 +1430,8 @@ void semantic_analysis::instantiate_pending()
             progress = true;
         }
     } while (progress);
+    if (!at_end)
+        return;
     /* [temp.explicit]/10, /12: an explicit instantiation definition
        instantiated the definitions it names, and takes their verdict */
     for (const explicit_instantiation_unit &x : explicit_instantiations) {
