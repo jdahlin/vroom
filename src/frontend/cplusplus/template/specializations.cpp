@@ -187,12 +187,17 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     /* [ext:gnu_attributes] before the declaration (e.g. SK_API /
        visibility("default")) */
     uint32_t lead = leading_gnu_attributes(inner);
-    for (uint32_t i = 0; i < lead; i++)
-        if (!inner[i].is(syntax_kind::gnu_attribute_specifier) ||
-            !gnu_attributes_without_effect(inner[i]))
+    for (uint32_t i = 0; i < lead; i++) {
+        bool without;
+        if (inner[i].is(syntax_kind::gnu_attribute_specifier))
+            without = gnu_attributes_without_effect(inner[i]);
+        else
+            without = attributes_without_effect(inner[i]);
+        if (!without)
             return not_supported_because(n, "temp.expl.spec",
                                          "an explicit specialization with an "
                                          "attribute that has an effect");
+    }
     bool defines = inner.is(syntax_kind::function_definition);
     bool deleted_body =
         defines && inner.function_definition().function_body().deleted();
