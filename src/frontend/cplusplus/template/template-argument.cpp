@@ -1320,7 +1320,8 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
            it) */
         static_member = !x.nonstatic_member && !x.member_body_deferred;
     if ((x.kind != entity_kind::variable && x.kind != entity_kind::function) ||
-        x.instantiation || (x.next_overload && !selected) ||
+        (x.instantiation && x.kind != entity_kind::function) ||
+        (x.next_overload && !selected) ||
         (!is_namespace(x.enclosing) && !static_member) || x.c11_thread_local)
         /* (an object of thread storage duration has no address that is
            the same in each thread: [temp.arg.nontype]/2's constant
