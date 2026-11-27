@@ -752,8 +752,20 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
         if (!one && b.name == name && b.kind == entity_kind::class_type &&
             !b.instantiation)
             one = of;
-        if (one && found && one != found)
-            ambiguous = true;
+        if (one && found && one != found) {
+            /* [class.member.lookup]/6.1: a declaration in a virtual base
+               is hidden by one of a class derived from that base */
+            auto hides = [&](entity_index lower, entity_index upper) {
+                entity_index below = entity_table[lower].enclosing;
+                entity_index above = entity_table[upper].enclosing;
+                return virtual_base_of(below, above) &&
+                       !nonvirtual_subobjects(c, above);
+            };
+            if (hides(found, one))
+                one = found;
+            else if (!hides(one, found))
+                ambiguous = true;
+        }
         if (one)
             found = one;
     }
