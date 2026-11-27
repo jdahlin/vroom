@@ -5802,7 +5802,7 @@ class semantic_analysis
        instantiations by template_entity: made as they are asked for */
     mutable record_chains templates_by_held, templates_by_identifier,
         instantiations_by_template;
-    mutable record_chains templates_by_entity;
+    mutable record_chains templates_by_entity, friends_by_function;
     const record_chains &held_templates() const
     {
         templates_by_held.update(
