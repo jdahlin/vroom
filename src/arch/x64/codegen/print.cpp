@@ -520,12 +520,17 @@ static void x64_epilogue_restores_append(codegen_context *e, tbuf *b,
     x64_lowering_context *X = e->x64_context;
 
     if (e->walk_state->stack_pointer_needed) {
+        /* the canary's address: from r12 in a realigned frame */
+        int64_t canary = e->walk_state->canary;
+        const char *base = "%r12";
+
+        if (e->walk_state->frame_alignment <= 16) {
+            canary -= X->wsave;
+            base = "%rbp";
+        }
         x64_stack_guard_append(e, b);
-        vtext_format_append(
-            b, "\tcmpq\t%lld(%s), %%r11\n\tjne\t.Lspfail%u\n",
-            (long long)(e->walk_state->canary -
-                        (e->walk_state->frame_alignment > 16 ? 0 : X->wsave)),
-            e->walk_state->frame_alignment > 16 ? "%r12" : "%rbp", s);
+        vtext_format_append(b, "\tcmpq\t%lld(%s), %%r11\n\tjne\t.Lspfail%u\n",
+                            (long long)canary, base, s);
     }
     for (int r = 0; r < 16; r++)
         if (X->callee_save_slots[r]) {
