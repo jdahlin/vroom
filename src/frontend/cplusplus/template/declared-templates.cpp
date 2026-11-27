@@ -1106,8 +1106,7 @@ bool semantic_analysis::depends_on_parameter_from(qualified_type t,
             instantiations[entity_table[r.entity].instantiation - 1];
         auto depends_on = [&](const template_argument &a) {
             return a.kind != template_argument::kind_t::type ||
-                   made_of_template_parameter(type_table, a.type, &entity_table,
-                                              from);
+                   depends_on_parameter_from(a.type, from);
         };
         for (uint32_t i = 0; i < x.argument_count; i++) {
             const template_argument &a =
