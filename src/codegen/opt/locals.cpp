@@ -51,8 +51,8 @@ VPRIV unsigned em_select_locals(codegen_context *e, uint32_t fn, uint32_t *cand,
     for (uint32_t s = lo; s <= hi; s++) {
         unsigned j;
 
-        if (!E->local_use_weights[s] || em_unused_local(e, s, fn) ||
-            !em_local_eligible(e, s) ||
+        if (!E->local_use_weights[s] || E->local_owner[s] != fn ||
+            em_unused_local(e, s, fn) || !em_local_eligible(e, s) ||
             !target_ok(e->compile_context, e->compile_context->syms[s].ty))
             continue;
         if (k == max &&

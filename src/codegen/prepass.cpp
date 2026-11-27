@@ -140,6 +140,7 @@ static void codegen_prepass_local_note(codegen_prepass_state *P, uint32_t s)
              u = P->E->local_use_weights[s] + w;
 
     P->E->local_use_weights[s] = (uint16_t)(u > 65535 ? 65535 : u);
+    P->E->local_owner[s] = P->fn;
     if (s < P->llo)
         P->llo = s;
     if (s > P->lhi)
@@ -622,7 +623,8 @@ VPRIV void codegen_function_walk_ensure(codegen_unit *E, cc *c, uint32_t s)
         codegen_prepass_node_walk(&P, c->syms[s].body);
         if (P.catches) /* (the allocators know no edge from a call to a landing pad) */
             for (uint32_t l = P.llo; l <= P.lhi && l < c->nsym; l++)
-                E->local_needs_memory[l] = 1;
+                if (E->local_owner[l] == s)
+                    E->local_needs_memory[l] = 1;
         E->function_local_span[2 * s] = P.llo,
                                    E->function_local_span[2 * s + 1] = P.lhi;
         E->function_node_counts[s] =

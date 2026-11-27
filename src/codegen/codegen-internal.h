@@ -286,6 +286,10 @@ typedef struct codegen_unit {
         local_needs_memory; /* per local: needs memory (address taken, asm operand, {} init) */
     uint32_t *
         function_local_span; /* per function: [2s] lowest, [2s+1] highest local sym seen */
+    /* per local: the function that refers to it.  A function's span holds
+       others' locals too: C++'s lowering makes a function's symbols while it
+       is making another's */
+    uint32_t *local_owner;
     int local_register_count; /* locals given callee-saved registers per function (VCC_LREGS) */
     bool cleanups_disabled; /* VCC_NOOPT: no opt.c clean-ups (to compare) */
     i128 *constant_written_values;

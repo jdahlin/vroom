@@ -505,7 +505,7 @@ static void codegen_keep_make(codegen_keep *K, cc *c, const codegen_unit *E)
 }
 
 /* codegen_unit_round_emit's per-TU tables (E.*) and text buffers */
-static vjob_region_pool codegen_round_pool = VJOB_REGION_POOL_INIT(19);
+static vjob_region_pool codegen_round_pool = VJOB_REGION_POOL_INIT(20);
 
 /*
  * Windows x64: the .refptr.NAME pointers the code read (sym_win64_indirect), in symbol order, each
@@ -603,6 +603,8 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
         (uint8_t *)vjob_region_acquire(&er[16], c->nsym + 64, "emit.lnoreg");
     E.function_local_span = (uint32_t *)(vjob_region_acquire(
         &er[17], (c->nsym + 64) * 2 * sizeof(uint32_t), "emit.lspan"));
+    E.local_owner = (uint32_t *)(vjob_region_acquire(
+        &er[19], (c->nsym + 64) * sizeof(uint32_t), "emit.lowner"));
     {
         const char *k = getenv("VCC_LREGS");
 
@@ -1091,6 +1093,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
     vjob_region_release(&er[15], (c->nsym + 64) * sizeof(uint16_t));
     vjob_region_release(&er[16], c->nsym + 64);
     vjob_region_release(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t));
+    vjob_region_release(&er[19], (c->nsym + 64) * sizeof(uint32_t));
     free((void *)E.refptr);
     vjob_region_pool_give(&codegen_round_pool, er);
     return errors;
