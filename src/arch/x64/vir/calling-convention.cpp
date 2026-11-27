@@ -205,7 +205,7 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
         if (x64_vir_value_immediate(f, i->b, &k) && k >= 0 &&
             k < (i->type == VIR_TYPE_I32 ? 32 : 64))
             x->mem = 2;
-        else
+        else if (!target || !target->bmi2)
             x->operands[1] = RCX;
     }
     int64_t k;
@@ -234,9 +234,6 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
     case VIR_OP_XOR:
     case VIR_OP_NEG:
     case VIR_OP_NOT:
-    case VIR_OP_SHL:
-    case VIR_OP_LSHR:
-    case VIR_OP_ASHR:
     case VIR_OP_EXT:
     case VIR_OP_TRUNC:
     case VIR_OP_P2I:
@@ -246,6 +243,13 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
     case VIR_OP_FMUL:
     case VIR_OP_FDIV:
         x->flags |= VIR_CONSTRAINT_FLAG_TIED;
+        break;
+    case VIR_OP_SHL:
+    case VIR_OP_LSHR:
+    case VIR_OP_ASHR:
+        /* (shlx and its kin have a destination of their own) */
+        if (!target || !target->bmi2 || (x->mem & 2))
+            x->flags |= VIR_CONSTRAINT_FLAG_TIED;
         break;
     default:
         break;

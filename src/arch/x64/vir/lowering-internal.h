@@ -31,6 +31,7 @@ typedef struct x64_vir_context {
     unsigned dup;
     bool may_fall_through, scratch_register10;
     bool has_returns_twice;
+    bool bmi2; /* shlx, shrx, sarx: a count in any register */
     bool
         uses_ymm; /* 256- or 512-bit values: vzeroupper before calls and returns */
     bool
