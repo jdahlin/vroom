@@ -164,9 +164,12 @@ void semantic_analysis::default_argument_used(uint32_t node)
                 mark_needed(f);
                 /* [temp.inst]/12: the default argument was analysed
                    unevaluated; its use in a call needs a function
-                   template specialization's definition */
-                if (need_specialization_definition(current_declaration, f) !=
-                    analysis_result::well_formed)
+                   template specialization's definition.  Constructors'
+                   only: the list also has functions named in operands not
+                   evaluated (std::declval, whose definition is ill-formed) */
+                if (entity_table[f].special == special_member::constructor &&
+                    need_specialization_definition(current_declaration, f) !=
+                        analysis_result::well_formed)
                     return;
             }
 }
