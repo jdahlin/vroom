@@ -266,7 +266,7 @@ static inline uint32_t virbuild_access_bytes(const virbuild_context *V,
     if (in->op == VIR_OP_STORE)
         type = V->insns[in->b].insn.type;
     if (vir_type_is_vector(type))
-        return 16;
+        return vir_type_size(type);
     return 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags);
 }
 
@@ -359,6 +359,8 @@ VPRIV void virbuild_vector_permute(codegen_context *e, int ra, int rb,
                                    const codegen_lvalue *d);
 VPRIV void virbuild_vector_half(codegen_context *e, int ra, int at,
                                 const codegen_lvalue *d);
+/* AVX2: 256-bit values are VIR's i64x4 */
+VPRIV bool virbuild_wide_vectors(codegen_context *e);
 VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op,
                                   uint32_t code, uint32_t vt, int lane, int ra,
                                   int rb, const codegen_lvalue *d, int at = 0);

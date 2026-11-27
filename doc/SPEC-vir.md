@@ -397,6 +397,10 @@ default.
 `vsplat` (of an `i32`, its low half), `add`, `sub`, `and`, `or` and `xor`
 only; its `load` and `store` have width 2.  There is no 16-bit scalar.
 
+7.5.1c `i64x4` is 256 bits, x86-64 with AVX2: the type of `load`, `store`,
+block parameters and `x86` (whose instruction is then the VEX form on `ymm`
+registers).  Its lanes are the instruction's business.
+
 7.5.1b `bitcast` of a vector type takes any vector type: the same 128 bits.
 
 7.5.2 These operations take a vector type as their result type, lane by lane:

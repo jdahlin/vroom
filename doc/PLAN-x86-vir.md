@@ -140,8 +140,15 @@ deleted in the commit that gives it a table row or a generic operation.
     leaves VIR for a vector reason.  Stockfish AVX2, depth 13: 91800 to
     106700 nodes/second (measured with another session compiling; clang++
     1990000).
-  - Left: the 32-byte ABI in VIR (calls that are not inlined), real 256-bit
-    operations, and the front end's lane expansions (`madd`, `maddubs`,
+  - XV3c (done): a real 256-bit value, `i64x4`, under AVX2: copies, loop
+    block parameters, spills, `vzeroupper` before calls and returns; lane
+    operators of two vectors and the builtins that work on each half are one
+    VEX instruction (the assembler gained the forms).  Stockfish AVX2
+    (`-O3`, depth 13, node count as clang's): 465 k nodes/second, from about
+    121 k (`-O2`).  clang: 1979 k.
+  - Left: the 32-byte ABI in VIR (calls that are not inlined); shifts,
+    vector-with-number operations, `vsplat` and shuffles on 256 bits (still
+    two halves); the front end's lane expansions (`madd`, `maddubs`,
     `mulhi`, `packus`, saturation) as instructions.
 - **XV4** The rest of SSE through AVX2, by family.
 - **XV5** AVX-512: 512 bits, mask registers, EVEX rounding and broadcast.

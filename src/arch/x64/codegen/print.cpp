@@ -722,7 +722,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
         case X64_OP_MOV:
             if (X64_REGISTER_IS_XMM(i->registers[0]) &&
                 X64_REGISTER_IS_XMM(i->registers[1]))
-                vtext_string_append(b, "\tmovaps\t");
+                vtext_string_append(b, sz == 32 ? "\tvmovaps\t" : "\tmovaps\t");
             else if (X64_REGISTER_IS_XMM(i->registers[0]) ||
                      X64_REGISTER_IS_XMM(i->registers[1]))
                 vtext_string_append(b, sz == 4 ? "\tmovd\t" : "\tmovq\t");

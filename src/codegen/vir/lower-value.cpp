@@ -824,6 +824,24 @@ VPRIV bool virbuild_vector_operation(codegen_context *e, int op,
     cc *c = e->compile_context;
     if (!CODEGEN_IS_X64(c))
         return false;
+    if (codegen_type_size(c, vt) == 32 && !unary && a_vector && b_vector &&
+        virbuild_wide_vectors(e)) {
+        uint32_t code = 0;
+        bool swapped = false;
+
+        if (x64_x86_operation_code(e, op, vt, &code, &swapped)) {
+            /* one VEX instruction on the whole vectors */
+            int first = ra, second = rb;
+
+            if (swapped) {
+                first = rb;
+                second = ra;
+            }
+            virbuild_vector_binary(e, VIR_OP_X86, code, VIR_TYPE_I64X4, 8,
+                                   first, second, d, 0);
+            return true;
+        }
+    }
     if (codegen_type_size(c, vt) == 32) {
         /* (both halves take the same path: nothing is done if the first has
            none) */
@@ -867,6 +885,15 @@ static codegen_value virbuild_halved_builtin(codegen_context *e, uint32_t n,
     codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
                         .align = 16,
                         .offset = walk_slot_temporary(e, 32, 16)};
+    if (!count && virbuild_wide_vectors(e)) { /* one VEX instruction */
+        virbuild_vector_binary(e, VIR_OP_X86, code, VIR_TYPE_I64X4, 8, r[0],
+                               r[1], &d, 0);
+        for (unsigned i = 0; i < 2; i++)
+            WALK_LOWER(tfree)(e, r[i]);
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number =
+                               (uint8_t)WALK_LOWER(laddr)(e, &d));
+    }
     for (int at = 0; at < 32; at += 16) {
         codegen_lvalue to = d;
         to.offset += at;

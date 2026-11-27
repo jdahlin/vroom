@@ -291,7 +291,7 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
                                    VIR_TYPE_VOID);
         }
         /* a vector field takes the type first stored; others are bitcast to and from it */
-        if (size == 16 && ty != VIR_TYPE_VOID) {
+        if (size >= 16 && ty != VIR_TYPE_VOID) {
             if (!vir_type_is_vector(ty))
                 bad[s] = 1;
             if (fd[k].type != VIR_TYPE_VOID)
@@ -333,7 +333,7 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
             continue;
         virbuild_promote_field *f = &fd[fof[i] - 1];
 
-        if (f->size == 16) {
+        if (f->size >= 16) {
             /* only a memset writes it: zero, of the type the load reads */
             for (uint32_t m = 0; f->type == VIR_TYPE_VOID &&
                                  vir_type_is_vector(q->insn.type) && m < nms;

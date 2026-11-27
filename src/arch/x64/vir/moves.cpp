@@ -124,6 +124,32 @@ VPRIV void x64_vir_x86_emit(x64_vir_context *L, uint32_t code, int d, int a,
     x64_vir_simd_emit(L, op, d, a, source);
 }
 
+VPRIV void x64_vir_x86_wide_emit(x64_vir_context *L, uint32_t code, int d,
+                                 int a, int b)
+{
+    const char *mnemonic = x64_x86_code_mnemonic(code);
+    char text[128];
+
+    if (code & X64_X86_SHIFT)
+        snprintf(text, sizeof text, "\tv%s\t$%u, %%ymm%d, %%ymm%d\n", mnemonic,
+                 code >> 16 & 0xff, a - XMM0, d - XMM0);
+    else if (code & X64_X86_UNARY) {
+        if (code & X64_X86_IMMEDIATE)
+            snprintf(text, sizeof text, "\tv%s\t$%u, %%ymm%d, %%ymm%d\n",
+                     mnemonic, code >> 16 & 0xff, a - XMM0, d - XMM0);
+        else
+            snprintf(text, sizeof text, "\tv%s\t%%ymm%d, %%ymm%d\n", mnemonic,
+                     a - XMM0, d - XMM0);
+    } else if (code & X64_X86_IMMEDIATE) {
+        snprintf(text, sizeof text, "\tv%s\t$%u, %%ymm%d, %%ymm%d, %%ymm%d\n",
+                 mnemonic, code >> 16 & 0xff, b - XMM0, a - XMM0, d - XMM0);
+    } else {
+        snprintf(text, sizeof text, "\tv%s\t%%ymm%d, %%ymm%d, %%ymm%d\n",
+                 mnemonic, b - XMM0, a - XMM0, d - XMM0);
+    }
+    x64_vir_text_append(L, text);
+}
+
 VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst,
                                         uint32_t v)
 {
@@ -224,8 +250,13 @@ VPRIV void vx_edit(x64_vir_context *L, const vir_edit *x)
         x64_vir_slot_access(L, false, x->src, L->allocation->slot[x->value]);
         break;
     case VIR_EDIT_MOVE:
-        x64_mov(L->context, x64_vir_register_number(x->dst),
-                x64_vir_register_number(x->src));
+        if (L->function->insns[x->value].type == VIR_TYPE_I64X4)
+            x64_record_emit_three_registers(
+                L->context, X64_OP_MOV, 32, x64_vir_register_number(x->dst),
+                x64_vir_register_number(x->src), X64_REGISTER_NONE);
+        else
+            x64_mov(L->context, x64_vir_register_number(x->dst),
+                    x64_vir_register_number(x->src));
         break;
     default:
         abort(); /* no swapped/tied operands in x64_vir_fixed_registers_get */
