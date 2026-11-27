@@ -2671,6 +2671,8 @@ class semantic_analysis
                              lookup_filter filter) const;
     /* one more declaration found for a name: r's entity if it is the same
        entity or the first, else ambiguous or unknown */
+    bool all_past_horizon(entity_index e) const;
+    bool declared_around(entity_index space, uint32_t name) const;
     void found_also(lookup_result &r, entity_index e, entity_index in) const;
     /* [basic.lookup.argdep]: the functions named name in the namespaces
        associated with arguments of these types, added to found (each

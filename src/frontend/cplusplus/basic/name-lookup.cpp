@@ -203,6 +203,29 @@ const char *semantic_analysis::unknown_scope_subclause(entity_index s) const
     return "namespace.udir";
 }
 
+/* the functions of e's overload chain are declared after the template
+   being instantiated */
+bool semantic_analysis::all_past_horizon(entity_index e) const
+{
+    for (entity_index o = e; o; o = entity_table[o].next_overload) {
+        uint32_t d = entity_table[o].first_declaration;
+        if (entity_table[o].kind != entity_kind::function || !d ||
+            entity_table.declaration(d).node.first_token() <= lookup_horizon)
+            return false;
+    }
+    return true;
+}
+
+bool semantic_analysis::declared_around(entity_index space, uint32_t name) const
+{
+    while (space) {
+        space = entity_table[space].enclosing;
+        if (entity_table.find(space, name))
+            return true;
+    }
+    return false;
+}
+
 void semantic_analysis::found_also(lookup_result &r, entity_index e,
                                    entity_index in) const
 {
@@ -347,6 +370,14 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
         }
         if (is_namespace(s)) {
             entity_index e = declared_in(s, name, filter);
+            /* [temp.dep.candidate]/1: functions all declared after the
+               template are not in its definition's lookup, which goes on
+               to the enclosing namespaces when one declares the name */
+            if (e && lookup_horizon && all_past_horizon(e) &&
+                declared_around(s, name)) {
+                horizon_hidden++;
+                e = 0;
+            }
             if (e)
                 found_also(r, e, s);
             if (e && collected_names)
@@ -440,11 +471,7 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
            lookup at the point of instantiation decides (when no enclosing
            namespace declares the name, which the definition's lookup
            would find instead) */
-        bool outer = false;
-        for (entity_index ns = entity_table[r.found_in].enclosing; ns;
-             ns = entity_table[ns].enclosing)
-            if (entity_table.find(ns, name))
-                outer = true;
+        bool outer = declared_around(r.found_in, name);
         if (late && !early && functions && !outer && !r.unknown &&
             !r.ambiguous) {
             r.entity = 0;
