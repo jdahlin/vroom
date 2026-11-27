@@ -702,6 +702,17 @@ be combined detected (a clash is an error in the prefix: drop the header).
 Verify: CS0's comparison on prefix2.h shows no symbol difference; node count.
 Gain: rests 17.2G to 3.9G [M 3, M 4].
 
+### Lazier analysis of the headers' bodies.  Status: tried, not kept (2026-11-27).
+The front end is already lazy for most of it.  Bodies analysed where they are
+defined, in the 52 system headers (timer around the outermost ones, of about
+1100 Mticks for the whole prefix): 410 non-template non-constexpr functions 52,
+536 template definitions 70, 78 constexpr 13: about 11 % together.
+Postponing the non-template classes' member bodies (queue_body_until_used, as
+a specialization's) kept all symbols and `bench`, and saved 1.3 % of the prefix
+(2.94G to 2.90G), 0.5 % without a prefix.  Free functions need their
+parameters' state re-derived; templates' bodies are analysed for
+[temp.res]/8's diagnostics.  Neither is worth it for the forked build.
+
 ### CS11. Record the result.  Status: not started.
 `bench/stockfish/prefix.py` in `AGENTS.md`'s list, the numbers of CS4, CS8 and
 CS10 in this file and in `doc/PLAN-cxx.md`'s 30x table; `ci/premerge.sh` gets
