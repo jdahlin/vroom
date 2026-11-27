@@ -40,6 +40,8 @@ int NAME()
     printf("%d %d %d\n", local_user(), apply(glambda), autov<sfn>() + autov<&afn>());
     printf("%d\n", of_enum<E>());
     printf("%d\n", in_static_template<int>());
+    Outer<Anon>::Member m{UNIT * 47};
+    printf("%d\n", Inner<Outer<Anon>::Member>::get(m));
     printf("%d %d\n", erased(Anon()), erased([] { return UNIT * 41; }));
     return r;
 }

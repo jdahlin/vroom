@@ -209,7 +209,9 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
             visible_local_class(entity_table, record.entity) &&
             !unit_local(record.entity))
             return false;
-        if (arguments && x.lambda && unit_local(record.entity))
+        /* (also a member class of a unit's own specialization, and a
+           closure type of namespace scope) */
+        if (arguments && unit_local(record.entity))
             return true;
         if (x.linkage_of_name != linkage::external)
             return true;
