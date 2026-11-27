@@ -697,20 +697,28 @@ bool semantic_analysis::associated_with(qualified_type t,
                 }
         }
         /* the class and its direct and indirect base classes, each once */
-        owned_array<entity_index> work;
+        /* (walked apart from classes: an enumeration's class is there
+           without its bases) */
+        owned_array<entity_index> work, walked;
         work.append(c);
         while (!work.empty()) {
             entity_index x = work.back();
             work.resize(work.size() - 1);
+            bool again = false;
+            for (entity_index other : walked)
+                if (other == x)
+                    again = true;
+            if (again)
+                continue;
+            if (entity_table[x].kind != entity_kind::class_type)
+                return false;
+            walked.append(x);
             bool seen = false;
             for (entity_index other : classes)
                 if (other == x)
                     seen = true;
-            if (seen)
-                continue;
-            if (entity_table[x].kind != entity_kind::class_type)
-                return false;
-            classes.append(x);
+            if (!seen)
+                classes.append(x);
             add_namespace(entity_table[x].enclosing);
             const entity &cx = entity_table[x];
             for (uint32_t i = 0; i < cx.base_count; i++)
@@ -737,6 +745,17 @@ bool semantic_analysis::associated_with(qualified_type t,
         if (entity_table[e].kind != entity_kind::enumeration)
             return false;
         add_namespace(entity_table[e].enclosing);
+        /* "and, if it is a class member, the member's class": its hidden
+           friends are found (/4.3) */
+        entity_index outer = entity_table[e].enclosing;
+        if (outer && entity_table[outer].kind == entity_kind::class_type) {
+            bool seen = false;
+            for (entity_index other : classes)
+                if (other == outer)
+                    seen = true;
+            if (!seen)
+                classes.append(outer);
+        }
         return true;
     }
     case type_kind::pointer:
