@@ -741,7 +741,10 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
            every element */
         bool zero_vector = record.kind == type_kind::ext_vector &&
                            parenthesized && !written.list;
-        if (!as_cast && !vector_value && !zero_vector &&
+        /* an array typedef-name with a braced list: a prvalue array
+           ([dcl.init.list]/3.9 gives it its bound) */
+        bool array_value = braced && record.kind == type_kind::array;
+        if (!as_cast && !vector_value && !zero_vector && !array_value &&
             record.kind != type_kind::fundamental &&
             record.kind != type_kind::pointer &&
             record.kind != type_kind::enumeration)
@@ -819,6 +822,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             VTRY(r, list_initialization(written.clause, to, true, result));
             m = expression_meaning();
             m.type = to;
+            if (array_value)
+                m.category = value_category::prvalue;
             m.evaluation = result.evaluation;
             m.value = result.value;
             m.node = result.node;
