@@ -25,6 +25,18 @@ union V { long long a : 33; char b; };
 #pragma pack(push, 8)
 struct E { char x; int a : 30; int b : 4; char y; };
 #pragma pack(pop)
+struct Wide { int w; char x; };
+struct Empty {};
+struct Narrow { short s; };
+#pragma pack(push, 1)
+struct F : Wide { char y; int z; };
+struct G : Narrow, Empty, Wide { char y; };
+union H { struct H1 : Wide { char q; } h; char k; };
+#pragma pack(pop)
+#pragma pack(push, 2)
+struct I : Narrow, Wide { char y; long long z; };
+struct J : Empty { int z; };
+#pragma pack(pop)
 template <class T> T zeroed()
 {
     T t;
@@ -41,5 +53,10 @@ int main()
     D d = zeroed<D>(); d.x = 1; d.a = 200; d.b = -100; dump(d);
     V v = zeroed<V>(); v.a = 0xabcdef12LL; dump(v);
     E e = zeroed<E>(); e.x = 1; e.a = 123456; e.b = 5; e.y = 4; dump(e);
+    F f = zeroed<F>(); f.w = 1; f.x = 2; f.y = 3; f.z = 4; dump(f);
+    G g = zeroed<G>(); g.s = 5; g.w = 1; g.x = 2; g.y = 3; dump(g);
+    H h = zeroed<H>(); h.h.w = 6; h.h.q = 7; dump(h);
+    I i = zeroed<I>(); i.s = 5; i.w = 1; i.x = 2; i.y = 3; i.z = 4; dump(i);
+    J j = zeroed<J>(); j.z = 8; dump(j);
     printf("%d %d %d %d\n", b.a, b.b, static_cast<int>(c.c % 1000), d.b);
 }

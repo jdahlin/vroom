@@ -418,6 +418,10 @@ const char *class_layout::base(entity &b)
     uint64_t base_alignment = d.alignment;
     if (d.virtual_base_count)
         base_alignment = d.nv_alignment;
+    /* [ext.clang] #pragma pack caps a base's alignment as a member's */
+    if (table[c].max_field_alignment &&
+        base_alignment > table[c].max_field_alignment)
+        base_alignment = table[c].max_field_alignment;
     raise_alignment(base_alignment);
     bool empty = empty_class(analysis, of);
     uint64_t at = 0;
@@ -616,10 +620,9 @@ const char *class_layout::allocation_of_members()
     if ((x.gnu_flags & gnu_packed) &&
         (x.base_count || x.virtual_base_count || x.dynamic))
         return "ext.gnu";
-    /* [ext.clang] #pragma pack with bases or a virtual table pointer: rules
-       this does not follow yet */
-    if (x.max_field_alignment &&
-        (x.base_count || x.virtual_base_count || x.dynamic))
+    /* [ext.clang] #pragma pack with virtual bases or a virtual table
+       pointer: rules this does not follow yet */
+    if (x.max_field_alignment && (x.virtual_base_count || x.dynamic))
         return "cpp.pragma";
     /* [abi:class-types] II: the primary base (virtual or non-virtual) is
        allocated first, at offset 0 */
