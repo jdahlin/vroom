@@ -1262,8 +1262,18 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
         return not_supported_because(
             at, "temp.arg.nontype",
             "the address-of operator for a reference parameter's argument");
+    /* [over.over]/1: "a non-type template parameter": an overload set's
+       name is the function the parameter's type selects */
+    function_set set;
+    bool selected = named_function_set(operand, set);
     expression_meaning m;
-    VTRY(result, expression(operand, m));
+    analysis_result result;
+    if (selected)
+        result = target_expression(operand, to, m);
+    else
+        result = expression(operand, m);
+    if (result != analysis_result::well_formed)
+        return result;
     entity_index e = m.entity;
     if (!e)
         return not_supported_because(
@@ -1287,7 +1297,7 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
            it) */
         static_member = !x.nonstatic_member && !x.member_body_deferred;
     if ((x.kind != entity_kind::variable && x.kind != entity_kind::function) ||
-        x.instantiation || x.next_overload ||
+        x.instantiation || (x.next_overload && !selected) ||
         (!is_namespace(x.enclosing) && !static_member) || x.c11_thread_local)
         /* (an object of thread storage duration has no address that is
            the same in each thread: [temp.arg.nontype]/2's constant
