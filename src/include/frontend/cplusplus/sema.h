@@ -1723,6 +1723,9 @@ enum class conversion_kind : uint8_t {
     /* [ext:gnu_vector_size] a cast between a vector and a vector or a
        scalar of the same size: the same bits */
     vector_cast,
+    /* [ext:clang_ext_vector_type] a scalar of the element type in every
+       lane */
+    vector_splat,
 };
 
 /* [expr.cast]/4: the casts that may perform an explicit conversion */
@@ -7605,6 +7608,14 @@ class semantic_analysis
     analysis_result same_type_copy(SyntaxRef at, expression_meaning &m,
                                    qualified_type type, constness evaluation,
                                    initialized_value &result);
+    analysis_result vector_initialization(SyntaxRef at, expression_meaning &m,
+                                          qualified_type type,
+                                          initialized_value &result);
+    uint64_t vector_value_bytes(qualified_type type) const;
+    analysis_result vector_splat(SyntaxRef at, expression_meaning &m,
+                                 qualified_type to);
+    void vector_converted(expression_meaning &m, qualified_type to,
+                          conversion_kind kind);
     analysis_result reference_initialization(SyntaxRef at,
                                              expression_meaning &m,
                                              qualified_type type,
