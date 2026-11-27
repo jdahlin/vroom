@@ -452,12 +452,6 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
         break;
     }
     entity_index destructor = entity_table[c].destructor;
-    if (destructor && entity_table[destructor].virtual_ &&
-        entity_table[destructor].pure)
-        /* a pure virtual destructor, still defined ([class.dtor]/12): its
-           slots and its deleting destructor are not analysed */
-        return not_supported_because(n, "class.dtor",
-                                     "a pure virtual destructor");
     dynamic_class d;
     d.primary_base = primary;
     d.primary_is_virtual = primary_virtual;

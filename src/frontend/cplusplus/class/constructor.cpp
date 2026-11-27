@@ -951,10 +951,9 @@ analysis_result semantic_analysis::special_member_declarator(
            overriding a base's ([class.dtor]/13) */
         /* virt_override, virt_final: the destructor's virt-specifier-seq
            (member_declaration) */
-        virt_pure = false;
         analysis_result r3 =
             virtual_member(c, e, declaration, m.id, virtual_specified);
-        virt_override = virt_final = false;
+        virt_override = virt_final = virt_pure = false;
         return r3;
     }
     return analysis_result::well_formed;
