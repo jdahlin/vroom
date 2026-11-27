@@ -7046,7 +7046,8 @@ class semantic_analysis
         form kind = form::bad;
         /* [over.ics.scs]/3: the rank of the standard conversion sequence
            (a user-defined one's second): 0 Exact Match, 1 Promotion, 2
-           Conversion */
+           Conversion; 3, a scalar to a vector's lanes
+           ([ext:clang_ext_vector_type]) */
         uint8_t rank = 0;
         /* the identity conversion: none but lvalue transformations
            ([over.ics.rank]/3.2.1) */

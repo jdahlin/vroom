@@ -101,6 +101,14 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
                 return of_form(sequence::form::bad);
     }
     fundamental_type ff = fundamental_of(from), tf = fundamental_of(to);
+    /* [ext:clang_ext_vector_type] an arithmetic scalar in every lane
+       (vector_initialization; bool is not analysed): as clang ranks it,
+       worse than every standard conversion to a scalar */
+    if (t.kind == type_kind::ext_vector && arithmetic_type(ff) &&
+        ff != fundamental_type::bool_) {
+        s.rank = 3;
+        return s;
+    }
     if (f.kind == type_kind::enumeration) {
         /* [conv.prom]/4: "A prvalue of an unscoped enumeration type whose
            underlying type is not fixed can be converted to a prvalue of the
