@@ -216,6 +216,31 @@ static void driver_job_pp_options_finish(struct driver_job *job,
     }
 }
 
+#ifdef __cplusplus
+struct driver_cxx_boundary {
+    struct driver_job *job;
+    const driver_environment *env;
+    pp *p;
+};
+
+static void driver_cxx_boundary_reached(void *context, const char **path)
+{
+    struct driver_cxx_boundary *b = (struct driver_cxx_boundary *)context;
+
+    struct driver_files f = {b->job->main_file, b->job->output_file,
+                             b->job->depfile, b->job->depfile_target};
+
+    b->env->cxx_boundary(b->env->cxx_boundary_context, &f);
+    if (strcmp(f.main_file, b->job->main_file))
+        pp_dependency_main_set(b->p, f.main_file);
+    b->job->main_file = f.main_file;
+    b->job->output_file = f.output_file;
+    b->job->depfile = f.depfile;
+    b->job->depfile_target = f.depfile_target;
+    *path = f.main_file;
+}
+#endif
+
 /* a C++ translation unit (frontend/cplusplus, doc/PLAN-cxx-sema.md S1e):
    the predefines and search path the driver resolved, the code generator's
    options C has; the C preprocessor p only reports the code generator's
@@ -225,7 +250,6 @@ static int driver_job_compile_cplusplus(struct driver_job *job, pp *p,
                                         const cc_options *co)
 {
 #ifdef __cplusplus
-    char path[4096];
     const char *main = job->main_file;
 
     if (job->stdin_src) {
@@ -233,12 +257,9 @@ static int driver_job_compile_cplusplus(struct driver_job *job, pp *p,
                             "compiled yet\n");
         return 1;
     }
-    if (main[0] != '/' && env->cwd) {
-        snprintf(path, sizeof path, "%s/%s", env->cwd, main);
-        main = path;
-    }
     struct cplusplus_compile_options o = {};
     o.path = main;
+    o.directory = env->cwd;
     o.edition = job->cxx;
     o.gnu = !job->strict_standard;
     o.predefines = job->predefines.data;
@@ -253,6 +274,13 @@ static int driver_job_compile_cplusplus(struct driver_job *job, pp *p,
         size_t l = strlen(main);
         o.preprocessed_input = (l > 2 && !strcmp(main + l - 2, ".i")) ||
                                (l > 3 && !strcmp(main + l - 3, ".ii"));
+    }
+    struct driver_cxx_boundary boundary = {job, env, p};
+    o.probe = env->cxx_probe;
+    o.probe_context = env->cxx_probe_context;
+    if (env->cxx_boundary && !job->debug) {
+        o.boundary = driver_cxx_boundary_reached;
+        o.boundary_context = &boundary;
     }
     return cplusplus_compile(&o, p, co) || pp_error_count(p) ? 1 : 0;
 #else

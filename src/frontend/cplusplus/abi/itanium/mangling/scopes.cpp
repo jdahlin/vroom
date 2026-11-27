@@ -301,7 +301,9 @@ bool itanium_mangler::closure_type_name(entity_index c)
     enc.write(terminal::E_end);
     entity_index context = enclosing_function(table, c);
     uint64_t earlier = 0;
-    for (entity_index other = 1; other < c; other++) {
+    for (entity_index other : analysis.closure_entities) {
+        if (other >= c)
+            break;
         const entity &k = table[other];
         if (k.kind != entity_kind::class_type || !k.lambda ||
             !k.call_operator || enclosing_function(table, other) != context ||

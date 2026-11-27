@@ -132,7 +132,8 @@ relative to it); `TODO.md` stays at the top.
   - `port/`: what depends on the host (headers in `include/port/`; `port_SRC`,
     linked by every tool): job regions kept from one job to the next
     (`job-regions.h`), file mapping, reading and writing (`file.h`), clocks
-    (`clock.h`), thread counters (`performance-counters.h`), the stack guard
+    (`clock.h`), `std::thread`'s interface without a C++ library (`thread.h`;
+    test `src/test/port/thread-test.cpp`), thread counters (`performance-counters.h`), the stack guard
     (`stack-guard.h`), CRC32C (`crc32c.h`), `-march=native` on x86
     (`x86native.h`), the shared thread pool and CPU budget (`task.h`,
     `vtask_*`: parallel-for, jobs, blocking regions;
@@ -194,7 +195,9 @@ relative to it); `TODO.md` stays at the top.
     One compile job from a clang command line (`job.cpp` calls the
     pieces: `cmdline.cpp`, `searchpath.cpp`, `predef.cpp`, `depfile.cpp`, `output.cpp`, ...;
     `driver-internal.h`), the declaration cache (`declaration-cache.cpp`), `--explain` pages (`explain.inc`).
-  - `server/`: vccd (`vccd.cpp`, with its main; one file per job beside it,
+  - `server/`: vccd (`vccd.cpp`, with its main; `cxx-prefix-worker.cpp`: C++ compiles with
+    -fcxx-prefix= forked from a `vccd --cxx-prefix-worker` that has the prefix
+    analysed; one file per job beside it,
     `vccd-internal.h`), the diagnostics store
     (`diagnostics-store.cpp`), the capability table (`capabilities.cpp`) and the warning groups
     (`warnings.inc`).  Without `--backend-sock` vccd runs the whole kernel
@@ -367,6 +370,7 @@ bench/cxx-sema.py --suites all   # ... also on clang's CodeGenCXX, Parser and Se
 bench/cxx-sema.py --check     # ... as in CI: no failure beyond src/test/cxx/sema/clang-failures.txt (known failures, xfail), none of its lines passing now; --bless rewrites it, with the fix (~70 s)
 bench/cxx-sema.py selftest          # the type and layout claims' paths through clang on hand-written claims (<1 s)
 bench/cxx-run.py -j 6 [-O 0123] [PAT]  # src/test/cxx/run: vpp -c (the driver: frontend/cplusplus lowered to C's AST, frontend/c/ast-builder.h) at -O0..3 vs clang++ -O2, run under qemu; -O0 symbols = clang's; /* cxx-run-flags: */ in a test adds flags for both (<10 s)
+bench/cxx-depfile.py                # C++ -MD/-MMD/-MP depfiles byte for byte vs clang++, also run from another directory as vccd does (<2 s)
 bench/cxx-include-guard.py [-v]      # the C++ preprocessor's multiple-include guard skip: src/test/cxx/include-guard, text and diagnostics vs clang -E -P (<1 s)
 bench/cxx-thread.py [-v] [PAT]     # src/test/cxx/thread: C++ programs that need threads, built by vpp, linked by clang++ -pthread, self-checking (a variable that should be thread-local or a local emitted as a shared static; <5 s)
 bench/cxx-mangle-unit.py [--clang] [-v] [PAT]   # the mangler's unit tests (src/test/cxx/mangle, a file per ABI section): every `// MANGLE: SYMBOL` in vpp -c's object; --clang: and in clang++'s, so the expectations are clang's (<2 s)
@@ -473,6 +477,14 @@ bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2)
 bench/vcpkg/build.py [-j N] [--clang] [-v] [PAT]   # microsoft/vcpkg-tool (C++17, 119 TUs; work/vcpkg-tool, work/vcpkg-deps-{fmt,cmrc,curl}: git clone --depth 1): vpp -x c++ -c per TU, refusals grouped by reason; --clang is the reference (all 119 build)
 bench/cxx-json.py [-v] [--force] [PAT]     # nlohmann/json's 71 test TUs (work/cxx/json/src/tests) by vpp -x c++ -std=c++17 -c against libc++, one at a time (nice, 60 s each): ok or the first error (refused subclause, vcc file:line), grouped by first error; cached in build/cxx-json.json (a rerun compiles only what changed; the full run ~1.5 min)
 bench/stockfish/run.py [--arch sse2|avx2] [-O 0123] [--depth N] [--mix] [-v]   # Stockfish 17.1 (work/stockfish, 23 TUs, libc++) by vpp -x c++ -c, first error per TU; once all compile, linked by clang++ and `bench` node count = clang++'s, with both nodes/second (--mix: one vcc object among clang's; --arch sse2: the SIMD build; ~20 s)
+bench/stockfish/threads.py [-j N] [--warm N] [--bin-dir build/linux/src-tsan]   # proof of concept: its TUs on threads of one process = one process each, byte for byte
+bench/stockfish/vccd.py             # ... concurrently through the vcc shim and one vccd (after threads.py)
+bench/stockfish/prefix.py [--fork]  # ... -fcxx-prefix= (the system headers; PLAN-cxx-snapshot.md): symbols and sizes = -include's and own includes'; --fork: one process forks a child per TU
+bench/cxx-prefix.py -j 6            # -fcxx-prefix=P = -include P over src/test/cxx/run: status, diagnostics, object (~1 min)
+bench/stockfish/vccd-prefix.py [--bin-dir DIR]   # vccd's -fcxx-prefix= workers: objects, depfiles, diagnostics as one vpp's, through header edits, shadowing, errors, killed workers (~1 min)
+bench/skia/prefix.py [--stride N]  # -fcxx-prefix= (Skia's standard headers) on the 529 files of work/skia-src's out/vcc: failures, instructions, CPU, defined symbols
+bench/skia/dm.py                   # ... Skia's dm rebuilt with it in build/skia-dm (needs out/vcc-test); then run its tests and GMs
+bench/stockfish/cache.py            # ... a result cache keyed on command, compiler and inputs: cold, unchanged, one header edited
 bench/highway/run.py [-O 0123] [-j N] [--bless] [-v] [PAT]   # Google Highway (work/highway, pinned commit in the file's header; x86-64 host, static SSE2 target, libc++): each TU by vpp -x c++ -c, the tests linked by clang++ (library objects vcc's where it compiles them) and run; a test lost from bench/highway/passing-O2 is an error, refusals grouped by first error (~1 min cold)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):

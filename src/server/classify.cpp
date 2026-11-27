@@ -33,7 +33,7 @@ VPRIV bool vccd_request_is_preprocess(const struct vccd_request *r)
  * client's fd 0, or by vccd first when clang may need the same bytes.
  */
 /* options whose value is the next argument (so it is not an input) */
-static bool vccd_option_takes_value(const char *a)
+VPRIV bool vccd_option_takes_value(const char *a)
 {
     static const char *const v[] = {
         "-o",

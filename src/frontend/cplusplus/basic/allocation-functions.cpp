@@ -218,6 +218,7 @@ uint32_t semantic_analysis::allocation_names_spelled()
              syntax_parser.keyword_of(next) == standard_keyword::delete_))
             count++;
     }
+    allocation_names_answered = count;
     return count;
 }
 

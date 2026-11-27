@@ -102,6 +102,8 @@ static const cmdlib_option vccd_options[] = {
 
 int main(int argc, char **argv)
 {
+    if (argc == 2 && !strcmp(argv[1], "--cxx-prefix-worker"))
+        return vccd_cxx_prefix_worker_main(3);
     if (cmdlib_wants_help(argc, argv)) {
         cmdlib_print_help("Usage: vccd [OPTIONS]", vccd_options);
         return 0;

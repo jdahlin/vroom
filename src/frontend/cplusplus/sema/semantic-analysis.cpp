@@ -541,7 +541,7 @@ analysis_result semantic_analysis::declaration_by_kind(SyntaxRef n)
         }});
 }
 
-void semantic_analysis::translation_unit()
+void semantic_analysis::begin_translation_unit()
 {
     /* [impl.clang] a typedef-name every translation unit starts with
        (the parser's names know it too) */
@@ -578,11 +578,27 @@ void semantic_analysis::translation_unit()
         entity_table[e].defined = true;
         entity_table.bind(0, id, e);
     }
+}
+
+void semantic_analysis::analyse_declarations(const node_index *first,
+                                             size_t count)
+{
+    for (size_t i = 0; i < count; i++)
+        declaration(first[i]);
+}
+
+void semantic_analysis::end_translation_unit()
+{
+    instantiate_pending();
+}
+
+void semantic_analysis::translation_unit()
+{
+    begin_translation_unit();
     owned_array<node_index> all;
     tree.declarations(&all);
-    for (node_index n : all)
-        declaration(n);
-    instantiate_pending();
+    analyse_declarations(all.data(), all.size());
+    end_translation_unit();
 }
 
 } // namespace cplusplus

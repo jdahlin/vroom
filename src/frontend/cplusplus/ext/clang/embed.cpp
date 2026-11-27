@@ -196,7 +196,7 @@ bool preprocessor::find_embed(const char *name, size_t length, bool angled,
         vbuffer_format_append(path.get(), "%s/%.*s", d, (int)length, name);
         vbuffer_append(path.get(), "", 1);
         struct stat st;
-        if (stat(path.data(), &st) == 0)
+        if (stat_file(path.data(), &st) == 0)
             return true;
     }
     return false;
@@ -207,7 +207,7 @@ bool preprocessor::embedded_size(const char *path, const embed_parameters &p,
                                  uint64_t *size)
 {
     struct stat st;
-    if (stat(path, &st) != 0)
+    if (stat_file(path, &st) != 0)
         return false;
     uint64_t n = (uint64_t)st.st_size;
     if (p.offset < n)
@@ -302,7 +302,7 @@ void preprocessor::clang_embed_directive(const preprocessing_token &name)
         return;
     }
     struct stat st;
-    if (stat(path.data(), &st) == 0 && !S_ISREG(st.st_mode)) {
+    if (stat_file(path.data(), &st) == 0 && !S_ISREG(st.st_mode)) {
         diagnostics.issue(diagnostic_id::err_pp_embed_device_file,
                           first.location);
         return;
@@ -314,6 +314,8 @@ void preprocessor::clang_embed_directive(const preprocessing_token &name)
             .text(header.data() + 1, header.size() - 2);
         return;
     }
+
+    note_dependency(path.data(), false);
 
     owned_array<preprocessing_token> out;
     auto append = [&](const owned_array<preprocessing_token> &from) {
@@ -327,7 +329,8 @@ void preprocessor::clang_embed_directive(const preprocessing_token &name)
     else {
         append(p.prefix);
         owned_buffer text;
-        FILE *f = fopen(path.data(), "rb");
+        owned_buffer storage;
+        FILE *f = fopen(files.on_disk(path.data(), storage), "rb");
         if (f && fseek(f, (long)p.offset, SEEK_SET) == 0) {
             for (uint64_t i = 0; i < size; i++) {
                 int c = fgetc(f);

@@ -194,6 +194,12 @@ static bool report_psabi(void *context, uint32_t location, const char *text)
     return m.severity == diagnostic_severity::error;
 }
 
+/* the driver's C preprocessor p keeps the list -MD writes */
+static void compile_dependency(void *context, const char *path, bool system)
+{
+    pp_dependency_note(static_cast<pp *>(context), path, system);
+}
+
 /* phases 7 to 9: the parse, the analysis, and unless -fsyntax-only the
    code; the developer outputs of the parse or of the analysis on out */
 static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
@@ -201,7 +207,7 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
                                     const dump_request &request,
                                     source_files &files, token_stream &tokens,
                                     diagnostic_consumer &diagnostics,
-                                    vbuffer *out)
+                                    const char *prefix, vbuffer *out)
 {
     (void)files;
     syntax_tree tree;
@@ -210,13 +216,56 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
     parse.debug_fallbacks = request.debug_fallbacks;
     if (request.speculation_limit)
         parse.speculation_limit = request.speculation_limit;
-    parse.translation_unit();
+    owned_array<node_index> prefix_nodes;
+    if (prefix)
+        parse.prefix_declarations(&prefix_nodes);
+    else
+        parse.translation_unit();
     if (request.phase() == dump_phase::parsing) {
         dump_parsing(request, tree, tokens, parse, out);
         return 0;
     }
     semantic_analysis analysis(tree, tokens, parse, diagnostics);
-    analysis.translation_unit();
+    const char *path = o->path;
+    if (!prefix)
+        analysis.translation_unit();
+    else {
+        analysis.begin_translation_unit();
+        analysis.analyse_declarations(prefix_nodes.data(), prefix_nodes.size());
+        /* what the prefix already wants, once rather than in every child of
+           a fork: functions are emitted in another order than with -include
+           (doc/PLAN-cxx-snapshot.md CS4) */
+        analysis.instantiate_so_far();
+        uint32_t answered = analysis.allocation_names_answered;
+        if (o->boundary)
+            o->boundary(o->boundary_context, &path);
+        if (!tokens.pp.enter_main(path)) {
+            dprintf(o->errfd, "vcc: error: cannot read %s\n", path);
+            return 1;
+        }
+        tokens.resume();
+        /* the parser reads no view of the analysis, whose arrays move */
+        const SyntaxContext *ambient = syntax_ambient;
+        syntax_ambient = nullptr;
+        parse.translation_unit();
+        syntax_ambient = ambient;
+        analysis.tree_grew();
+        owned_array<node_index> all;
+        tree.declarations(&all);
+        analysis.analyse_declarations(all.data() + prefix_nodes.size(),
+                                      all.size() - prefix_nodes.size());
+        analysis.end_translation_unit();
+        /* [basic.stc.dynamic.allocation] a rule asked about the operator
+           new tokens of the whole translation unit before they were made */
+        if (answered != UINT32_MAX &&
+            answered != analysis.allocation_names_spelled()) {
+            dprintf(o->errfd,
+                    "vcc: error: -fcxx-prefix=: %s declares an "
+                    "allocation function the prefix asked about\n",
+                    path);
+            return 1;
+        }
+    }
     if (request.phase() == dump_phase::analysis) {
         if (request.has(dump_output::type_claims))
             analysis.evaluate_analysed_expressions();
@@ -239,8 +288,8 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
         cc *c = ast_builder_open(p, co);
         ast_builder_psabi_reporter(c, report_psabi, &diagnostics);
         lowering_failure why;
-        if (!lower_translation_unit(analysis, tokens, c, co->target, why,
-                                    o->path, co->rtti != 0)) {
+        if (!lower_translation_unit(analysis, tokens, c, co->target, why, path,
+                                    co->rtti != 0)) {
             report_failure(o->errfd, tokens, why);
             status = 1;
         } else if (ast_builder_emit(c))
@@ -254,7 +303,8 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
    and settings, the outputs they ask for; false after an error on errfd */
 static bool compile_arguments(const cplusplus_compile_options *o,
                               implementation_defined_behavior &behavior,
-                              diagnostic_options &settings, dump_request &r)
+                              diagnostic_options &settings, dump_request &r,
+                              const char *&prefix)
 {
     for (int i = 0; i < o->argument_count; i++) {
         const char *a = o->arguments[i];
@@ -274,7 +324,9 @@ static bool compile_arguments(const cplusplus_compile_options *o,
                         bad, a);
                 return false;
             }
-        } else if (!strcmp(a, "-fcxx-phase4-diagnostics-only"))
+        } else if (!strncmp(a, "-fcxx-prefix=", 13))
+            prefix = a + 13;
+        else if (!strcmp(a, "-fcxx-phase4-diagnostics-only"))
             r.phase4_diagnostics_only = true;
         else if (!strcmp(a, "-fcxx-dump-sections"))
             r.sections = true;
@@ -355,7 +407,8 @@ static int compile(const cplusplus_compile_options *o, pp *p,
     diagnostic_options settings;
     implementation_defined_behavior behavior = compile_behavior(o, co);
     dump_request request;
-    if (!compile_arguments(o, behavior, settings, request))
+    const char *prefix = nullptr;
+    if (!compile_arguments(o, behavior, settings, request, prefix))
         return 1;
     owned_buffer out, messages;
     int status = 0;
@@ -370,8 +423,11 @@ static int compile(const cplusplus_compile_options *o, pp *p,
     diagnostic_consumer diagnostics(settings);
     dump_phase phase = request.phase();
     if (phase == dump_phase::lexing) {
-        if (!dump_raw_tokens(o->path, behavior, diagnostics, out.get(),
-                             messages.get())) {
+        owned_buffer storage;
+        source_files where(behavior, diagnostics);
+        where.directory = o->directory;
+        if (!dump_raw_tokens(where.on_disk(o->path, storage), behavior,
+                             diagnostics, out.get(), messages.get())) {
             dprintf(o->errfd, "vcc: error: cannot read %s\n", o->path);
             return 1;
         }
@@ -382,11 +438,28 @@ static int compile(const cplusplus_compile_options *o, pp *p,
     }
     /* (source_files keeps a reference) */
     source_files files(behavior, diagnostics);
+    files.directory = o->directory;
     diagnostics.files = &files;
     files.file_options.preprocessed_input = o->preprocessed_input != 0;
     preprocessor_options options;
     options.predefined_macros = false;
+    options.dependency = compile_dependency;
+    options.dependency_context = p;
     compile_predefines(o, options);
+    if (prefix && phase != dump_phase::none) {
+        dprintf(o->errfd, "vcc: error: -fcxx-prefix= takes no -fcxx-dump=\n");
+        return 1;
+    }
+    if (prefix) {
+        /* the meaning of -include PREFIX, with a stop after it */
+        owned_buffer line;
+        vbuffer_format_append(line.get(), "#include \"%s\"\n", prefix);
+        memcpy(options.command_line.extend(line.size()), line.data(),
+               line.size());
+        options.stop_before_main = true;
+        options.probe = o->probe;
+        options.probe_context = o->probe_context;
+    }
     compile_search_path(o->search, options);
     for (int i = 0; i < o->embed_directory_count; i++)
         options.embed_directories.append(o->embed_directories[i]);
@@ -403,7 +476,7 @@ static int compile(const cplusplus_compile_options *o, pp *p,
             dump_parser_tokens(request, files, tokens, diagnostics, out.get());
         else
             status = compile_translation_unit(o, p, co, request, files, tokens,
-                                              diagnostics, out.get());
+                                              diagnostics, prefix, out.get());
     }
     for (const diagnostic_message &m : diagnostics.messages)
         diagnostics.render(m, messages.get());

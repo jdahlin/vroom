@@ -553,6 +553,22 @@ VPRIV void pp_dependency_add(pp *p, const char *path, uint8_t sys)
     e->location_base = p->next_location_base++;
 }
 
+void pp_dependency_main_set(pp *p, const char *path)
+{
+    for (uint32_t i = 0; i < p->file_count; i++)
+        if (p->files[i].lex_file != &p->builtin_file) {
+            p->files[i].spelled_path = pp_string_copy(p, path, strlen(path));
+            return;
+        }
+}
+
+void pp_dependency_note(pp *p, const char *path, int system)
+{
+    if (p->options->deps)
+        pp_dependency_add(p, pp_string_copy(p, path, strlen(path)),
+                          (uint8_t)(system != 0));
+}
+
 /*
  * Read-ahead for a file entered for the first time: the first candidate of
  * each unconditional #include "x" / <x> (the includer's directory, or the

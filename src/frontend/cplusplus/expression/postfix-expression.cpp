@@ -1748,6 +1748,11 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 owned_array<template_argument> specified;
                 {
                     resolving_call scope(resolving_calls);
+                    /* [basic.lookup.argdep]/3: what unqualified lookup
+                       found stays a candidate beside them */
+                    if (x.entity &&
+                        entity_table[x.entity].kind == entity_kind::function)
+                        using_directive_functions.append(x.entity);
                     if (several)
                         for (entity_index d : declared)
                             using_directive_functions.append(d);

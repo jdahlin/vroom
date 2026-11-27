@@ -299,6 +299,92 @@ static const cmdlib_option vpp_options[] = {
     {OPT_STATS, "--stats", "FILE", "Write batch statistics.", false},
     {0, NULL, NULL, NULL, false}};
 
+/*
+ * --cxx-prefix-batch JOBS -j N ARGS (doc/PLAN-cxx-snapshot.md CS4, Linux and
+ * macOS): ARGS is one compile with -fcxx-prefix=; JOBS has a line per TU, main
+ * file \x1f object.  The process takes ARGS' job to the stop after the prefix,
+ * then forks a child per line, N at a time; each child goes on with its file.
+ * The parent never compiles past the stop.
+ */
+struct vpp_fork_batch {
+    char **mains, **outputs;
+    int count, width;
+};
+
+static void vpp_fork_at_boundary(void *context, struct driver_files *files)
+{
+    struct vpp_fork_batch *b = (struct vpp_fork_batch *)context;
+    int running = 0, failed = 0, status;
+
+    for (int i = 0; i < b->count || running;) {
+        if (i < b->count && running < b->width) {
+            pid_t child = fork();
+
+            if (child < 0) {
+                perror("vpp: fork");
+                _exit(2);
+            }
+            if (!child) {
+                files->main_file = b->mains[i];
+                files->output_file = b->outputs[i];
+                return;
+            }
+            running++;
+            i++;
+            continue;
+        }
+        if (wait(&status) < 0)
+            _exit(2);
+        running--;
+        if (!WIFEXITED(status) || WEXITSTATUS(status))
+            failed++;
+    }
+    if (failed)
+        fprintf(stderr, "vpp: %d of %d jobs failed\n", failed, b->count);
+    _exit(failed != 0);
+}
+
+static int vpp_fork_batch_run(int argc, char **argv)
+{
+    struct vpp_fork_batch b = {NULL, NULL, 0, atoi(argv[4])};
+    FILE *f = fopen(argv[2], "r");
+    char *line = NULL;
+    size_t room = 0;
+    ssize_t n;
+    driver_environment e = {.outfd = 1, .errfd = 2};
+
+    if (!f) {
+        perror(argv[2]);
+        return 2;
+    }
+    while ((n = getline(&line, &room, f)) > 0) {
+        char *tab;
+
+        if (line[n - 1] == '\n')
+            line[n - 1] = 0;
+        tab = strchr(line, 0x1f);
+        if (!tab)
+            continue;
+        *tab = 0;
+        b.mains =
+            (char **)(realloc(b.mains, (size_t)(b.count + 1) * sizeof(char *)));
+        b.outputs = (char **)(realloc(b.outputs,
+                                      (size_t)(b.count + 1) * sizeof(char *)));
+        b.mains[b.count] = strdup(line);
+        b.outputs[b.count] = strdup(tab + 1);
+        b.count++;
+    }
+    free(line);
+    fclose(f);
+    if (b.width < 1)
+        b.width = 1;
+    e.cxx_boundary = vpp_fork_at_boundary;
+    e.cxx_boundary_context = &b;
+    argv[4] = argv[0];
+    int status = driver_job_run(argc - 4, argv + 4, &e);
+    return status;
+}
+
 int main(int argc, char **argv)
 {
     if (cmdlib_wants_help(argc, argv)) {
@@ -308,6 +394,10 @@ int main(int argc, char **argv)
         compiler_options_print();
         return 0;
     }
+
+    if (argc > 5 && !strcmp(argv[1], "--cxx-prefix-batch") &&
+        !strcmp(argv[3], "-j"))
+        return vpp_fork_batch_run(argc, argv);
 
     driver_environment e = {.outfd = 1, .errfd = 2};
     const char *w = getenv("VPP_WARM");

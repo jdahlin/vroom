@@ -1349,7 +1349,7 @@ bool semantic_analysis::emitted_functions_needed()
 
 /* [temp.point]/7: the definitions of the specializations used, after the
    translation unit's declarations (each may use more) */
-void semantic_analysis::instantiate_pending()
+void semantic_analysis::instantiate_pending(bool at_end)
 {
     size_t next_definition = 0;
     bool progress;
@@ -1358,6 +1358,8 @@ void semantic_analysis::instantiate_pending()
         progress = pass_deferred_needs() || progress;
         for (size_t i = 0; i < postponed_bodies.size(); i++) {
             const postponed_body b = postponed_bodies[i];
+            if (!at_end && b.c && !instantiable_early(b.declaration))
+                continue;
             if (b.c && b.member_definition) {
                 if (b.function) {
                     if (!entity_table[b.function].member_definition_needed &&
@@ -1424,6 +1426,8 @@ void semantic_analysis::instantiate_pending()
             entity_index t = instantiations[index].template_entity;
             const function_template ft =
                 function_templates[entity_table[t].instantiation - 1];
+            if (!at_end && !instantiable_early(ft.declaration))
+                continue;
             if (!ft.definition) {
                 instantiations[index].pending = false;
                 continue;
@@ -1432,6 +1436,8 @@ void semantic_analysis::instantiate_pending()
             progress = true;
         }
     } while (progress);
+    if (!at_end)
+        return;
     /* [temp.explicit]/10, /12: an explicit instantiation definition
        instantiated the definitions it names, and takes their verdict */
     for (const explicit_instantiation_unit &x : explicit_instantiations) {

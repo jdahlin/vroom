@@ -15,9 +15,11 @@ extern "C" {
 #endif
 
 struct cplusplus_compile_options {
-    const char *path; /* the main file */
-    int edition;      /* the standard's year as -std= gives it: 98 .. 26 */
-    int gnu;          /* -std=gnu++NN */
+    const char *path; /* the main file, as the command line names it */
+    /* the directory relative paths are read from, or NULL: the process's */
+    const char *directory;
+    int edition; /* the standard's year as -std= gives it: 98 .. 26 */
+    int gnu;     /* -std=gnu++NN */
     /* clang's predefined macros and the command line's -D/-U/-include, as
        #define/#undef/#include lines (the driver's predefine text) */
     const char *predefines;
@@ -36,6 +38,13 @@ struct cplusplus_compile_options {
     const char *const *embed_directories;
     int embed_directory_count;
     int preprocessed_input; /* the main file is a .i or .ii */
+    /* called once with -fcxx-prefix=, after the prefix is analysed and
+       before the main file is opened; may change path.  Or NULL */
+    void (*boundary)(void *context, const char **path);
+    void *boundary_context;
+    /* told of every path the preprocessor asks about (the process's view) */
+    void (*probe)(void *context, const char *path);
+    void *probe_context;
 };
 
 /* 0 if the translation unit compiled; 1 after an error, a diagnostic on

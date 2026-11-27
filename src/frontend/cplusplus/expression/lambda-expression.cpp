@@ -529,6 +529,7 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
     entity_table[c].type = qualified_type::make(
         type_table.of_entity(type_kind::class_type, c), cv_none);
     entity_table[c].lambda = n;
+    closure_entities.append(c);
     if (!function_state.active && deducing_variable &&
         entity_table[deducing_variable].inline_)
         entity_table[c].closure_variable = deducing_variable;

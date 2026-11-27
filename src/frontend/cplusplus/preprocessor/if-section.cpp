@@ -1223,7 +1223,7 @@ bool preprocessor::has_include(expression_reader &r,
     int32_t after = -1, directory;
     if (next)
         after = include_next_start(name);
-    bool system;
+    bool system = false;
     owned_buffer path;
     if (embed)
         *result =
@@ -1231,6 +1231,10 @@ bool preprocessor::has_include(expression_reader &r,
     else
         *result = find_header(header.data() + 1, header.size() - 2, angled,
                               after, path, &directory, &system);
+    /* [impl.clang] a file __has_include or __has_embed found is a
+       dependency */
+    if (*result)
+        note_dependency(path.data(), system);
     if (embed && *result) {
         /* C23 6.10.1: __STDC_EMBED_FOUND__ 1, __STDC_EMBED_EMPTY__ 2; an
            unknown parameter is not found */

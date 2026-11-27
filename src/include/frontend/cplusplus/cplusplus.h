@@ -26,6 +26,8 @@
 #include "common/buffer.h"
 #include "frontend/cplusplus/owned.h"
 
+struct stat;
+
 namespace cplusplus
 {
 
@@ -651,6 +653,11 @@ class source_files
     /* the source file at path, or nullptr if it cannot be read */
     entry *open(const char *path);
     entry *open(const char *path, lexer_options options);
+    /* where relative paths are read from (the client's directory in a
+       server), or nullptr: the process's.  Names stay as written. */
+    const char *directory = nullptr;
+    /* path as the filesystem is to see it: itself, or in storage */
+    const char *on_disk(const char *path, owned_buffer &storage) const;
     /* the options of the files open() reads */
     lexer_options file_options;
     /* a pragma that changes the floating-point environment or its
@@ -758,6 +765,17 @@ struct preprocessor_options {
     bool predefined_macros = true;
     /* [cpp.include]/6: "up to an implementation-defined nesting limit" */
     unsigned include_nesting_limit = 200;
+    /* told of each file the translation unit depends on, as spelled, at
+       every use of it: what is included (a skipped file too), embedded or
+       found by __has_include */
+    void (*dependency)(void *context, const char *path, bool system) = nullptr;
+    void *dependency_context = nullptr;
+    /* the end of the command line's includes is an end of the tokens: the
+       main file is opened and entered by enter_main (-fcxx-prefix=) */
+    bool stop_before_main = false;
+    /* told of every path stat_file asks about, found or not */
+    void (*probe)(void *context, const char *path) = nullptr;
+    void *probe_context = nullptr;
     /* for clang's -dM: keep definitions in the order made */
     bool keep_definition_order = false;
 };
@@ -988,6 +1006,15 @@ class preprocessor
                            directive_kind kind);
     bool header_name_from_tokens(const preprocessing_token &first,
                                  owned_buffer &header, source_location *at);
+    void note_dependency(const char *path, bool system);
+    /* after start() with stop_before_main and the tokens' end: the main
+       file; false if it cannot be read */
+    bool enter_main(const char *path);
+    bool main_pending = false;
+    /* __DATE__ and __TIME__ of now */
+    void set_translation_time();
+    /* stat of a path as spelled (source_files::directory) */
+    int stat_file(const char *path, struct stat *st) const;
     bool find_header(const char *name, size_t length, bool angled,
                      int32_t after_directory, owned_buffer &path,
                      int32_t *directory, bool *system);

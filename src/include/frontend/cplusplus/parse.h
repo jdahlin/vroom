@@ -35,6 +35,9 @@ using token_index = uint32_t;
 class token_stream
 {
   public:
+    /* the tokens ended but the source goes on (preprocessor::enter_main):
+       the end-of-file token is taken back */
+    void resume();
     explicit token_stream(preprocessor &pp);
     token_stream(const token_stream &) = delete;
     token_stream &operator=(const token_stream &) = delete;
@@ -97,7 +100,13 @@ class token_stream
     bool has_lookahead = false;
     bool complete = false;
     preprocessing_token read();
-    void make_through(token_index i);
+    /* the tokens up to i exist: almost always, so tested here */
+    void make_through(token_index i)
+    {
+        if (!complete && tokens.size() <= i)
+            make_more(i);
+    }
+    void make_more(token_index i);
 };
 
 /* ---- the syntax tree ---------------------------------------------------- */
@@ -785,6 +794,12 @@ class parser
 
     /* [basic.link]: translation-unit; the tree's root */
     node_index translation_unit();
+    /* the declarations up to the tokens' end, of a translation unit that
+       translation_unit() then finishes (not a module unit); their nodes */
+    void prefix_declarations(owned_array<node_index> *out);
+    bool unit_begun = false;
+    size_t unit_mark = 0;
+    token_index unit_first = 0;
     /* [module] */
     bool at_phase4_keyword(preprocessing_token_kind kind, unsigned ahead = 0);
     bool at_module_declaration();

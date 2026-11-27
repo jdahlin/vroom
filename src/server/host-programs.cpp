@@ -121,6 +121,9 @@ VPRIV int vccd_host_program_compile(const struct vccd_request *r)
                                 .errfd = r->fds[2],
                                 .envp = r->envp,
                                 .infd = r->fds[0]};
+        int status = vccd_cxx_prefix_compile(r->argc, r->argv, &e);
+        if (status >= 0)
+            return status;
         return driver_job_run(r->argc, r->argv, &e);
     }
 

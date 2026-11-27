@@ -1976,6 +1976,25 @@ class semantic_analysis
 
     /* [basic.link]: every declaration of the translation unit, in order */
     void translation_unit();
+    /* translation_unit() in parts: begin, the top-level declarations in
+       order, then end; tree_grew after the parser added to the tree */
+    void begin_translation_unit();
+    void analyse_declarations(const node_index *first, size_t count);
+    void end_translation_unit();
+    void instantiate_so_far()
+    {
+        instantiate_pending(false);
+    }
+    void tree_grew()
+    {
+        syntax_cx.nodes = tree.node_data();
+        syntax_cx.child_lists = tree.child_data();
+    }
+    /* what allocation_names_spelled answered while the tokens were not
+       all made, or none */
+    uint32_t allocation_names_answered = UINT32_MAX;
+    /* the operator new and delete tokens made so far */
+    uint32_t allocation_names_spelled();
     /* one declaration of a declaration-seq */
     analysis_result declaration(SyntaxRef n);
     /* for -fcxx-dump=type-claims: the value of each analysed prvalue that
@@ -1986,6 +2005,9 @@ class semantic_analysis
 
     types type_table;
     entities entity_table;
+    /* the closure types made, in increasing order: numbering one among
+       its context's looks at these, not at every entity */
+    owned_array<entity_index> closure_entities;
     /* a dependent value's written template arguments (types): those of an
        alias template's specialization as the qualifier, Q<args>::name
        (dependent_alias_value), and of a member function template called,
@@ -5944,7 +5966,14 @@ class semantic_analysis
     analysis_result need_specialization_definition(SyntaxRef at,
                                                    entity_index f);
     /* the definitions pending_definitions waits for */
-    void instantiate_pending();
+    void instantiate_pending(bool at_end = true);
+    /* before the end only a system header's templates: the program may not
+       specialize what those call, so their point of instantiation is free;
+       a project's may be followed by a specialization ([temp.point]/7) */
+    bool instantiable_early(SyntaxRef declaration) const
+    {
+        return in_system_header(tree[declaration].first_token);
+    }
     /* a lazily named specialization (instantiation_record::lazy) defined
        now: a use that needs the class complete (a call's result, a member
        lookup, its size); nothing for any other class */
@@ -7704,7 +7733,6 @@ class semantic_analysis
        more often, a function lookup misses may be the one a call would
        choose (allocation_names_spelled) */
     uint32_t allocation_declarations_analysed = 0;
-    uint32_t allocation_names_spelled();
     /* [expr.new]/11, [expr.delete]/9: the functions named kind found in
        class c (0: none; in_class) or else in the global scope;
        class_complete: at c's closing }, whose members (and its bases') are
@@ -7856,7 +7884,7 @@ class semantic_analysis
     token_stream &tokens;
     const parser &syntax_parser;
     diagnostic_consumer &diagnostics;
-    const SyntaxContext syntax_cx;
+    SyntaxContext syntax_cx;
     SyntaxScope syntax_scope{syntax_cx};
 };
 

@@ -14,8 +14,30 @@
 namespace cplusplus
 {
 
+void parser::prefix_declarations(owned_array<node_index> *out)
+{
+    unit_begun = true;
+    unit_mark = begin_node();
+    unit_first = position;
+    while (!at_end())
+        declaration();
+    for (size_t i = unit_mark; i < pending.size(); i++)
+        if (!pending[i].is_token())
+            out->append(pending[i].node());
+}
+
 node_index parser::translation_unit()
 {
+    if (unit_begun) {
+        while (!at_end())
+            declaration();
+        if (position != unit_first)
+            finish_node(syntax_kind::declaration_seq, unit_mark, unit_first);
+        tree.root =
+            finish_node(syntax_kind::translation_unit, unit_mark, unit_first);
+        pending.resize(unit_mark);
+        return tree.root;
+    }
     size_t mark = begin_node();
     token_index first = position;
     /* the second alternative: a module unit ([module.unit]), from C++20 */

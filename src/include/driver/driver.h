@@ -16,6 +16,10 @@
 #define VCC_PPDRIVER_H
 
 #include <stdbool.h>
+/* the files of a -c job; depfile NULL: no -MD */
+struct driver_files {
+    const char *main_file, *output_file, *depfile, *depfile_target;
+};
 typedef struct driver_environment {
     const char
         *cwd; /* relative paths are relative to this (NULL: process cwd) */
@@ -28,6 +32,15 @@ typedef struct driver_environment {
     const char *
         input_text; /* non-NULL: the input `-` already read (vccd keeps it for a fallback) */
     size_t input_length;
+    /* with -fcxx-prefix=: called at the stop after the prefix, and may give
+       the job other files (vccd's prefix worker and vpp --cxx-prefix-batch
+       fork there).  Only for jobs without -g. */
+    void (*cxx_boundary)(void *context, struct driver_files *files);
+    void *cxx_boundary_context;
+    /* every path the C++ preprocessor asks the filesystem about, found or
+       not (as the process is to see it); or NULL */
+    void (*cxx_probe)(void *context, const char *path);
+    void *cxx_probe_context;
 } driver_environment;
 
 /* the client's umask for files a job creates (-1: the process's own) */

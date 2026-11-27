@@ -54,7 +54,18 @@ uint32_t token_stream::target_pragma_at(token_index i)
     return in_effect;
 }
 
-void token_stream::make_through(token_index i)
+void token_stream::resume()
+{
+    make_through(static_cast<token_index>(-2));
+    has_lookahead = false;
+    preprocessing_tokens.resize(first_piece[tokens.size() - 1]);
+    first_piece.resize(tokens.size() - 1);
+    identifiers.resize(tokens.size() - 1);
+    tokens.resize(tokens.size() - 1);
+    complete = false;
+}
+
+void token_stream::make_more(token_index i)
 {
     while (!complete && tokens.size() <= i) {
         preprocessing_token first = read();

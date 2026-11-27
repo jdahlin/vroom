@@ -179,6 +179,16 @@ void source_files::place(entry &e)
     next_base += e.file.size + 1;
 }
 
+const char *source_files::on_disk(const char *path, owned_buffer &storage) const
+{
+    if (!directory || path[0] == '/')
+        return path;
+    storage.clear();
+    vbuffer_format_append(storage.get(), "%s/%s", directory, path);
+    vbuffer_append(storage.get(), "", 1);
+    return storage.data();
+}
+
 source_files::entry *source_files::open(const char *path)
 {
     return open(path, file_options);
@@ -187,7 +197,8 @@ source_files::entry *source_files::open(const char *path)
 source_files::entry *source_files::open(const char *path, lexer_options o)
 {
     source_file read;
-    if (!read.open(path))
+    owned_buffer storage;
+    if (!read.open(on_disk(path, storage)))
         return nullptr;
     entry &e = files.make(behavior, diagnostics, o);
     e.file = static_cast<source_file &&>(read);
