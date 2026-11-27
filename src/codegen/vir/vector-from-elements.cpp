@@ -112,6 +112,61 @@ static uint32_t virbuild_elements_word(const virbuild_elements_at *W,
     return word;
 }
 
+/* a 256-bit vector of 32- and 64-bit stores of different values: each 64 bits
+ * to every lane, then blended into its own; 0 when the stores are not those.
+ * (Built in registers: a load of the slot could not be forwarded from the
+ * narrower stores.) */
+static uint32_t virbuild_elements_blend(const virbuild_elements_at *W,
+                                        const virbuild_elements *E, uint32_t ty)
+{
+    codegen_context *e = W->context;
+    virbuild_context *V = e->vir_builder;
+    uint32_t word[4], built = 0;
+
+    if (vir_type_size(ty) != 32 || E->covered != 0xffffffffu)
+        return 0;
+    for (uint32_t q = 0; q < 4; q++) {
+        uint32_t at = 8 * q, width = E->width[at];
+
+        if (width == 8) {
+            if (V->insns[E->value[at]].insn.type != VIR_TYPE_I64)
+                return 0;
+        } else if (width != 4 || E->width[at + 4] != 4) {
+            return 0;
+        }
+    }
+    for (uint32_t q = 0; q < 4; q++) {
+        uint32_t at = 8 * q;
+
+        word[q] = E->value[at];
+        if (E->width[at] == 8)
+            continue;
+        uint32_t half[2];
+
+        for (uint32_t i = 0; i < 2; i++)
+            half[i] = virbuild_elements_insn(
+                W, VIR_OP_EXT, VIR_TYPE_I64,
+                virbuild_elements_i32(W, E->value[at + 4 * i]), 0, 0);
+        half[1] = virbuild_elements_insn(
+            W, VIR_OP_SHL, VIR_TYPE_I64, half[1],
+            virbuild_constant_integer(e, VIR_TYPE_I64, 32), 0);
+        word[q] = virbuild_elements_insn(W, VIR_OP_OR, VIR_TYPE_I64, half[0],
+                                         half[1], 0);
+    }
+    for (uint32_t q = 0; q < 4; q++) {
+        uint32_t every =
+            virbuild_elements_insn(W, VIR_OP_VSPLAT, ty, word[q], 0, 0);
+
+        if (q)
+            every = virbuild_elements_insn(W, VIR_OP_X86, ty, built, every,
+                                           x64_x86_operator_code("pblendd") |
+                                               (uint32_t)X64_X86_IMMEDIATE |
+                                               (3u << (2 * q)) << 16);
+        built = every;
+    }
+    return built;
+}
+
 /* the 256- or 512-bit vector of one value in every element: that value repeated to 64
  * bits, then to every lane; 0 when E's stores are not that */
 static uint32_t virbuild_elements_wide(const virbuild_elements_at *W,
@@ -182,8 +237,13 @@ static uint32_t virbuild_elements_vector(const virbuild_elements_at *W,
     uint32_t built = 0;
     uint32_t made = 0;
 
-    if (vir_type_size(ty) > 16)
-        return virbuild_elements_wide(W, E, ty);
+    if (vir_type_size(ty) > 16) {
+        uint32_t same = virbuild_elements_wide(W, E, ty);
+
+        if (same)
+            return same;
+        return virbuild_elements_blend(W, E, ty);
+    }
     if (E->covered != 0xffff)
         return 0;
     if (E->width[0] == 8) {
