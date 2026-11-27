@@ -661,6 +661,20 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     for (uint32_t i = 0; i < of.parameter_count; i++)
         bind_template_argument(scope, template_parameter_entities[names + i],
                                template_arguments[first + i]);
+    /* a parameter the class's declaration left unnamed: the class's
+       members see the class template's names, so the definition's name of it
+       is bound there ([temp.local], [basic.scope.temp]) */
+    for (uint32_t i = 0; i < of.parameter_count && x.specialization; i++) {
+        uint32_t mine =
+            entity_table[template_parameter_entities[names + i]].name;
+        if (mine &&
+            !entity_table[template_parameter_entities[of.first_parameter + i]]
+                 .name &&
+            !entity_table.find(x.specialization, mine))
+            bind_template_argument(x.specialization,
+                                   template_parameter_entities[names + i],
+                                   template_arguments[first + i]);
+    }
     if (o.outer_record) {
         /* (the qualifier's outer class template's parameters, as bound for
            its specialization) */
@@ -903,7 +917,9 @@ bool semantic_analysis::parameter_names_after_declarator(SyntaxRef definition,
             entity_table[template_parameter_entities[mine + i]].name;
         uint32_t class_name =
             entity_table[template_parameter_entities[theirs + i]].name;
-        if (mine_name == class_name)
+        /* (a parameter the class's declaration left unnamed has no name
+           to confuse the definition's with) */
+        if (mine_name == class_name || !class_name)
             continue;
         for (token_index t = after; t < definition.end_token(); t++)
             if (tokens[t].kind == token_kind::identifier &&
