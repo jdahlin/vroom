@@ -593,6 +593,8 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
     }
     case VIR_OP_CALL:
     case VIR_OP_INVOKE: {
+        bool musttail =
+            i->op == VIR_OP_CALL && (i->flags & VIR_INSN_FLAG_CALL_MUSTTAIL);
         if (L->uses_ymm) /* no 256-bit value is passed yet */
             x64_vir_text_append(L, "\tvzeroupper\n");
         uint32_t ng = L->function->extra[i->c];
@@ -611,6 +613,15 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         if (L->ms && total < 32)
             total = 32; /* the shadow space */
         total = (total + 15) & ~15;
+        if (musttail && (total || L->ms)) /* the direct emitter says why */
+            x64_vir_fail(L, VIRBUILD_FAILURE(musttail));
+        /* a sibling call: nothing on the stack, and al free for the callee's
+           address (a variadic call through a pointer needs both) */
+        bool sibling =
+            !musttail && i->op == VIR_OP_CALL && !total && !L->ms &&
+            !(p[0] != VIR_REGISTER_NONE &&
+              VIR_SIGNATURE_IS_VARIADIC(L->function->extra[i->b])) &&
+            virbuild_call_is_sibling(e, L->function, L->ret32, L->tail, b, v);
         if (total)
             x64_record_emit(e, X64_OP_ADJSP)->immediate = -total;
         for (uint32_t k = 0; k < ng; k++) {
@@ -678,6 +689,20 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             }
         else if (VIR_SIGNATURE_IS_VARIADIC(L->function->extra[i->b]))
             x64_record_emit_move_immediate(e, RAX, nf);
+        if (musttail || sibling) {
+            if (indirect)
+                x64_mov(e, RAX, R11);
+            record *jump = x64_record_emit(e, X64_OP_TAILCALL);
+            jump->condition = indirect;
+            if (!indirect) {
+                const vir_insn *callee = &L->function->insns[i->a];
+                codegen_reference_note(e, callee->a);
+                jump->reference = callee->a;
+            }
+            e->has_calls = true;
+            L->skip = v + 1;
+            return;
+        }
         record *call;
         /* an invoke: the call between two marks, a site of the exception table */
         uint32_t eh_site = 0;

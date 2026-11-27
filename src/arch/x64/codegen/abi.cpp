@@ -572,7 +572,21 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
                              ast_qualified_type rt)
 {
     cc *c = e->compile_context;
+    bool musttail = e->musttail, sibling = e->sibling;
 
+    e->musttail = false;
+    e->sibling = false;
+    if (musttail) {
+        const attrs *own =
+            codegen_symbol_attributes(c, e->walk_state->function_symbol);
+
+        if (e->msabi || e->x64_context->msfn)
+            codegen_musttail_refuse(e, "the Microsoft calling convention");
+        if (own && own->interrupt)
+            codegen_musttail_refuse(e, "an interrupt function");
+        if (r && r->is_in_memory && !r->is_x87 && !r->is_sse_up)
+            codegen_musttail_refuse(e, "a result returned in memory");
+    }
     if (e->msabi)
         return x64w_call(e, ref, fn, a, n, variadic, r, rt);
 
@@ -684,6 +698,23 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         place[k] = total;
         total += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
     }
+    if (musttail) {
+        if (total)
+            codegen_musttail_refuse(e, "arguments passed on the stack");
+        if (X->outstanding_pushes)
+            codegen_musttail_refuse(e, "values pushed across the call");
+        /* (a return statement's: only the callee's address lives, and
+           nothing is read after the jump) */
+        saved = fsaved = 0;
+    }
+    /* a call in tail position: a jump where musttail could be one */
+    sibling = sibling && !total && !X->outstanding_pushes && stackalign <= 16 &&
+              !(r && r->is_in_memory && !r->is_x87 && !r->is_sse_up) &&
+              !(variadic && fn) && !e->msabi && !X->msfn && !X->interrupt &&
+              !CODEGEN_IS_WIN64(c);
+    if (sibling)
+        saved = fsaved = 0; /* (nothing is live in a tail position) */
+    bool jump = musttail || sibling;
     x64_temporaries_save(e, saved, fsaved);
     if (stackalign > 16) {
         codegen_lvalue slot = x64_fr(savedsp = walk_slot_temporary(e, 8, 8));
@@ -801,7 +832,7 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
     /* C++ exceptions: the call's bounds for the exception table, with the cleanup it unwinds into */
     walk_state *EW = e->walk_state;
     bool eh =
-        EW &&
+        !jump && EW &&
         EW->eh_fn; /* (a landing pad's calls too, no pad of their own: an address the table lacks terminates) */
 
     if (eh) {
@@ -811,7 +842,14 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         EW->eh_sites[k].node = walk_eh_call_node(e);
         x64_record_emit(e, X64_OP_EHMARK)->label = EW->eh_sites[k].begin;
     }
-    if (fn) {
+    if (jump) {
+        if (fn)
+            x64_mov(e, RAX, R11);
+        i = x64_record_emit(e, X64_OP_TAILCALL);
+        i->condition = fn != NULL;
+        if (!fn)
+            i->reference = ref;
+    } else if (fn) {
         x64_record_emit_three_registers(e, X64_OP_CALLR, 8, X64_REGISTER_NONE,
                                         R11, X64_REGISTER_NONE);
     } else {

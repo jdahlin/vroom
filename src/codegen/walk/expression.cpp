@@ -2950,6 +2950,7 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
     uint32_t ref = 0;
     codegen_value fn = {0};
     walk_argument argbuf[64], *args = argbuf, r = {0};
+    bool musttail = x->aux == AST_CALL_MUSTTAIL;
     bool var = (f->flags &
                 (AST_TYPE_FLAG_VARIADIC | AST_TYPE_FLAG_NO_PROTOTYPE)) != 0,
          rec_ = walk_type_is_in_memory(e, f->base);
@@ -2964,13 +2965,25 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
     if (x->c > sizeof argbuf / sizeof *argbuf &&
         !(args = (walk_argument *)(malloc((size_t)x->c * sizeof *args))))
         codegen_fatal_report(e, x->loc, "out of memory");
+    if (musttail) {
+        codegen_musttail_check(e, n, e->walk_state->function_symbol);
+        if (e->walk_state->inline_call || e->walk_state->instance)
+            codegen_musttail_refuse(e, "the function is inlined");
+        if (e->walk_state->cleanup_count)
+            codegen_musttail_refuse(e, "an object to destroy after the call");
+    }
     if (KIND(c, f->base) != AST_TYPE_VOID)
         walk_scalar_check(e, n, f->base);
     if (fx->op == AST_NODE_CAST && fx->aux == AST_CAST_FUNCTION_DECAY &&
         N(fx->a)->op == AST_NODE_VARIABLE) {
         uint32_t s = codegen_symbol_canonical(c, N(fx->a)->a);
 
-        if (c->syms[s].kind == AST_SYMBOL_BUILTIN) {
+        if (musttail) {
+            /* the call itself: nothing folded, inlined or replaced */
+            codegen_reference_note(
+                e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s));
+            ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s);
+        } else if (c->syms[s].kind == AST_SYMBOL_BUILTIN) {
             int kind = cc_builtin_library_kind(c->syms[s].val);
             int64_t bi = c->syms[s].val;
 
@@ -3103,6 +3116,17 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
     e->has_calls = true;
     em_abi(e, ft);
     {
+        if (musttail)
+            e->current_location = x->loc;
+        e->musttail = musttail;
+        e->sibling = false;
+        if (!musttail && em_tail_site(e, n) && !e->walk_state->inline_call &&
+            !e->walk_state->instance && !e->walk_state->cleanup_count &&
+            !e->walk_state->eh_fn)
+            e->sibling =
+                !ref ||
+                (CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_SYMBOL &&
+                 em_tail_target_ok(e, CODEGEN_REFERENCE_INDEX(ref)));
         codegen_value v =
             WALK_LOWER(call)(e, ref, ref ? NULL : &fn, args, (int)na, var,
                              rec_ ? &r : NULL, f->base);

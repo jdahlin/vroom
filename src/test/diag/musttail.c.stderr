@@ -1,0 +1,46 @@
+musttail.c:12:31: error: 'musttail' attribute requires that the return value is the result of a function call
+   12 |     __attribute__((musttail)) return x;
+      |                               ^
+musttail.c:17:31: error: cannot perform a tail call to function 'g' because its signature is incompatible with the calling function
+   17 |     __attribute__((musttail)) return g(x);
+      |                    -          ^
+      |                    |
+      |                    tail call required by 'musttail' attribute here
+musttail.c:5:6: note: target function has different return type ('int' expected but has 'long')
+    5 | long g(long);
+      |      ^
+musttail.c:17:20: note: tail call required by 'musttail' attribute here
+musttail.c:22:31: error: cannot perform a tail call to function 'two' because its signature is incompatible with the calling function
+   22 |     __attribute__((musttail)) return two(x, 0);
+      |                    -          ^
+      |                    |
+      |                    tail call required by 'musttail' attribute here
+musttail.c:8:5: note: target function has different number of parameters (expected 1 but has 2)
+    8 | int two(int, char *);
+      |     ^
+musttail.c:22:20: note: tail call required by 'musttail' attribute here
+musttail.c:27:31: error: cannot perform a tail call to function 'two' because its signature is incompatible with the calling function
+   27 |     __attribute__((musttail)) return two(x, 0);
+      |                    -          ^
+      |                    |
+      |                    tail call required by 'musttail' attribute here
+musttail.c:8:5: note: target function has type mismatch at 2nd parameter (expected 'char *' but has 'int *')
+    8 | int two(int, char *);
+      |     ^
+musttail.c:27:20: note: tail call required by 'musttail' attribute here
+musttail.c:32:20: error: 'musttail' attribute only applies to return statements
+   32 |     __attribute__((musttail)) cl(0);
+      |                    ^
+musttail.c:37:31: error: 'musttail' attribute may not be used with variadic functions
+   37 |     __attribute__((musttail)) return v(x);
+      |                               ^
+musttail.c:43:31: error: cannot perform a tail call from this return statement
+   42 |     __attribute__((cleanup(cl))) int y = 0;
+      |                                      - jump exits scope of variable with __attribute__((cleanup))
+   43 |     __attribute__((musttail)) return f(x);
+      |                               ^
+musttail.c:42:38: note: jump exits scope of variable with __attribute__((cleanup))
+musttail.c:48:20: error: 'musttail' attribute takes no arguments
+   48 |     __attribute__((musttail(1))) return f(x);
+      |                    ^
+8 errors generated.

@@ -28,6 +28,9 @@ env = dict(os.environ, VCC_THREADS='1')
 # VIR's checks and reports (doc/OPTIMIZATION.md): -O3 has the vectorizer, -O2 not
 aids = ['-fvir-verify', '-fvir-report', '-fvir-check', '-fvir-vectorize-report']
 
+# a transfer to another function: a call, or the jmp a call in tail position is (not to a .L label)
+TRANSFER = r'\b(?:call\w*|jmp(?=\s+[A-Za-z_]))\s+'
+
 def run(cmd, **kw):
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=60, **kw)
     if p.returncode:
@@ -152,7 +155,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 if '%rsp' in body or '%rbp' in body:
                     raise SystemExit('token_copy: ABI words still round-trip through a temporary')
                 body = text.split('wrapper:\n', 1)[1].split('.Lfunc_end', 1)[0]
-                if not re.search(r'\bcall\w*\s+produce\b', body) or 'movups' in body:
+                if not re.search(TRANSFER + r'produce\b', body) or 'movups' in body:
                     raise SystemExit('wrapper: expected a forwarded result buffer')
             if filename == 'vir_byte_or.c':
                 for name in required_more:
@@ -172,21 +175,21 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                         raise SystemExit(f'{name}: mixed-width integer stores prevented slot promotion')
             if filename == 'vir_inline_large.c':
                 body = asm.read_text().split('large:\n', 1)[1].split('.Lfunc_end', 1)[0]
-                if not re.search(r'\bcall\w*\s+helper\b', body):
+                if not re.search(TRANSFER + r'helper\b', body):
                     raise SystemExit('large: once-only bonus copied an oversized helper into a large caller')
             if filename == 'vir_x86_inline.c':
                 body = asm.read_text().split('work:\n', 1)[1].split('.Lfunc_end', 1)[0]
-                if re.search(r'\bcall\w*\b', body):
+                if re.search(TRANSFER, body):
                     raise SystemExit('work: single-call helper was not inlined')
             if filename == 'vir_inline_context.c':
                 bodies = {name: asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                           for name in required_more}
                 for name in ('constant0', 'constant1', 'wrapped'):
-                    if re.search(r'\bcall\w*\b', bodies[name]):
+                    if re.search(TRANSFER, bodies[name]):
                         raise SystemExit(f'{name}: selected helper was not inlined')
                 for name, target in [('layer1', 'wrapped'), ('layer2', 'wrapped'), ('general', 'specialize'),
                                      ('ignored0', 'unused'), ('ignored1', 'unused')]:
-                    if not re.search(r'\bcall\w*\s+' + target + r'\b', bodies[name]):
+                    if not re.search(TRANSFER + target + r'\b', bodies[name]):
                         raise SystemExit(f'{name}: helper with no applicable inline budget was copied')
             if filename == 'vir_x86_select.c':
                 for name in required_more:
@@ -218,11 +221,11 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 if '%rsp' in local or '%rbp' in local:
                     raise SystemExit('frame_words: two-word local still round-trips through the frame')
                 body = asm.read_text().split('nonzero:\n', 1)[1].split('.Lfunc_end', 1)[0]
-                if 'rep ' in body or re.search(r'\bcall\w*\s+memset', body):
+                if 'rep ' in body or re.search(TRANSFER + r'memset', body):
                     raise SystemExit('nonzero: a small constant fill should be stored in place')
                 for name in ('copy129', 'zero257', 'dynamic'):
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
-                    if 'rep ' not in body and not re.search(r'\bcall\w*\s+mem(?:cpy|set)', body):
+                    if 'rep ' not in body and not re.search(TRANSFER + r'mem(?:cpy|set)', body):
                         raise SystemExit(f'{name}: missing generic block-operation fallback')
             if filename == 'vir_x86_cmpmem.c':
                 for name, op in [('left', 'cmpq'), ('right', 'cmpq'), ('full32', 'cmpl'), ('sign8', 'cmpb'), ('zero8', 'cmpb'), ('sign16', 'cmpw'), ('indexed', 'cmpq')]:

@@ -15,6 +15,7 @@ static void vx_target_block_begin(void *ctx, uint32_t b)
     x64_vir_context *L = (x64_vir_context *)ctx;
 
     L->map_block = b;
+    L->skip = 0;
     L->compare_condition = UINT32_MAX;
     L->memory_value = L->memory_skip = L->scaled_value = L->scaled_skip =
         L->big_endian_value = L->test_value = L->compare_memory_value =
@@ -389,13 +390,35 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
     L.rotations = layout + 2 * f->block_count;
     L.chase = layout + 3 * f->block_count;
     L.loops = &V->loops;
+    {
+        const ctype *ft =
+            T(e->compile_context, e->compile_context->syms[sym].ty);
+        uint8_t *frame_address =
+            (uint8_t *)calloc((size_t)f->insn_count + 1, 1);
+
+        if (!frame_address)
+            codegen_fatal_report(e, e->current_location, "out of memory");
+        /* a parameter in memory is an address in the incoming arguments */
+        for (uint32_t i = f->constant_count; i < f->insn_count; i++)
+            if (f->insns[i].op == VIR_OP_PARAM &&
+                x64_vir_stack_object_size(f, f->signature,
+                                          x64_vir_param_word(f, &f->insns[i])))
+                frame_address[i] = 1;
+        L.ret32 = KIND(e->compile_context, ft->base) != AST_TYPE_VOID &&
+                  codegen_type_is_integer(e->compile_context, ft->base) &&
+                  codegen_type_size(e->compile_context, ft->base) == 4;
+        /* (a result in memory: the return still loads its address) */
+        L.tail = !ms && !L.result_pointer_slot && em_tail_caller_ok(e, sym) &&
+                 !virbuild_tail_call_reason(e, f, frame_address);
+        free(frame_address);
+    }
     L.drv = VCC_LITERAL(
         virbuild_lowering, .target = &vx_lowering_target, .ctx = &L, .f = f,
         .o = &V->allocation, .lp = &V->loops, .order = L.order,
         .position = L.position, .rotation = L.rotations, .chase = L.chase,
         .path = layout + 4 * f->block_count, .block_label = L.label,
         .optimize = !e->unit->cleanups_disabled,
-        .rotate = e->unit->options->optimize.rotate_loops,
+        .rotate = e->unit->options->optimize.rotate_loops, .skip_at = &L.skip,
         .row = e->unit->options->debug ? x64_dbgrow : NULL, .row_e = e);
 
     for (int r = 0; r < 16; r++) {

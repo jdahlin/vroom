@@ -364,7 +364,7 @@ def check_unreachable(assembly, arch):
     else:
         for name in ['dc_debugtrap', 'dc_builtin_debugtrap']:
             text = body(assembly, name, False)
-            if not re.search(r'\bbrk\b', text) or not re.search(r'\bbl\s+dc_effect\b', text):
+            if not re.search(r'\bbrk\b', text) or not re.search(r'\bbl?\s+dc_effect\b', text):
                 raise RuntimeError(f'{name}: removed resumable trap or continuation\n{text}')
 
 
@@ -676,16 +676,21 @@ def check_tails(assembly, arch, level, cfi=False, disabled=False):
         'tc_ptr_swap': 'tc_pointer_pair', 'tc_constants': 'tc_pack32',
         'tc_cycle6': 'tc_six', 'tc_duplicate': 'tc_six', 'tc_empty': 'tc_zero',
     }
-    negative = {
-        'tc_conversion': 'tc_sum32', 'tc_arithmetic': 'tc_sum32',
-        'tc_effect_argument': 'tc_sum32',
-        'tc_cast': 'tc_sum32', 'tc_local': 'tc_sum32', 'tc_address': 'tc_load',
-        'tc_cleanup': 'tc_sum32', 'tc_vla': 'tc_sum32', 'tc_stack9': 'tc_nine',
+    # Calls in tail position of a function that lets no frame address out.
+    general = {
+        'tc_arithmetic': 'tc_sum32', 'tc_effect_argument': 'tc_sum32',
+        'tc_cast': 'tc_sum32', 'tc_local': 'tc_sum32',
         'tc_vararg': 'tc_vararg_target', 'tc_fp': 'tc_fp_target',
-        'tc_narrow': 'tc_byte_target', 'tc_noopt': 'tc_sum32',
-        'tc_disabled': 'tc_sum32', 'tc_notail': 'tc_notail_target',
-        'tc_twice': 'tc_twice_target', 'tc_caller_twice': 'tc_sum32',
+        'tc_narrow': 'tc_byte_target',
     }
+    negative = {
+        'tc_conversion': 'tc_sum32', 'tc_address': 'tc_load',
+        'tc_cleanup': 'tc_sum32', 'tc_vla': 'tc_sum32', 'tc_stack9': 'tc_nine',
+        'tc_noopt': 'tc_sum32', 'tc_disabled': 'tc_sum32',
+        'tc_notail': 'tc_notail_target', 'tc_twice': 'tc_twice_target',
+        'tc_caller_twice': 'tc_sum32',
+    }
+    (negative if wasm else positive).update(general)
     (positive if arch == 'aarch64' else negative)['tc_cycle8'] = 'tc_eight'
     call = r'\bcall\s+' if wasm else r'\b(?:callq?|bl)\s+'
     jump = r'\b(?:jmpq?|b)\s+'
@@ -703,7 +708,8 @@ def check_tails(assembly, arch, level, cfi=False, disabled=False):
         # The transfer must follow frame restoration and end the instruction
         # stream. Avoid counting incidental moves or fixing register choices.
         after = text[tail.end():]
-        if re.search(r'^\s*[a-z][\w.]*\s', after, re.M):
+        # (a general one may leave the unused shared epilogue behind it)
+        if name not in general and re.search(r'^\s*[a-z][\w.]*\s', after, re.M):
             raise RuntimeError(f'{name}: executable code follows tail transfer\n{text}')
         before = text[:tail.start()]
         if arch == 'x86_64' and re.search(r'\bpushq\s+%rbp\b', before):
@@ -722,9 +728,19 @@ def check_tails(assembly, arch, level, cfi=False, disabled=False):
         if not re.search(call + re.escape(callee) + r'\b', text):
             raise RuntimeError(f'{name}: expected conservative ordinary call to {callee}\n{text}')
     text = body(assembly, 'tc_indirect', wasm)
-    indirect = r'\bcall_indirect\b' if wasm else r'\bcallq?\s+\*' if arch == 'x86_64' else r'\bblr\s'
+    if wasm:
+        indirect = r'\bcall_indirect\b'
+    elif level == 0 or disabled:
+        if arch == 'x86_64':
+            indirect = r'\bcallq?\s+\*'
+        else:
+            indirect = r'\bblr\s'
+    elif arch == 'x86_64':
+        indirect = r'\bjmpq?\s+\*'
+    else:
+        indirect = r'\bbr\s+x16\b'
     if not re.search(indirect, text):
-        raise RuntimeError(f'tc_indirect: expected ordinary indirect call\n{text}')
+        raise RuntimeError(f'tc_indirect: expected an indirect call or jump\n{text}')
 
 
 def check_deadresults(assembly, arch):

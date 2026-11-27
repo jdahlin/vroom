@@ -561,6 +561,10 @@ CC_PRIVATE uint32_t cc_node_new(cc *c, int op, ast_qualified_type ty,
                                 uint32_t loc);
 static inline void cc_node_span_set(cc *c, uint32_t n, uint32_t b);
 CC_PRIVATE diag_span cc_node_range(cc *c, uint32_t n);
+/* musttail.cpp */
+CC_PRIVATE void cc_musttail_attribute_note(cc *c, const attrs *a);
+CC_PRIVATE void cc_musttail_return_check(cc *c, uint32_t e, uint32_t loc,
+                                         uint32_t attribute_loc);
 CC_PRIVATE diag_span
 cc_node_range_bare(cc *c, uint32_t n); /* without the parentheses */
 CC_PRIVATE void cc_report_forward_note(cc *c, ast_qualified_type t);

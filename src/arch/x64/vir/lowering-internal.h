@@ -31,11 +31,14 @@ typedef struct x64_vir_context {
     unsigned dup;
     bool may_fall_through, scratch_register10;
     bool has_returns_twice;
-    bool bmi2; /* shlx, shrx, sarx: a count in any register */
+    bool tail, ret32; /* sibling calls: virbuild_call_is_sibling's */
+    bool bmi2;        /* shlx, shrx, sarx: a count in any register */
     bool
         uses_ymm; /* 256- or 512-bit values: vzeroupper before calls and returns */
     bool
         ms; /* the Microsoft x64 convention (Windows): arguments by position, rcx rdx r8 r9 / xmm0-3, shadow space */
+    uint32_t
+        skip; /* an instruction not to lower (after a musttail call), 0 none */
     uint32_t memory_value, memory_skip, scaled_value, scaled_skip;
     /* a 256- or 512-bit load the next instruction takes as its memory
      * operand: the value, and its address in AT&T form */

@@ -902,6 +902,22 @@ uint32_t c_lowering::statement(uint32_t index)
     case semantic_kind::return_statement: {
         uint32_t value = 0;
         owned_array<uint32_t> items, after;
+        if (n.op == 1) {
+            /* [[clang::musttail]]: the call and nothing after it */
+            if (n.a)
+                value = full_expression(n.a, false, items, after);
+            if (!value)
+                return 0;
+            if (leaving_objects() || !items.empty() || !after.empty() ||
+                returned_in_place.unqualified() ||
+                !ast_builder_musttail(c, value))
+                return fail("a musttail call code generation cannot guarantee "
+                            "(an object or temporary to destroy or hold, a "
+                            "result returned in memory, a builtin)",
+                            n.at);
+            return ast_builder_node(c, AST_NODE_RETURN, void_type, value, 0, 0,
+                                    0, 0);
+        }
         if (n.a && named_return && returned_variable(n.a) == named_return) {
             /* the variable is the result object: its bytes are the
                result, and it is not destroyed */

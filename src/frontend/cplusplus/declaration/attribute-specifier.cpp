@@ -573,6 +573,7 @@ semantic_analysis::statement_attribute_at(token_index t) const
         {"fallthrough", statement_attribute::fallthrough},
         {"code_align", statement_attribute::code_align},
         {"assume", statement_attribute::assume},
+        {"musttail", statement_attribute::musttail},
     };
     owned_buffer spelling;
     tokens.spelling(t, spelling.get());
@@ -648,8 +649,8 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
                              name_is(ns, ns_length, "clang") &&
                              name_is(name, length, "reinitializes");
         /* [impl.clang] clang::musttail (and gnu::) promises a tail call, which
-           code generation does not guarantee: never ignored, though
-           __has_cpp_attribute answers 0 for it */
+           code generation does not give everywhere: never ignored, though
+           __has_cpp_attribute may answer 0 for it */
         if (ns &&
             (name_is(ns, ns_length, "clang") ||
              name_is(ns, ns_length, "_Clang") ||

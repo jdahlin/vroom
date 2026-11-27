@@ -2296,6 +2296,7 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
     W->eh_cleanup_limit = INT32_MAX;
     W->eh_fn = e->unit->options->eh && e->unit->options->cfi &&
                W->cleanup_node_count > 0 && c->eh_resume_sym;
+    em_tail_sites_find(e, s);
     walk_statement_emit(e, y->body);
     if (walk_function_is_main(c, s) &&
         KIND(c, W->return_type) == AST_TYPE_INT) {

@@ -114,6 +114,7 @@
       "VIR lowering: an instruction it does not lower")                        \
     X(x64_unsupported_target_option, "VIR x86-64: stack protector or no SIMD") \
     X(x64_interrupt_function, "VIR x86-64: an interrupt function")             \
+    X(musttail, "VIR: a musttail call left to the direct emitter")             \
     X(x64_constant_kind, "VIR x86-64: a constant of a kind it cannot place")   \
     X(x64_constant_range,                                                      \
       "VIR x86-64: a symbol or slot address beyond the 32-bit range")          \

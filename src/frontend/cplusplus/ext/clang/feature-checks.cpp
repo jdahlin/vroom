@@ -286,6 +286,15 @@ int64_t answer(const implementation_defined_behavior &b, check_kind kind,
 
 } // namespace
 
+/* clang's answer for musttail does not hold here (claims_musttail) */
+static bool target_without_musttail(const implementation_defined_behavior &b,
+                                    const char *musttail, const char *name,
+                                    size_t length)
+{
+    return !b.claims_musttail && strlen(musttail) == length &&
+           !memcmp(musttail, name, length);
+}
+
 bool has_feature(const implementation_defined_behavior &b, const char *name,
                  size_t length, bool extension)
 {
@@ -298,6 +307,8 @@ bool has_feature(const implementation_defined_behavior &b, const char *name,
 int64_t has_gnu_attribute(const implementation_defined_behavior &b,
                           const char *name, size_t length)
 {
+    if (target_without_musttail(b, "musttail", name, length))
+        return 0;
     return answer(b, check_kind::attribute, name, length);
 }
 
@@ -371,6 +382,8 @@ int64_t clang_cpp_attribute_value(const implementation_defined_behavior &b,
     check_kind kind = check_kind::cpp_attribute;
     if (c_attribute)
         kind = check_kind::c_attribute;
+    if (target_without_musttail(b, "clang::musttail", operand, length))
+        return 0;
     return answer(b, kind, operand, length);
 }
 

@@ -77,7 +77,8 @@ typedef struct attrs { /* the attributes of one declaration */
         dll; /* Windows: CC_DLLIMPORT or CC_DLLEXPORT (sym_attrs(c, s)->dll), 0: neither */
     uint32_t tlsloc; /* tls_model attribute location */
     uint32_t visibility;
-    uint32_t flags; /* AF_* declaration/call restrictions */
+    uint32_t flags;    /* AF_* declaration/call restrictions */
+    uint32_t musttail; /* a statement's musttail: the attribute's location */
     uint8_t packed, transparent, used, unused, weak, noreturn, constructor,
         destructor;
     uint8_t nonstring, may_alias, cold, gnu_inline, always_inline, noinline,

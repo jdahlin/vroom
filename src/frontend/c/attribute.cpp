@@ -67,6 +67,7 @@ enum {
     CC_ATTRIBUTE_VECTORCALL,
     CC_ATTRIBUTE_PASCAL,
     CC_ATTRIBUTE_REGCALL,
+    CC_ATTRIBUTE_MUSTTAIL,
     CC_ATTRIBUTE_COUNT
 };
 
@@ -124,6 +125,7 @@ static const char *const cc_attribute_names[CC_ATTRIBUTE_COUNT] = {
     [CC_ATTRIBUTE_VECTORCALL] = "vectorcall",
     [CC_ATTRIBUTE_PASCAL] = "pascal",
     [CC_ATTRIBUTE_REGCALL] = "regcall",
+    [CC_ATTRIBUTE_MUSTTAIL] = "musttail",
     [CC_ATTRIBUTE_DEPRECATED] = "deprecated",
     [CC_ATTRIBUTE_WUR] = "warn_unused_result",
     [CC_ATTRIBUTE_NODISCARD] = "nodiscard",
@@ -677,6 +679,21 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c,
                     a->counted_by = tok(c)->id;
                 next(c);
                 cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+                continue;
+            case CC_ATTRIBUTE_MUSTTAIL:
+                if (scope == 1) { /* gnu::musttail: unknown to clang */
+                    cc_report_warning(c, "unknown-attributes", true, NULL, loc,
+                                      NULL, 0, NULL, 0,
+                                      "unknown attribute 'gnu::musttail' "
+                                      "ignored");
+                    break;
+                }
+                if (cc_token_is(c, LEX_TOKEN_LEFT_PAREN)) {
+                    cc_report_error(c, loc,
+                                    "'musttail' attribute takes no arguments");
+                    cc_token_skip_balanced(c);
+                }
+                a->musttail = loc;
                 continue;
             case CC_ATTRIBUTE_PURE:
             case CC_ATTRIBUTE_CONST: /* (-Wunused-value: a discarded call) */

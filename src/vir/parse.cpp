@@ -1271,6 +1271,7 @@ static void vir_parse_flags(vir_parse_state *p, vir_insn *in)
         {"noreturn", VIR_INSN_FLAG_CALL_NORETURN, 1},
         {"pure", VIR_INSN_FLAG_CALL_PURE, 1},
         {"const", VIR_INSN_FLAG_CALL_CONST, 1},
+        {"musttail", VIR_INSN_FLAG_CALL_MUSTTAIL, 1},
         {"likely", VIR_INSN_FLAG_LIKELY, 1},
         {"unlikely", VIR_INSN_FLAG_UNLIKELY, 1},
         {"negp", VIR_INSN_FLAG_NEGP, 1},

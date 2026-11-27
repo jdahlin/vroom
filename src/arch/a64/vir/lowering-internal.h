@@ -77,7 +77,7 @@ typedef struct a64_vir_context {
     bool
         frame_is_at_risk; /* x17 held data across a frame access: the frame must stay small */
     bool
-        tail; /* a call right before a ret may be a sibling call (a64_vir_tail_call_reason) */
+        tail; /* a call right before a ret may be a sibling call (virbuild_tail_call_reason) */
     bool
         ret32; /* the function returns a 32-bit integer: the upper half of x0 is unspecified */
     int64_t callee_saved_float_offsets
@@ -281,8 +281,6 @@ VPRIV void a64_vir_load_lower(a64_vir_context *L, uint32_t i,
                               const vir_insn *in, uint8_t res);
 VPRIV void a64_vir_store_lower(a64_vir_context *L, const vir_insn *in);
 VPRIV void a64_vir_memory_block_lower(a64_vir_context *L, const vir_insn *in);
-VPRIV const char *a64_vir_tail_call_reason(a64_vir_context *L, uint8_t *d);
-VPRIV bool a64_vir_call_is_sibling(a64_vir_context *L, uint32_t b, uint32_t i);
 VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i,
                               const vir_insn *in);
 VPRIV void a64_vir_parameter_lower(a64_vir_context *L, const vir_insn *in,

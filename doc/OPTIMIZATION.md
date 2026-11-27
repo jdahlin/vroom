@@ -49,7 +49,23 @@ The frontend and walker also apply local optimizations when `cc_opts.opt >= 1`.
 - **Registers**: the six most used locals of a function (by loop depth, from
   the prepass) live in callee-saved registers.
 - **Calls**: sibling calls as tail calls (`-fno-optimize-sibling-calls` turns
-  them off).
+  them off; never at `-O0`).  A forwarding wrapper (`return f(args);` alone)
+  jumps without a frame.  Any other call in tail position (`return f(...);`, or
+  a `void` function's last call; direct or indirect, any arguments and results
+  in registers) jumps after the epilogue, when the function takes no address in
+  its frame (`&local`, a local array or vector not just indexed, a compound
+  literal, inline asm, a VLA or `alloca`, `setjmp`, `__builtin_frame_address`,
+  a `try`) -- an address passed to a function whose source drops it before
+  returning, inlined or not, does not count (`opt/tail-borrow.cpp`: a static or
+  C++ inline function that only loads and stores through it, hands it to such
+  functions or `memcpy`'s bytes, or returns it to its caller's own such use;
+  the call that is passed it stays a call, since the callee reads the frame) --
+  has no live cleanup, and the call has no argument on the stack, no
+  result in memory (x86-64), no argument by reference to a copy (arm64).  VIR
+  asks the same of its own instructions after inlining and slot promotion: a
+  slot's address that only loads, stores and copies use does not count.  A
+  record result in two registers is passed on by a jump too, when the
+  function returns exactly those, in order.
 - **Records** (`arch/a64/codegen/opt.c`, `func.c`): the clean-up passes over
   each function's machine records: liveness, copies, slots, extensions, dead
   records, folds, flags, unreachable code and fall-throughs, a frame only when

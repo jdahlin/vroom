@@ -147,7 +147,15 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
     codegen_value res = codegen_value_none();
     int hn;
 
+    bool musttail = e->musttail, sibling = e->sibling;
+
+    e->musttail = false;
+    e->sibling = false;
     e->has_calls = true;
+    if (musttail) {
+        if (sret)
+            codegen_musttail_refuse(e, "a result returned in memory");
+    }
     if (fnv) {
         if (fnv->kind == CODEGEN_VALUE_ADDRESS && fnv->integer == 0) {
             ref = fnv->reference;
@@ -203,6 +211,8 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
     }
     if (CODEGEN_IS_DARWIN(c))
         nsaa = (nsaa + 7) & ~7;
+    if (musttail && nsaa)
+        codegen_musttail_refuse(e, "arguments passed on the stack");
     if (nsaa > e->outgoing_argument_bytes_max)
         e->outgoing_argument_bytes_max = nsaa;
     if (sret)
@@ -355,7 +365,30 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
     else if (sret)
         a64_record_emit_immediate(e, A64_OP_ADDI, 1, 8, A64_REGISTER_FRAME,
                                   rslot);
-    if (fslot != 1) {
+    /* a call in tail position: a jump where musttail could be one */
+    sibling = sibling && !nsaa && !sret && !e->dynamic_frame;
+    for (int i = 0; i < n; i++)
+        if (args[i].argument.kind == A64_ABI_ARGUMENT_REFERENCE_REGISTER) {
+            if (musttail)
+                codegen_musttail_refuse(
+                    e, "an argument passed by reference to a copy");
+            sibling = false;
+        }
+    if (musttail || sibling) {
+        a64_record *t;
+
+        if (fslot != 1)
+            a64_record_emit_memory(e, A64_OP_LD, 3, 0, R_X16,
+                                   A64_REGISTER_FRAME, fslot);
+        t = a64_record_emit(e, A64_OP_TAIL);
+        if (fslot != 1) {
+            t->condition = 3;
+            t->rn = R_X16;
+        } else {
+            t->condition = 2;
+            t->reference = ref;
+        }
+    } else if (fslot != 1) {
         a64_record_emit_memory(e, A64_OP_LD, 3, 0, R_X16, A64_REGISTER_FRAME,
                                fslot);
         uint32_t site = a64_eh_call_begin(e);
@@ -869,6 +902,21 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
     e->call_destination = 0;
 
     /* more than MAXARGS (psql's sql_help.c passes ~260): on the heap */
+    bool musttail = x->aux == AST_CALL_MUSTTAIL;
+
+    if (musttail) {
+        const codegen_function_instance *f = e->function_instance;
+
+        codegen_musttail_check(e, n, f->function);
+        if (f->is_inlined)
+            codegen_musttail_refuse(e, "the function is inlined");
+        /* (a variable-length array's entry only gives sp back, as the
+           epilogue does) */
+        for (int i = f->cleanup_base; i < e->cleanup_count; i++)
+            if (!(T(c, c->syms[e->cleanups[i]].ty)->flags & AST_TYPE_FLAG_VLA))
+                codegen_musttail_refuse(e,
+                                        "an object to destroy after the call");
+    }
     if (na > MAXARGS &&
         !(args = (a64_call_argument *)(malloc((size_t)na * sizeof(*args)))))
         codegen_fatal_report(e, x->loc, "out of memory");
@@ -886,7 +934,7 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
     }
     if (!s && !ref)
         fnv = gen(e, x->a);
-    inl = s && !into && can_inline(e, s);
+    inl = s && !into && !musttail && can_inline(e, s);
     if (inl)
         codegen_function_prepass_request(e, s);
     for (int i = 0; i < na; i++) {
@@ -918,6 +966,8 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
              args[i].value.kind == CODEGEN_VALUE_REGISTER_PAIR))
             park(e, &args[i]);
     }
+    if (musttail && !s && ref)
+        codegen_musttail_refuse(e, "a builtin function");
     if (!s && CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_NAME &&
         CODEGEN_REFERENCE_INDEX(ref) < 0x8000000u && na >= 3 &&
         cc_builtin_library_kind(CODEGEN_REFERENCE_INDEX(ref)) ==
@@ -953,7 +1003,7 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
                           cc_builtin_library_kind(CODEGEN_REFERENCE_INDEX(ref)),
                           args, &r)) {
         /* inlined */
-    } else if (s && codegen_memory_function_kind(e, s, na) &&
+    } else if (s && !musttail && codegen_memory_function_kind(e, s, na) &&
                args[2].value.kind == CODEGEN_VALUE_CONSTANT &&
                (uint64_t)args[2].value.integer <= 64 &&
                mem_inline(e, codegen_memory_function_kind(e, s, na), args,
@@ -969,6 +1019,18 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
             (T(c, ft)->flags & AST_TYPE_FLAG_VARIADIC))
             nfix = (int)T(c, ft)->n;
         e->call_destination = into;
+        if (musttail)
+            e->current_location = x->loc;
+        e->musttail = musttail;
+        e->sibling = false;
+        if (!musttail && em_tail_site(e, n) &&
+            !e->function_instance->is_inlined &&
+            e->cleanup_count == e->function_instance->cleanup_base) {
+            if (s)
+                e->sibling = em_tail_target_ok(e, s);
+            else
+                e->sibling = !ref;
+        }
         r = s || ref ? do_call(e, ref, NULL, args, na, x->ty, noret, nfix)
                      : do_call(e, 0, &fnv, args, na, x->ty, false, nfix);
     }

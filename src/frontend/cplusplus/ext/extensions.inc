@@ -129,6 +129,9 @@ EXTENSION(clang_type_traits, clang,
 EXTENSION(clang_nullability, clang,
           "clang Language Extensions, Nullability: _Nonnull, _Nullable, _Nullable_result "
           "and _Null_unspecified as cv-qualifiers, which do not change the type")
+EXTENSION(clang_musttail, clang,
+          "clang Attributes, musttail: [[clang::musttail]] return f(x); a call guaranteed to be a "
+          "tail call")
 EXTENSION(clang_deleted_function_message, clang,
           "C++26's = delete(\"reason\") (P2573R2) in earlier editions, with a warning")
 EXTENSION(clang_no_operator_names, clang,
