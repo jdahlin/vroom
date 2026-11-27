@@ -959,6 +959,74 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
 }
 
 /*
+ * Whether no guide of the class template with one parameter is as
+ * specialized as the copy deduction candidate ([temp.func.order]) for a
+ * specialization of the template: a guide of one is a forwarding
+ * reference, a template parameter or a const reference to one, a pointer or
+ * a reference to an array.  A constructor's guide that names the template
+ * itself is not told, but for a constructor template whose own parameter
+ * stands for the class's first, which has no default.
+ */
+bool semantic_analysis::copy_candidate_wins(uint32_t ct)
+{
+    entity_index primary = function_templates[ct - 1].entity;
+    template_parameter_parts form;
+    if (!function_templates[ct - 1].parameter_count ||
+        !template_parameter_form(
+            template_parameter_nodes[function_templates[ct - 1]
+                                         .first_parameter],
+            form) ||
+        form.has_default)
+        return false;
+    for (const function_template &g : function_templates) {
+        if (g.guide_of != ct)
+            continue;
+        const struct type &f =
+            type_table[entity_table[g.entity].type.unqualified()];
+        if (f.kind != type_kind::function || f.parameter_count != 1)
+            continue;
+        qualified_type p =
+            type_table.parameters(entity_table[g.entity].type.unqualified())[0];
+        const struct type *k = &type_table[p.unqualified()];
+        bool lvalue = k->kind == type_kind::lvalue_reference;
+        bool reference = lvalue || k->kind == type_kind::rvalue_reference;
+        if (reference) {
+            p = k->operand;
+            k = &type_table[p.unqualified()];
+        }
+        if (g.implicit_guide) {
+            if (k->kind == type_kind::dependent) {
+                uint32_t i = entity_table[k->entity].instantiation;
+                if (!i || instantiations[i - 1].template_entity != primary)
+                    continue;
+                /* a constructor template naming the template with another
+                   parameter than the class's first leaves that one
+                   undeduced ([temp.deduct.type]): not viable */
+                const instantiation_record &spec = instantiations[i - 1];
+                uint32_t own = function_templates[ct - 1].parameter_count;
+                bool undeduced = false;
+                for (uint32_t j = own;
+                     spec.argument_count && j < g.parameter_count; j++)
+                    if (entity_table
+                            [template_parameter_entities[g.first_parameter + j]]
+                                .type ==
+                        template_arguments[spec.first_argument].type)
+                        undeduced = true;
+                if (!undeduced)
+                    return false;
+            }
+            continue;
+        }
+        if (k->kind == type_kind::pointer || k->kind == type_kind::array)
+            continue;
+        if (k->kind != type_kind::template_parameter ||
+            (lvalue && p.cv() != cv_const))
+            return false;
+    }
+    return true;
+}
+
+/*
  * [over.match.class.deduct]/1: "When resolving a placeholder for a deduced
  * class type ([dcl.type.simple]) where the template-name names a primary
  * class template C, a set of functions and function templates, called the
@@ -1013,19 +1081,37 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                 "class template argument deduction from a function argument");
         arguments.append(e);
     }
-    /* [over.match.class.deduct]/1.2: a lone argument of the template's own
-       specialization selects the copy deduction candidate (not a guide
-       here) */
+    implicit_deduction_guides(ct);
+    /* [over.match.class.deduct]/1.2, [over.match.best]: a lone argument of
+       the template's own specialization selects the copy deduction
+       candidate, which deduces its class, unless a guide could be as
+       specialized */
     if (arguments.size() == 1) {
         const struct type &argument =
             type_table[arguments[0].type.unqualified()];
         if (argument.kind == type_kind::class_type &&
-            class_template_of(argument.entity) == ct)
-            return not_supported_because(n, "over.match.class.deduct",
-                                         "class template argument deduction "
-                                         "from a specialization of itself");
+            class_template_of(argument.entity) == ct) {
+            /* only a function parameter: another argument may be a
+               template's, whose explicit instantiation is analysed after
+               its point of instantiation ([temp.point]) */
+            entity_index named = arguments[0].entity;
+            if (!named ||
+                !entity_table[entity_table[named].enclosing].parameter_scope)
+                return not_supported_because(
+                    n, "over.match.class.deduct",
+                    "class template argument deduction from a specialization "
+                    "of itself that is not a parameter");
+            if (!copy_candidate_wins(ct))
+                return not_supported_because(
+                    n, "over.match.class.deduct",
+                    "class template argument deduction from a "
+                    "specialization of itself, beside such a guide");
+            expressions.resize(expressions_before);
+            name_uses.resize(uses_before);
+            c = argument.entity;
+            return analysis_result::well_formed;
+        }
     }
-    implicit_deduction_guides(ct);
     owned_array<uint32_t> group;
     for (size_t i = 0; i < function_templates.size(); i++)
         if (function_templates[i].guide_of == ct)

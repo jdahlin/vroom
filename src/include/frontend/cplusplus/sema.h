@@ -2338,6 +2338,7 @@ class semantic_analysis
     /* [over.match.class.deduct]/1.1: the implicit guides of the class
        template ct made from its constructors (once) */
     void implicit_deduction_guides(uint32_t ct);
+    bool copy_candidate_wins(uint32_t ct);
     analysis_result implicit_guide_member(uint32_t ct, SyntaxElement member);
     /* [over.match.class.deduct]/1, [dcl.type.class.deduct]/2: the class
        template specialization the placeholder for a deduced class type
