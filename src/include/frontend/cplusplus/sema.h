@@ -460,7 +460,8 @@ enum class statement_attribute : uint8_t {
     unlikely,
     fallthrough,
     code_align,
-    assume
+    assume,
+    musttail
 };
 
 struct ext_vector_attribute {
@@ -6658,6 +6659,10 @@ class semantic_analysis
        well-formed) */
     analysis_result statement(SyntaxElement s, uint32_t &built);
     analysis_result attributed_statement(Statement n, uint32_t &built);
+    /* [ext:clang_attributes] musttail on the return statement built: clang's
+       rules (built's op is then 1: a tail call or an error in lowering) */
+    analysis_result musttail_return(Statement n, uint32_t built);
+    bool musttail_similar(qualified_type a, qualified_type b) const;
     /* a substatement ([stmt.pre]/2): a block scope of its own whose
        outermost names shall not redeclare conflicts' */
     analysis_result substatement(SyntaxElement s, entity_index conflicts,

@@ -631,6 +631,7 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
         return not_supported_because(
             n, "stmt.pre", "an attributed statement with too few parts");
     SyntaxElement inner = n[n.size() - 1];
+    bool musttail = false;
     bool declaration = inner.is(syntax_kind::simple_declaration);
     for (uint32_t i = 0; i + 1 < n.size(); i++) {
         SyntaxElement c = n[i];
@@ -691,6 +692,15 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
                                                  "on a loop with an argument");
                 /* (past the argument's three tokens) */
                 t += 3;
+            } else if (a == statement_attribute::musttail) {
+                if (!inner.is(syntax_kind::jump_statement) ||
+                    !inner[0].is_token() ||
+                    inner[0].keyword() != standard_keyword::return_)
+                    return ill_formed(n,
+                                      "'musttail' attribute only applies to "
+                                      "return statements",
+                                      "stmt.return");
+                musttail = true;
             } else if (a == statement_attribute::fallthrough) {
                 if (!inner.is(syntax_kind::expression_statement) ||
                     inner.size() != 1 || function_state.switches.empty())
@@ -713,7 +723,146 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
             }
         }
     }
-    return statement(inner, built);
+    analysis_result r = statement(inner, built);
+    if (musttail && r == analysis_result::well_formed)
+        return musttail_return(n, built);
+    return r;
+}
+
+/* clang's hasSimilarType as it matters here: qualifiers aside at every
+   level of pointer */
+bool semantic_analysis::musttail_similar(qualified_type a,
+                                         qualified_type b) const
+{
+    if (a.unqualified() == b.unqualified())
+        return true;
+    const struct type &x = type_table[a.unqualified()];
+    const struct type &y = type_table[b.unqualified()];
+    return x.kind == type_kind::pointer && y.kind == type_kind::pointer &&
+           musttail_similar(x.operand, y.operand);
+}
+
+/* [ext:clang_attributes] clang's musttail: "the return value is the result
+   of a function call" whose function type is the caller's, with nothing to
+   destroy after it.  What needs the lowered code (temporaries) is refused
+   there */
+analysis_result semantic_analysis::musttail_return(Statement n, uint32_t built)
+{
+    if (!built || semantics[built].kind != semantic_kind::return_statement)
+        return not_supported_because(n, "stmt.return",
+                                     "a musttail return of this shape");
+    semantics[built].op = 1;
+    uint32_t value = semantics[built].a;
+    while (value && (semantics[value].kind == semantic_kind::conversion ||
+                     semantics[value].kind == semantic_kind::bind_reference))
+        value = semantics[value].a;
+    qualified_type caller = entity_table[function_state.function].type;
+    if (depends_on_template_parameter(caller))
+        return analysis_result::well_formed;
+    if (!value || semantics[value].kind != semantic_kind::call)
+        return ill_formed(n,
+                          "'musttail' attribute requires that the return value "
+                          "is the result of a function call",
+                          "stmt.return");
+    const semantic_node &call = semantics[value];
+    qualified_type callee = semantics[call.a].type;
+    if (type_table[callee.unqualified()].kind == type_kind::pointer)
+        callee = type_table[callee.unqualified()].operand;
+    const struct type &x = type_table[caller.unqualified()];
+    const struct type &y = type_table[callee.unqualified()];
+    if (x.kind != type_kind::function || y.kind != type_kind::function ||
+        depends_on_template_parameter(callee))
+        return not_supported_because(n, "stmt.return",
+                                     "a musttail call of this callee");
+    if (x.variadic || y.variadic)
+        return ill_formed(n,
+                          "'musttail' attribute may not be used with variadic "
+                          "functions",
+                          "stmt.return");
+    bool member = entity_table[function_state.function].nonstatic_member;
+    bool member_call = call.b || semantics[call.a].kind ==
+                                     semantic_kind::member_pointer_access;
+    if (member && !member_call)
+        return ill_formed(n,
+                          "non-static member function cannot perform a tail "
+                          "call to non-member or static member function",
+                          "stmt.return");
+    if (!member && member_call)
+        return ill_formed(n,
+                          "non-member or static member function cannot perform "
+                          "a tail call to non-static member function",
+                          "stmt.return");
+    uint32_t named = call.a;
+    while (semantics[named].kind == semantic_kind::conversion)
+        named = semantics[named].a;
+    if (member && semantics[named].kind == semantic_kind::entity &&
+        entity_table[semantics[named].a].enclosing !=
+            entity_table[function_state.function].enclosing)
+        return ill_formed(n,
+                          "member function cannot perform a tail call to a "
+                          "member of a different class",
+                          "stmt.return");
+    /* clang refuses a [[noreturn]] callee, not a GNU noreturn one; the
+       entity keeps one flag for both */
+    if (semantics[named].kind == semantic_kind::entity &&
+        (entity_table[semantics[named].a].gnu_flags & gnu_noreturn))
+        return not_supported_because(n, "dcl.attr",
+                                     "a musttail call of a noreturn function");
+    if (!musttail_similar(x.operand, y.operand))
+        return ill_formed(n,
+                          "cannot perform a tail call because the signature is "
+                          "incompatible with the calling function: target "
+                          "function has different return type",
+                          "stmt.return");
+    if (x.parameter_count != y.parameter_count)
+        return ill_formed(n,
+                          "cannot perform a tail call because the signature is "
+                          "incompatible with the calling function: target "
+                          "function has different number of parameters",
+                          "stmt.return");
+    const qualified_type *mine = type_table.parameters(caller.unqualified());
+    const qualified_type *theirs = type_table.parameters(callee.unqualified());
+    auto destroyed_class = [&](qualified_type t) {
+        const struct type &k = type_table[t.unqualified()];
+        return k.kind == type_kind::class_type && destroys(k.entity);
+    };
+    for (uint32_t i = 0; i < x.parameter_count; i++) {
+        if (!musttail_similar(mine[i], theirs[i]))
+            return ill_formed(n,
+                              "cannot perform a tail call because the "
+                              "signature is incompatible with the calling "
+                              "function: target function has a parameter type "
+                              "mismatch",
+                              "stmt.return");
+        if (destroyed_class(mine[i]))
+            return ill_formed(n,
+                              "tail call requires that the return value, all "
+                              "parameters, and any temporaries created by the "
+                              "expression are trivially destructible",
+                              "stmt.return");
+    }
+    if (destroyed_class(x.operand))
+        return ill_formed(n,
+                          "tail call requires that the return value, all "
+                          "parameters, and any temporaries created by the "
+                          "expression are trivially destructible",
+                          "stmt.return");
+    jump_point here;
+    here.scope = current_scope;
+    here.at = n.first_token();
+    for (const jump_point &v : function_state.destroyed)
+        if (in_scope(v, here))
+            return ill_formed(n,
+                              "cannot perform a tail call from this return "
+                              "statement: jump exits scope of variable with "
+                              "non-trivial destructor",
+                              "stmt.return");
+    if (try_entities)
+        return ill_formed(n,
+                          "cannot perform a tail call from this return "
+                          "statement: jump exits try block",
+                          "stmt.return");
+    return analysis_result::well_formed;
 }
 
 /*

@@ -1536,6 +1536,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 4: quality
 
+- [ ] **musttail's limits, and general sibling calls** [P].  `musttail` is a
+  jump or an error (`codegen/musttail.cpp`).  Refused: arguments on the stack
+  (x86-64: more than the argument registers, or a vector wider than the ISA's
+  registers), results returned in memory, arm64 arguments passed by reference
+  to a copy, Windows x64, WebAssembly, builtins.  Other calls in tail position
+  stay calls (only `em_tail_candidate`'s forwarding wrappers jump), so C++
+  answers `__has_cpp_attribute(clang::musttail)` with 0: Skia then rewinds its
+  stack, which its stages without the attribute need.  *Validate:*
+  `src/test/vcc/musttail.c`, `src/test/cxx/run/musttail.cpp`; Skia's HIGHP
+  stages end in `jmp` by objdump.
 - [ ] **VIR's code shape against the direct emitter's rules** [P].  Since
   -O2 is VIR (doc/OPTIMIZATION.md), `bench/vcc-opt-rules.py` checks code shape
   at -O0/-O1 alone (`DIRECT_LEVELS`) and `bench/vcc-tail-controls.py` runs with

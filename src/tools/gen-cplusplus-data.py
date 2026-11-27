@@ -362,9 +362,10 @@ def feature_check_queries():
     return queries
 
 
-# answers vcc cannot give as clang does: [[clang::musttail]] promises a tail
-# call, which vcc's code generation does not guarantee (the analysis refuses
-# the attribute), so code asking takes its portable path
+# answers vcc cannot give as clang does: code asking for [[clang::musttail]]
+# (Skia's raster pipeline) also counts on the optimizer making its other
+# forwarding calls jumps, which vcc does only for the simplest wrappers, so it
+# takes its portable path; a musttail written anyway is honoured
 FEATURE_CHECKS_NOT_VCCS = {('attribute', 'musttail'),
                            ('cpp_attribute', 'clang::musttail')}
 
