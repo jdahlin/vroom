@@ -151,6 +151,63 @@ void preprocessor::layout_pragma_directive(const preprocessing_token *t,
         files.layout_pragma = files.pack_pragma;
 }
 
+/*
+ * [ext:clang_pragma_attribute] "clang attribute push (attribute,
+ * apply_to = ...)" and "clang attribute pop" (clang Language Extensions,
+ * #pragma clang attribute).  Only the target("...") attribute has an effect
+ * here: it applies to every function defined until the pop.
+ */
+void preprocessor::attribute_pragma_directive(const preprocessing_token *t,
+                                              size_t count)
+{
+    size_t verb = 2;
+    /* an optional namespace: "NAME." before push and pop */
+    if (count > 4 && punctuator_is(files, t[3], "."))
+        verb = 4;
+    if (verb >= count)
+        return;
+    if (spelled_as(files, t[verb], "pop")) {
+        if (files.target_stack.size()) {
+            files.target_pragma = files.target_stack.back();
+            files.target_stack.resize(files.target_stack.size() - 1);
+        }
+        return;
+    }
+    if (!spelled_as(files, t[verb], "push"))
+        return;
+    files.target_stack.append(files.target_pragma);
+    for (size_t i = verb + 1; i + 2 < count; i++) {
+        if (!spelled_as(files, t[i], "target") &&
+            !spelled_as(files, t[i], "__target__"))
+            continue;
+        if (!punctuator_is(files, t[i + 1], "(") ||
+            !is_string_literal(t[i + 2]))
+            continue;
+        owned_buffer features;
+        /* the enclosing push's first, then these */
+        if (files.target_pragma) {
+            const char *outer = reinterpret_cast<const char *>(
+                files.target_strings.data() + files.target_pragma - 1);
+            owned_buffer copy;
+            vbuffer_append(copy.get(), outer, strlen(outer));
+            vbuffer_append(features.get(), copy.data(), copy.size());
+            vbuffer_append(features.get(), ",", 1);
+        }
+        for (size_t k = i + 2; k < count && is_string_literal(t[k]); k++) {
+            owned_buffer spelling;
+            files.spelling(t[k], spelling.get());
+            if (spelling.size() >= 2)
+                vbuffer_append(features.get(), spelling.data() + 1,
+                               spelling.size() - 2);
+        }
+        vbuffer_append(features.get(), "", 1);
+        files.target_pragma =
+            static_cast<uint32_t>(files.target_strings.size() + 1);
+        vbuffer_append(files.target_strings.get(), features.data(),
+                       features.size());
+    }
+}
+
 /* the pp-tokens of a pragma directive or of a _Pragma ([cpp.pragma.op]) */
 void preprocessor::execute_pragma(const preprocessing_token *t, size_t count,
                                   source_location at)
@@ -176,6 +233,10 @@ void preprocessor::execute_pragma(const preprocessing_token *t, size_t count,
     if (environment)
         files.floating_point_pragma = true;
     layout_pragma_directive(t, count);
+    if (count > 1 && spelled_as(files, t[0], "clang") &&
+        spelled_as(files, t[1], "attribute") &&
+        files.behavior.has(extension::clang_pragma_attribute))
+        attribute_pragma_directive(t, count);
     if (!known_pragma(*this, t[0]))
         diagnostics.issue(diagnostic_id::warn_pragma_ignored, t[0].location);
 }

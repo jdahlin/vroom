@@ -513,6 +513,10 @@ struct entity {
        left undefined, and a use of it is refused (body_failures' index
        plus one) */
     uint32_t unsupported_body = 0;
+    /* [ext:gnu_attributes] a defined function: the features its target
+       attribute and [ext:clang_pragma_attribute] pragmas give it, the offset
+       plus one of a string in target_strings (0: none) */
+    uint32_t target_features = 0;
     /* [except.spec]/1: the function's exception specification, compared
        by redeclarations ([except.spec]/4) */
     exception_specification exceptions;
@@ -1913,6 +1917,8 @@ class semantic_analysis
        (unknown_names): it gives them their reason when it is refused */
     owned_array<entity_index> unknown_scopes_pending;
     owned_array<unsupported_construct> body_failures;
+    /* the strings entity::target_features names, each NUL-terminated */
+    owned_buffer target_strings;
     /* whether the token is in a system header (clang's; lowering) */
     bool token_in_system_header(token_index at) const
     {
@@ -3143,6 +3149,8 @@ class semantic_analysis
         evaluation_cause = nullptr;
         return r;
     }
+    void record_target_features(SyntaxRef definition, entity_index f,
+                                token_index body);
     analysis_result defer_unsupported_body(SyntaxRef n, entity_index f,
                                            size_t before, analysis_result r);
     analysis_result gnu_compound_literal(SyntaxRef n, expression_meaning &m);

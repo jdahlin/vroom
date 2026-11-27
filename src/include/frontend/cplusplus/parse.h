@@ -65,6 +65,8 @@ class token_stream
     /* source_files::layout_pragma at token i (#pragma pack, ms_struct,
        options align): its regions are found as the tokens are made */
     uint8_t layout_pragma_at(token_index i);
+    /* source_files::target_pragma at token i (found as layout_pragma_at) */
+    uint32_t target_pragma_at(token_index i);
     /* the tokens made so far */
     size_t made() const
     {
@@ -82,6 +84,9 @@ class token_stream
     owned_array<token_index> layout_change_at;
     owned_array<uint8_t> layout_change_to;
     uint8_t layout_pragma_before = 0;
+    owned_array<token_index> target_change_at;
+    owned_array<uint32_t> target_change_to;
+    uint32_t target_pragma_before = 0;
     /* token i is preprocessing_tokens[first_piece[i] .. first_piece[i+1]) */
     owned_array<uint32_t> first_piece;
     owned_array<preprocessing_token> preprocessing_tokens;

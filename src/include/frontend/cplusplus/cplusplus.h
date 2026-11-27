@@ -121,11 +121,9 @@ struct implementation_defined_behavior {
     /* whether the edition in effect has a feature ([diff]) */
     bool has(language_feature feature) const;
     /* the vendors whose extensions are on (clang and GNU's always, as in
-       clang; Microsoft's with -fms-extensions), and those turned off one by
-       one */
+       clang; Microsoft's with -fms-extensions) */
     uint8_t extension_vendors =
         1 << (int)extension_vendor::gnu | 1 << (int)extension_vendor::clang;
-    uint64_t extensions_off = 0;
     /* whether an extension is on */
     bool has(extension e) const;
 };
@@ -662,6 +660,13 @@ class source_files
     bool ms_struct_pragma = false;
     bool other_layout_pragma = false;
     owned_array<uint8_t> pack_stack;
+    /* [ext:clang_pragma_attribute] the target("...") strings of the pragmas
+       in effect: NUL-terminated strings in target_strings, target_pragma the
+       offset plus one of the current one (0: none), target_stack the ones
+       the open pushes replaced */
+    owned_buffer target_strings;
+    uint32_t target_pragma = 0;
+    owned_array<uint32_t> target_stack;
     /* text that is not a file: the predefined macros, the command line's,
        or a preprocessing token phase 4 spelled ("<scratch space>") */
     entry &add_text(const char *name, const char *text, size_t length,
@@ -1082,6 +1087,8 @@ class preprocessor
     void directive_pragma(const preprocessing_token &name);
     void layout_pragma_directive(const preprocessing_token *tokens,
                                  size_t count);
+    void attribute_pragma_directive(const preprocessing_token *tokens,
+                                    size_t count);
     void execute_pragma(const preprocessing_token *tokens, size_t count,
                         source_location at);
     void pragma_message(const preprocessing_token *tokens, size_t count,

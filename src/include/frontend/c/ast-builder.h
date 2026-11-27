@@ -177,6 +177,10 @@ uint32_t ast_builder_end_catch_function(cc *c);
    placed in */
 void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,
                                 size_t length);
+/* GNU C's __attribute__((target(features))) on a function (x86-64): the
+   instructions its code may use */
+void ast_builder_symbol_target(cc *c, uint32_t s, const char *features,
+                               size_t length);
 /* GNU C's __attribute__((visibility(name))): "hidden", "protected" */
 void ast_builder_symbol_visibility(cc *c, uint32_t s, const char *name,
                                    size_t length);
