@@ -227,7 +227,13 @@ over `src/test/cxx/run`, `src/test/cxx/sema` inputs, clang's mangling tests
 every symbol and every refusal with its reason, byte for byte.  Also the
 existing gates: `cxx-mangle.py` (passing list), `cxx-run.py -O 0123`,
 `cxx-sema.py --check`, `cxx-c-suites.py`, `vcc-abi.py` (cxx/).
-Status: not started.
+Status: done (2026-11-27).  `bench/cxx-mangle-same.py`: 1618 inputs (1467
+cxx/run, 57 clang mangling tests, 71 json, 23 Stockfish), ~2.5 min at -j 12;
+two runs of one build agree.  The mangler is ~7% of `-fcxx-dump=symbols` on
+Stockfish's search.cpp (perf record), most of it `closure_type_name`'s scan
+of the entity table; `cxx-fe-bench.py` (-fsyntax-only) does not reach it,
+so instructions of `-fcxx-dump=symbols` on four json/Stockfish TUs are the
+speed measure.
 
 ### M1: one table per kind of terminal
 `operators.inc` and `builtin-types.inc`; the operator tables and both
