@@ -1051,6 +1051,14 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
     case VIR_OP_VSPLAT: {
         char s[160];
         int lane = x64_vir_type_size(vir_type_element(i->type));
+        int64_t k;
+
+        if (x64_vir_value_immediate(L->function, i->a, &k) && !k) {
+            snprintf(s, sizeof s, "\tpxor\t%%xmm%d, %%xmm%d\n", d - XMM0,
+                     d - XMM0);
+            x64_vir_text_append(L, s);
+            return;
+        }
         x64_record_emit_three_registers(e, X64_OP_MOV, lane, d, a,
                                         X64_REGISTER_NONE);
         if (i->type == VIR_TYPE_I16X8) { /* the low word to all eight */
@@ -1111,6 +1119,17 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         int width = x64_vir_type_size(vir_type_element(i->type));
         static const unsigned swap32[4] = {228, 225, 198, 39};
         unsigned perm = width == 4 ? swap32[i->c] : i->c ? 78 : 228;
+        int64_t k;
+
+        /* zero into the upper 64-bit lane: movq keeps the lower and clears
+		 * it (the zero extension of an 8-byte load) */
+        if (width == 8 && i->c &&
+            x64_vir_value_immediate(L->function, i->b, &k) && !k) {
+            snprintf(text, sizeof text, "\tmovq\t%%xmm%d, %%xmm%d\n", a - XMM0,
+                     d - XMM0);
+            x64_vir_text_append(L, text);
+            return;
+        }
         /* Save the scalar first: the result may share its register. Swap the
 		 * destination lane to lane zero, replace just that lane, then swap back. */
         x64_record_emit_three_registers(e, X64_OP_MOV, width, XMM0 + 14, c,

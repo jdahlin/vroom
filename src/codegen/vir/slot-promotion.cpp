@@ -98,6 +98,12 @@ static uint32_t virbuild_promote_zero_vector(codegen_context *e, uint32_t ty)
 {
     uint32_t entry = e->vir_builder->block_order[0];
     uint32_t prev = 0;
+
+    /* after the parameters, which the lowering wants first */
+    for (uint32_t q = e->vir_builder->blocks[entry].first_insn;
+         q && e->vir_builder->insns[q].insn.op == VIR_OP_PARAM;
+         q = e->vir_builder->insns[q].next)
+        prev = q;
     vir_insn splat =
         VCC_LITERAL(vir_insn, VIR_OP_VSPLAT, VIR_TYPE_I32X4, 0,
                     virbuild_constant_integer(e, VIR_TYPE_I32, 0), 0, 0);
@@ -328,7 +334,13 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
         virbuild_promote_field *f = &fd[fof[i] - 1];
 
         if (f->size == 16) {
-            /* never stored: no undefined vector constant to give it */
+            /* only a memset writes it: zero, of the type the load reads */
+            for (uint32_t m = 0; f->type == VIR_TYPE_VOID &&
+                                 vir_type_is_vector(q->insn.type) && m < nms;
+                 m++)
+                if (virbuild_promote_memset_covers(&ms[m], f))
+                    f->type = q->insn.type;
+            /* never written: no undefined vector constant to give it */
             if (f->type == VIR_TYPE_VOID || !vir_type_is_vector(q->insn.type))
                 bad[q->slot_plus_one - 1] = 1;
             continue;
