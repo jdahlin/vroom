@@ -1832,11 +1832,16 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             return CONST_UNKNOWN;
         const entity &k = entity_table[o.designator];
         /* [expr.const]/5.9: reading a mutable subobject of an object that
-           is usable in constant expressions is not constant: which object
-           this is is not modelled */
-        if (entity_table[x.b].mutable_member) {
+           is usable in constant expressions is not constant; one of an
+           object the evaluation is making (its constructor's
+           initialization of the member) is any other member.  Not one of
+           a class with a destructor: constant destruction
+           ([expr.const]/6) is not checked, where the member is read */
+        if (entity_table[x.b].mutable_member &&
+            (place_read_only(state, whole) || destroys(o.designator))) {
             /* a read of it in an object that began its life outside the
-               evaluation ([expr.const]/5.9) is not constant */
+               evaluation ([expr.const]/5.9) is not constant; which other
+               access this is is not modelled */
             if (state.reading && !state.potential &&
                 place_read_only(state, whole))
                 return CONST_NOT_CONSTANT_NOTE(rule_note::read_mutable_member);
