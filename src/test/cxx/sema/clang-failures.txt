@@ -525,7 +525,6 @@ verdict CXX/class.access/class.friend/p1.cpp -std=c++14: ill-formed for us, acce
 verdict CXX/class.access/class.friend/p1.cpp -std=c++98: ill-formed for us, accepted by clang: line 295 (2 declarations)
 verdict CXX/class.access/class.friend/p1.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 295 (2 declarations)
 verdict CXX/class.access/class.protected/p1-cxx11.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 16 (1 declarations)
-verdict CXX/class/class.compare/class.compare.default/p1.cpp -std=c++2a: ill-formed for us, accepted by clang: line 258 (1 declarations)
 verdict CXX/class/class.compare/class.spaceship/p2.cpp -std=c++2a: ill-formed for us, accepted by clang: line 83 (10 declarations)
 verdict CXX/class/class.init/class.copy.elision/p3.cpp -std=c++11: ill-formed for us, accepted by clang: line 432 (1 declarations)
 verdict CXX/class/class.init/class.copy.elision/p3.cpp -std=c++20: ill-formed for us, accepted by clang: line 432 (1 declarations)
