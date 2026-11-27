@@ -153,6 +153,108 @@ static void virbuild_literal_memcmp_fold(codegen_context *e,
     }
 }
 
+/* the C library function a call's callee names, NULL if it may be the
+ * program's own */
+static const char *virbuild_library_callee(codegen_context *e,
+                                           const vir_insn *fn)
+{
+    cc *c = e->compile_context;
+
+    if (fn->op != VIR_OP_SYMADDR || fn->b || fn->c)
+        return NULL;
+    uint32_t index = CODEGEN_REFERENCE_INDEX(fn->a);
+
+    if (CODEGEN_REFERENCE_KIND(fn->a) == CODEGEN_REFERENCE_NAME) {
+        if (index >= 0x8000000u)
+            return NULL;
+        const char *name = cc_builtin_name_get(index);
+
+        if (!strncmp(name, "__builtin_", 10))
+            name += 10;
+        return name;
+    }
+    if (CODEGEN_REFERENCE_KIND(fn->a) != CODEGEN_REFERENCE_SYMBOL)
+        return NULL;
+    const sym *y = &c->syms[index];
+
+    if ((y->flags & AST_SYMBOL_FLAG_DEFINED) || y->body ||
+        y->kind != AST_SYMBOL_FUNCTION || y->sc == AST_STORAGE_STATIC ||
+        !(y->flags & AST_SYMBOL_FLAG_GLOBAL) ||
+        codegen_symbol_attributes(c, index)->asmname ||
+        e->unit->options->no_builtin)
+        return NULL;
+    for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
+        if (e->unit->options->disabled_builtins[i])
+            return NULL;
+    if (CODEGEN_IDENTIFIER_IS(y->name, "strlen"))
+        return "strlen";
+    if (CODEGEN_IDENTIFIER_IS(y->name, "strcpy"))
+        return "strcpy";
+    return NULL;
+}
+
+/* the string literal a pointer points into, its length from there in *length;
+ * false if it is not one of bytes with a terminator after it */
+static bool virbuild_literal_string(codegen_context *e, uint32_t v,
+                                    uint64_t *length)
+{
+    virbuild_context *V = e->vir_builder;
+    const vir_insn *at = &V->insns[v].insn;
+
+    if (at->op != VIR_OP_SYMADDR ||
+        CODEGEN_REFERENCE_KIND(at->a) != CODEGEN_REFERENCE_STRING)
+        return false;
+    const cstr *str = &e->compile_context->strs[CODEGEN_REFERENCE_INDEX(at->a)];
+    uint64_t offset = (uint64_t)at->b | (uint64_t)at->c << 32;
+
+    if (str->esz != 1 || offset >= str->n)
+        return false;
+    const char *end = (const char *)memchr(str->s + offset, 0, str->n - offset);
+
+    if (!end)
+        return false;
+    *length = (uint64_t)(end - (str->s + offset));
+    return true;
+}
+
+/* strlen of a string literal is its length, and strcpy of a short one whose
+ * result nothing reads is a copy of its bytes: what an inlined argument makes
+ * known only here (std::string("abc")). */
+static void virbuild_literal_string_call_fold(codegen_context *e,
+                                              const virbuild_simplify_state *S,
+                                              uint32_t q)
+{
+    virbuild_context *V = e->vir_builder;
+    vir_insn call = V->insns[q].insn;
+
+    if (q >= S->constant_start || V->extra[call.c] < 1 || V->extra[call.c] > 2)
+        return;
+    const char *name = virbuild_library_callee(e, &V->insns[call.a].insn);
+
+    if (!name)
+        return;
+    uint32_t arguments = V->extra[call.c];
+    uint32_t source = virbuild_value_resolve(V, V->extra[call.c + arguments]);
+    uint64_t length;
+
+    if (arguments == 1 && !strcmp(name, "strlen") &&
+        call.type == VIR_TYPE_I64 &&
+        virbuild_literal_string(e, source, &length)) {
+        V->forward[q] =
+            virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)length);
+        V->insns[q].insn =
+            VCC_LITERAL(vir_insn, VIR_OP_NOP, VIR_TYPE_VOID, 0, 0, 0, 0);
+    } else if (arguments == 2 && !strcmp(name, "strcpy") && !S->use_counts[q] &&
+               virbuild_literal_string(e, source, &length) && length < 128) {
+        uint32_t destination = virbuild_value_resolve(V, V->extra[call.c + 1]);
+        uint32_t bytes =
+            virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)length + 1);
+
+        V->insns[q].insn = VCC_LITERAL(vir_insn, VIR_OP_MEMCPY, VIR_TYPE_VOID,
+                                       0, destination, source, bytes);
+    }
+}
+
 /* Size the workspace before assigning pointers: growth may move the backing allocation.
  * Every table except the trailing byte flags has four-byte alignment. */
 static size_t virbuild_simplify_layout(codegen_context *e,
@@ -349,6 +451,11 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
         V->forward[q] =
             virbuild_simplify_undefined_value(e, &S, V->insns[q].insn.type);
     }
+    for (uint32_t i = 0; i < V->block_order_count; i++)
+        for (uint32_t q = V->blocks[V->block_order[i]].first_insn; q;
+             q = V->insns[q].next)
+            if (V->insns[q].insn.op == VIR_OP_CALL && V->forward[q] == q)
+                virbuild_literal_string_call_fold(e, &S, q);
     for (uint32_t i = 0; has_memcmp && i < V->block_order_count; i++) {
         const virbuild_preir_block *block = &V->blocks[V->block_order[i]];
         for (uint32_t q = block->first_insn; q; q = V->insns[q].next)
