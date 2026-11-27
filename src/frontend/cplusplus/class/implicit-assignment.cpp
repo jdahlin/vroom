@@ -103,7 +103,26 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
         return assignment_use::unknown;
     lookup_result found = lookup_qualified(
         k, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
-    if (found.unknown || found.ambiguous)
+    if (found.ambiguous)
+        return assignment_use::unknown;
+    /* [class.copy.assign]/2, /3: beside operator= templates and operators
+       taking another type, a trivial implicit one is no entity; an exact
+       match, it beats them ([over.match.best]/2.4, [over.ics.rank]/3.2).
+       Where no move one is implicit (/3.1, /3.4) a template may beat the
+       copy one for an xvalue */
+    const entity &kx = entity_table[k];
+    bool move_may_be_template =
+        move && !kx.defaulted_move_assignment &&
+        (declares_copy_constructor(k) ||
+         (kx.destructor && !entity_table[kx.destructor].implicit));
+    if ((found.entity || found.unknown) &&
+        kx.defaulted_copy_assignment == kx.defaulted_move_assignment &&
+        !move_may_be_template && assigned_bitwise(k)) {
+        if (copy_assignment_deleted(k) || bytewise_const_member(k))
+            return assignment_use::deleted;
+        return assignment_use::usable;
+    }
+    if (found.unknown)
         return assignment_use::unknown;
     if (!found.entity) {
         /* no operator= at all: the bytes are copied */
@@ -171,7 +190,6 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
     /* X& operator=(const X&) = default and X& operator=(X&&) = default
        are no entities (defaulted_copy_assignment): usable as a trivial
        one is, when the class's bytes are assigned */
-    const entity &kx = entity_table[k];
     if ((!move && !copies && kx.defaulted_copy_assignment) ||
         (move && !movings &&
          (kx.defaulted_move_assignment ||
@@ -379,8 +397,9 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
         entity_index k = element_class(t);
         if (!k)
             continue;
-        if (r.kind == type_kind::array && !assigned_bitwise(k))
-            /* element by element: not analysed */
+        if (r.kind == type_kind::array && !assigned_bitwise(k) &&
+            type_table[r.operand.unqualified()].kind != type_kind::class_type)
+            /* an array of arrays, element by element: not analysed */
             return analysis_result::well_formed;
         assignment_use copying =
             subobject_assignment(k, c, false, copy_non_throwing, nonconst_form);
@@ -592,6 +611,36 @@ semantic_analysis::implicit_assignment(entity_index c, SyntaxRef n,
                                       from, result));
             statements.append(statement_node(
                 semantic_kind::expression_statement, at, result.node));
+            continue;
+        }
+        if (record.kind == type_kind::array && record.bound_known &&
+            record.bound > 0 &&
+            type_table[record.operand.unqualified()].kind ==
+                type_kind::class_type &&
+            !assigned_bitwise(k)) {
+            /* [class.copy.assign]/13.2: "if the subobject is an array, each
+               element is assigned, in the manner appropriate to the element
+               type" (read before the pointer types add types, which may
+               move record) */
+            uint64_t bound = record.bound;
+            qualified_type et = record.operand;
+            qualified_type from_et = qualified_type::make(
+                et.unqualified(), et.cv() | from.type.cv());
+            value_category source_category = value_category::lvalue;
+            if (move)
+                source_category = value_category::xvalue;
+            expression_meaning to_element = array_element_at_index(
+                at, object.node, et, value_category::lvalue);
+            expression_meaning from_element =
+                array_element_at_index(at, from.node, from_et, source_category);
+            expression_meaning result;
+            VTRY_SET(r, assignment_of(n, at, preprocessing_op_or_punc::EQUAL,
+                                      SyntaxElement(), SyntaxElement(),
+                                      to_element, from_element, result));
+            statements.append(array_loop_statement(
+                at, bound, false,
+                statement_node(semantic_kind::expression_statement, at,
+                               result.node)));
             continue;
         }
         if (k && !assigned_bitwise(k))

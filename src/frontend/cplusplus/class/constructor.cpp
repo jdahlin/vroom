@@ -2759,7 +2759,11 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             if (t.cv() & cv_const)
                 const_member = true;
         }
-        bool moves = move_seen && move_usable && !const_member;
+        /* [class.copy.ctor]/11: a trivial X(X&&) = default may be no
+           entity: it moves where a deleted X(const X&) cannot copy */
+        bool trivial_move_only = !move_seen && sub.defaulted_move_constructor;
+        bool moves =
+            ((move_seen && move_usable) || trivial_move_only) && !const_member;
         bool copies = copy_usable;
         if (!const_member && move_seen)
             copies = false;
