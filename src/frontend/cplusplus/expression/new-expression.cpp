@@ -712,8 +712,28 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         bool has_list =
             init.size() == 3 && init[1].is(syntax_kind::initializer_list);
         owned_array<expression_meaning> list;
+        /* [over.best.ics]/1: a braced-init-list argument of a constructor,
+           converted by [over.ics.list], kept as written; as in a
+           declaration's parentheses, not a lone {} (CWG1902) */
+        owned_array<SyntaxElement> written;
         if (has_list)
-            VTRY_SET(r, expression_list_meanings(init[1], list));
+            VTRY_SET(r, expression_list_meanings(init[1], list, &written));
+        bool braced = false;
+        for (const SyntaxElement &w : written)
+            if (w.is(syntax_kind::braced_init_list))
+                braced = true;
+        if (braced &&
+            (!c ||
+             (!entity_table[c].first_constructor &&
+              !entity_table[c].constructor_templates) ||
+             is_aggregate(c) ||
+             (list.size() == 1 &&
+              written[0].end_token() <= written[0].first_token() + 2 &&
+              may_be_default_constructible(c))))
+            return not_supported_because(
+                n, "over.match.list",
+                "a braced-init-list argument of a new-initializer that is "
+                "not a constructor's");
         if (init.size() == 2 || (has_list && list.empty())) {
             /* [dcl.init]/11: "An object whose initializer is an empty set
                of parentheses, i.e., (), shall be value-initialized."; /8:
@@ -753,7 +773,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                libc++'s __shared_ptr_emplace) */
             if (c && (entity_table[c].first_constructor ||
                       entity_table[c].constructor_templates))
-                r = construct(n, type, list, object.node, value);
+                r = construct(n, type, list, object.node, value, false,
+                              &written);
             else if (list.size() == 1)
                 r = initialize_with(n, list[0], type, true, false, value);
             else if (c &&
