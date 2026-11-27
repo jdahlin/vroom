@@ -24,6 +24,7 @@ VPRIV void virbuild_classify(codegen_context *e, ast_qualified_type t,
          k == AST_TYPE_UINT128)) {
         x64_abi_classify_named(e, t, a);
         a->is_unnamed = unnamed;
+        a->is_record = codegen_type_is_record(c, t);
         if (a->is_x87 || a->is_sse_up || a->is_wide_record ||
             a->bool_lane_count || a->align > 16 || !size || size > 1024 ||
             (!a->is_in_memory && !a->eightbyte_count))
@@ -78,6 +79,27 @@ static uint32_t virbuild_pass_class_type(uint32_t pc)
     return pc == VIR_CLASS_F32   ? VIR_TYPE_F32
            : pc == VIR_CLASS_F64 ? VIR_TYPE_F64
                                  : VIR_TYPE_I64;
+}
+
+/* a record's piece of 1, 2 or 4 bytes, zero-extended.  Loading the whole word
+   would read past what was stored, which the CPU cannot forward from the
+   narrower store: a stall on every such call */
+static uint32_t virbuild_call_narrow_load(codegen_context *e, int64_t off,
+                                          int bytes)
+{
+    virbuild_context *V = e->vir_builder;
+    int64_t rel;
+    uint32_t slot = virbuild_slot_find(e, off, (uint64_t)bytes, &rel);
+
+    V->slots[slot].loads++;
+    uint32_t v = virbuild_insn_append(
+        e, VIR_OP_LOAD, VIR_TYPE_I32,
+        virbuild_memory_flags_make(bytes, (uint32_t)bytes, false),
+        virbuild_slot_address(e, slot, rel), 0, 0);
+
+    if (!V->slots[slot].incoming_object)
+        V->insns[v].slot_plus_one = slot + 1;
+    return virbuild_insn_append(e, VIR_OP_EXT, VIR_TYPE_I64, 2, v, 0, 0);
 }
 
 /* a slot word's value: the store table's, else a load */
@@ -248,10 +270,17 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
              j++) {
             uint32_t ty = virbuild_pass_class_type(
                 virbuild_piece_class(&a[k], (unsigned)j));
-            uint32_t x =
-                a[k].is_in_memory
-                    ? virbuild_call_slot_pointer(e, a[k].slot)
-                    : virbuild_call_word_load(e, a[k].slot + 8 * j, ty);
+            uint32_t x;
+            uint64_t bytes = 8;
+
+            if (a[k].is_record && !a[k].is_in_memory && ty == VIR_TYPE_I64)
+                bytes = a[k].size - 8 * (uint64_t)j;
+            if (a[k].is_in_memory)
+                x = virbuild_call_slot_pointer(e, a[k].slot);
+            else if (bytes == 1 || bytes == 2 || bytes == 4)
+                x = virbuild_call_narrow_load(e, a[k].slot + 8 * j, (int)bytes);
+            else
+                x = virbuild_call_word_load(e, a[k].slot + 8 * j, ty);
             V->extra[o + 1 + word++] = x;
         }
     }
