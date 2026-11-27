@@ -2752,7 +2752,19 @@ analysis_result semantic_analysis::aggregate_element_clause(
                else braces are elided into the subaggregate */
             conversion_sequence reached =
                 implicit_conversion_sequence(e, element, true);
-            if (reached.kind == conversion_sequence::form::unknown)
+            /* (elision that would bind a reference member first is not
+               followed: such an object's lifetime rules are not checked) */
+            const entity &sub = entity_table[record.entity];
+            bool binds = false;
+            if (sub.member_count) {
+                entity_index first = class_members[sub.first_member];
+                type_kind k =
+                    type_table[entity_table[first].type.unqualified()].kind;
+                binds = k == type_kind::lvalue_reference ||
+                        k == type_kind::rvalue_reference;
+            }
+            if (reached.kind == conversion_sequence::form::unknown ||
+                (reached.kind == conversion_sequence::form::bad && binds))
                 return not_supported_because(
                     list, "dcl.init.aggr",
                     "a subaggregate converted from another class");
