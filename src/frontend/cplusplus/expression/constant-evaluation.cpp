@@ -4126,7 +4126,10 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
             instantiate_definition(ft.declaration, static_cast<uint32_t>(i));
         return;
     }
+    /* (C++26's later points of instantiation are not followed) */
     size_t waiting = postponed_bodies.size();
+    if (tokens.files.behavior.edition >= standard_edition::cplusplus_26)
+        waiting = 0;
     for (size_t i = 0; i < waiting && !entity_table[f].definition; i++) {
         /* a member's definition outside its class template, waiting for a
            use: by name, until f has its body */

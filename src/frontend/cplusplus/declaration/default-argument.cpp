@@ -41,6 +41,15 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
             any = true;
     if (!any)
         return analysis_result::well_formed;
+    /* a default argument added after a using-declaration named the
+       function (so by a redeclaration): the standard's using-declaration
+       sees it, clang's does not */
+    if (kind == entity_kind::function && f && !specialization &&
+        entity_table[f].named_by_using)
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a default argument added after a using-declaration of the "
+            "function");
     /* [temp.spec]/6: a default argument is checked */
     flag_set checked(explicit_declaration_names, false);
     /* [temp.inst]/4: a function template specialization a default

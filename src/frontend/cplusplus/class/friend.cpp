@@ -362,8 +362,12 @@ analysis_result semantic_analysis::friend_elaborated_class(entity_index c,
     /* in a specialization, lookup does not see what was declared after the
        template ([temp.res]): a class declared there, or by an earlier
        friend declaration, is the friend by its name ([temp.friend]) */
+    entity_index later = entity_table.find(space, name);
+    bool being_defined = later &&
+                         entity_table[later].kind == entity_kind::class_type &&
+                         !entity_table[later].size;
     if (found.unknown && !found.ambiguous && instantiation_depth && !local &&
-        !found.entity) {
+        !found.entity && !being_defined) {
         befriend_by_name(c, space, name);
         return analysis_result::well_formed;
     }

@@ -1112,7 +1112,10 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                         arguments[0].category == value_category::prvalue;
             /* (in a specialization's own body, an expression of a type
                that depends on nothing is what it is) */
+            /* (a glvalue: a prvalue there may be a deduction of a
+               template's own definition, analysed with it) */
             if (!named && function_state.active && instantiation_depth &&
+                arguments[0].category != value_category::prvalue &&
                 entity_table[function_state.function].instantiation &&
                 !depends_on_template_parameter(arguments[0].type))
                 made = true;

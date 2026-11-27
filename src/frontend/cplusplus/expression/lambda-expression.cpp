@@ -820,7 +820,10 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                 if (r == analysis_result::well_formed) {
                     open_parameter_scope();
                     /* [dcl.spec.auto]/3: -> auto, -> decltype(auto) */
-                    placeholder_allowed = true;
+                    /* (not from C++23, whose implicit move of a returned
+                       name decltype(auto) sees: not analysed) */
+                    placeholder_allowed = tokens.files.behavior.edition <
+                                          standard_edition::cplusplus_23;
                     r = type_id(part[1], returns);
                 }
                 current_scope = outer;
@@ -1021,6 +1024,19 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
     }
     /* (as lambda_default_arguments: the mangled name of such a lambda in a
        specialization is not clang's yet) */
+    /* (a lambda in one may capture what a default argument may not
+       name, [dcl.fct.default]/9: not analysed) */
+    for (const parameter_meaning &x : call_parameters) {
+        if (r != analysis_result::well_formed || !x.default_argument ||
+            x.default_argument.is_token())
+            continue;
+        SyntaxRef clause = node_of(x.default_argument);
+        for (token_index t = clause.first_token(); t < clause.end_token(); t++)
+            if (is_operator(tokens[t], preprocessing_op_or_punc::LEFT_BRACKET))
+                r = not_supported_because(
+                    n, "dcl.fct.default",
+                    "a generic lambda's default argument with a [");
+    }
     if (r == analysis_result::well_formed && defaults && instantiation_depth)
         r = not_supported_because(n, "dcl.fct.default",
                                   "a lambda's default argument in a "

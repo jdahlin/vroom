@@ -1416,6 +1416,21 @@ analysis_result semantic_analysis::default_initialize_variable(
         token_index place = claim_place;
         entity_index claims = claim_scope;
         VTRY(r, construct(declaration, object, none, 0, value));
+        /* (an implicit constructor's default member initializers may use
+           a member before its lifetime, which the evaluator does not
+           see) */
+        bool written = false;
+        for (entity_index k = entity_table[record].first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (!entity_table[k].implicit &&
+                type_table[entity_table[k].type.unqualified()]
+                        .parameter_count == entity_table[k].default_arguments)
+                written = true;
+        if (constexpr_variable && entity_table[e].automatic && !written)
+            return not_supported_because(
+                declaration, "dcl.init",
+                "a constexpr local default-initialized by an implicit "
+                "constructor");
         /* [basic.start.static]/2: constant initialization for a static
            variable default-initialized by a constexpr constructor */
         if ((!entity_table[e].automatic || constexpr_variable) && value.node) {
