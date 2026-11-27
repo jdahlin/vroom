@@ -54,7 +54,7 @@ uint32_t token_stream::target_pragma_at(token_index i)
     return in_effect;
 }
 
-void token_stream::make_through(token_index i)
+void token_stream::make_more(token_index i)
 {
     while (!complete && tokens.size() <= i) {
         preprocessing_token first = read();

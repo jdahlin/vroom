@@ -97,7 +97,13 @@ class token_stream
     bool has_lookahead = false;
     bool complete = false;
     preprocessing_token read();
-    void make_through(token_index i);
+    /* the tokens up to i exist: almost always, so tested here */
+    void make_through(token_index i)
+    {
+        if (!complete && tokens.size() <= i)
+            make_more(i);
+    }
+    void make_more(token_index i);
 };
 
 /* ---- the syntax tree ---------------------------------------------------- */
