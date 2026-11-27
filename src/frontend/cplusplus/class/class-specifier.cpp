@@ -1116,10 +1116,28 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
         type = entity_table[c].type.unqualified();
         return analysis_result::well_formed;
     }
-    if (count == 2 && e[at].is(syntax_kind::simple_template_id)) {
-        /* [dcl.type.elab]/1: class-key simple-template-id */
+    bool is_template_id =
+        (count == 2 && e[at].is(syntax_kind::simple_template_id)) ||
+        (count == 3 && e[at].nested_name_specifier() &&
+         e[at + 1].is(syntax_kind::simple_template_id)) ||
+        (count == 4 && e[at].nested_name_specifier() && e[at + 1].is_token() &&
+         leading_keyword(e[at + 1]) == standard_keyword::template_ &&
+         e[at + 2].is(syntax_kind::simple_template_id));
+    if (is_template_id) {
+        /* [dcl.type.elab]/1: class-key nested-name-specifier_opt template_opt
+           simple-template-id */
+        entity_index scope = 0;
+        bool qualified = false;
+        SyntaxElement id = e[at];
+        if (count >= 3) {
+            nominated_scope q;
+            VTRY(r, nested_name_specifier(e[at], q));
+            scope = q.entity;
+            qualified = true;
+            id = e[at + static_cast<uint32_t>(count - 2)];
+        }
         type_index t = 0;
-        VTRY(r, template_type(e[at], 0, false, t));
+        VTRY(r, template_type(id, scope, qualified, t));
         if (type_table[t].kind == type_kind::dependent)
             return not_supported_because(
                 n, "dcl.type.elab",

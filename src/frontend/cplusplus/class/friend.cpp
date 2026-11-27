@@ -306,7 +306,11 @@ analysis_result semantic_analysis::friend_elaborated_class(entity_index c,
         /* a qualified name: [basic.lookup.elab]/3, a class declared
            before */
         type_index named = 0;
-        VTRY(r, elaborated_type_specifier(type, named));
+        declaring_specializations++;
+        analysis_result r = elaborated_type_specifier(type, named);
+        declaring_specializations--;
+        if (r != analysis_result::well_formed)
+            return r;
         const struct type &record = type_table[named];
         if (record.kind != type_kind::class_type ||
             entity_table[record.entity].kind != entity_kind::class_type)
