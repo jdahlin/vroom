@@ -1826,6 +1826,14 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
 #endif
         if (external && (!vir_walk || (y->flags & AST_SYMBOL_FLAG_WEAK)))
             return false;
+        /* each copy keeps a by-value record in the caller's frame, one per
+		 * call: a large one stays a call (gcc bounds the frame's growth) */
+        for (uint32_t i = 0; external && i < N(y->body)->aux; i++) {
+            ast_qualified_type pt = c->syms[c->lists[N(y->body)->a + i]].ty;
+
+            if (codegen_type_is_record(c, pt) && codegen_type_size(c, pt) > 256)
+                return false;
+        }
 #ifdef WALK_PREFIX
         /* VIR: per call site by the callee's size with the callees it inlines itself
 		   (codegen_inline_size, bottom-up as LLVM), so nested copies cannot grow exponentially; a
