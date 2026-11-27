@@ -381,7 +381,8 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         MOVE_SHIFT,   /* shift by an immediate: the digit in `digit` */
         COUNT_SHIFT,  /* shift by the count in an xmm register */
         FROM_MASK,    /* a mask register's bits to a vector's lanes */
-        K_TO_GENERAL  /* a mask register to a 32-bit general register */
+        K_TO_GENERAL /* a mask register to a 32-bit general register */,
+        BROADCAST_GENERAL /* a 64-bit general register to every lane */
     };
     static const struct {
         const char *name;
@@ -424,6 +425,7 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         {"vmovdqu64", VECTOR_STORE, 1, 0x7f, 2, 1, 64},
         {"vmovdqa64", VECTOR_STORE, 1, 0x7f, 1, 1, 64},
         {"vpbroadcastq", BROADCAST, 2, 0x59, 1, 1, 8},
+        {"vpbroadcastq", BROADCAST_GENERAL, 2, 0x7c, 1, 1, 8},
         {"vpbroadcastd", BROADCAST, 2, 0x58, 1, 0, 4},
         {"vpbroadcastw", BROADCAST, 2, 0x79, 1, 0, 2},
         {"vpbroadcastb", BROADCAST, 2, 0x78, 1, 0, 1},
@@ -490,7 +492,12 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         if (form == BROADCAST &&
             !(n == 2 && o[0].kind == XK_REG && o[0].cls == XR_XMM))
             continue;
-        if (form == VECTOR_STORE || form == BROADCAST) {
+        if (form == BROADCAST_GENERAL &&
+            !(n == 2 && o[0].kind == XK_REG && o[0].cls == XR_GPR &&
+              o[0].size == 8))
+            continue;
+        if (form == VECTOR_STORE || form == BROADCAST ||
+            form == BROADCAST_GENERAL) {
             XOp *reg = &o[1], *mem = &o[0];
 
             if (form == VECTOR_STORE)

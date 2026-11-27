@@ -180,6 +180,25 @@ deleted in the commit that gives it a table row or a generic operation.
     three-operand instructions, the 64-byte ABI in VIR, shift
     operators and shuffles, EVEX rounding and broadcast.  Without VNNI
     Stockfish's `network.cpp` does not compile (a 64-byte argument).
+- **XV5c** `zmm16`-`zmm31` for 512-bit values (in progress).  Why: Stockfish's
+  accumulator refresh keeps 16 vectors live and VIR has 14 registers; vector
+  spills are about 1% of the search, so this is a small gain.
+  - Done: the assembler encodes the EVEX forms with these registers as
+    llvm-mc does (`x86-avx512-high-registers.s`), and `vpbroadcastq` from a
+    64-bit register, so a splat needs no `xmm` step.
+  - Allocator (`vir/register-allocation.cpp`): the target says which
+    registers only `i64x8` values may take.  The masks are 64-bit already
+    (`alloc[1]`), but registers are chosen in several places, some without
+    knowing the value that goes there: `vir_alloc_register_choose`,
+    `..._victim_find`, the scratch of parallel moves, loop-header drops, block
+    parameter votes and hints, tied results, the callee-saved relocations and
+    `vir_alloc_register_displace`.  The x86-64 lowering must also refuse (and
+    leave to the direct emitter) a function where any other value got a high
+    register, so a missed site costs speed, not correctness.
+  - Lowering: record register numbers for them (`XMM0 + 16` is `RIP`; 48-63
+    are free), their text (`a - XMM0` throughout), calls clobbering them,
+    and no VEX or legacy instruction on such a value.
+  - 256-bit values stay in 0-15 (they would need AVX-512VL forms).
 - **XV6** Delete the stencils and `tools/gen-x86stencils.py`, or keep them
   for the named few the table cannot express.
 
