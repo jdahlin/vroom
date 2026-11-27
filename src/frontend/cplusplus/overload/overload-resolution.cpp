@@ -503,7 +503,8 @@ analysis_result semantic_analysis::best_viable_function(
                     } else if (argument.node) {
                         a = implicit_conversion_sequence(argument, target,
                                                          user_defined);
-                    } else {
+                    } else if (list_class ||
+                               scalar_type(list_target.unqualified())) {
                         /* a scalar parameter's list: {} for an enumeration,
                            T{{0}} to T(int) */
                         a = list_scalar_sequence((*written_arguments)[k],
