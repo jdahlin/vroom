@@ -63,6 +63,25 @@ def main():
         if a.v:
             print(got[0][1].decode()[:400], '---', got[1][1].decode()[:400])
     compiled = sum(1 for r in results if not r[2][0][0])
+    # src/test/cxx/prefix: NAME.cpp on NAME.h as its prefix, whose headers the
+    # stop must not change; each compiles as with -include
+    cases = os.path.join(R, 'src/test/cxx/prefix')
+    for name in sorted(os.listdir(cases)):
+        if not name.endswith('.cpp'):
+            continue
+        for how in (['-include'], ['-fcxx-prefix=']):
+            h = os.path.join(cases, name[:-4] + '.h')
+            if how == ['-include']:
+                how = ['-include', h]
+            else:
+                how = ['-fcxx-prefix=' + h]
+            p = subprocess.run([vpp] + cxx_run.CXX + ['-c'] + how +
+                               [os.path.join(cases, name), '-o',
+                                os.path.join(T, 'case.o')],
+                               capture_output=True, text=True, timeout=60)
+            if p.returncode:
+                print('%s %s: %s' % (name, how[0][:12], p.stderr[:300]))
+                bad.append((name, ['failed'], None))
     print('cxx-prefix: %d programs (%d compile), %d differ' %
           (len(results), compiled, len(bad)))
     return 1 if bad else 0

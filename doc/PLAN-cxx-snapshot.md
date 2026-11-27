@@ -685,7 +685,15 @@ Risk: (d) has many paths; a missed one means `-include` meaning for that TU,
 which CS0's symbol comparison on real projects bounds.  Lookups from
 instantiations at the end of the TU are checked against the TU's whole reach.
 
-### CS10. Project headers.  Status: not started; needs CS9.
+### CS10. Project headers.  Status: explicit mode measured (2026-11-27); CS9
+and the must-emit filter not built.
+`bench/stockfish/prefix.py --project [--run]`.  Early instantiation at the
+stop first broke movegen.cpp (a header's template calls generate<T>, the file
+then specializes generate<LEGAL>): now only system headers' templates are
+instantiated early (`src/test/cxx/prefix/late-specialization`).  Forked -O2:
+25.8G instructions (system prefix 33.1G).  Symbols = `-include`'s in all 23;
+against own includes 13 TUs add what inline variables with dynamic
+initializers need (SYSTEM_THREADS_NB, ...); `bench` node count = clang++'s.
 A second worker forked from the first: the system prefix, then the project's
 headers; ended and forked again from the first when a project header
 changes (1.06G, 0.1 s).  Requires: the must-emit filter of 3.2 #5 in place of

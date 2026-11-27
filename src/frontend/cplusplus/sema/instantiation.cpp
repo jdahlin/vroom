@@ -1358,6 +1358,8 @@ void semantic_analysis::instantiate_pending(bool at_end)
         progress = pass_deferred_needs() || progress;
         for (size_t i = 0; i < postponed_bodies.size(); i++) {
             const postponed_body b = postponed_bodies[i];
+            if (!at_end && b.c && !instantiable_early(b.declaration))
+                continue;
             if (b.c && b.member_definition) {
                 if (b.function) {
                     if (!entity_table[b.function].member_definition_needed &&
@@ -1422,6 +1424,8 @@ void semantic_analysis::instantiate_pending(bool at_end)
             entity_index t = instantiations[index].template_entity;
             const function_template ft =
                 function_templates[entity_table[t].instantiation - 1];
+            if (!at_end && !instantiable_early(ft.declaration))
+                continue;
             if (!ft.definition) {
                 instantiations[index].pending = false;
                 continue;

@@ -6,6 +6,9 @@ with the same sizes, and those of the TU with its own includes only.  The
 bytes differ: functions are emitted in another order.
 
   bench/stockfish/prefix.py [-O 0|2] [--src DIR] [--bin-dir DIR] [--fork]
+--project: the project's own headers in the prefix too (CS10).
+--run: link the objects with and without the prefix and clang++'s own, with
+clang++, and compare their `bench` node counts (needs the networks in SRC).
 --fork (CS4): one vpp analyses P and forks a child per TU
 (vpp --cxx-prefix-batch); the same objects again, and the CPU both ways.
 """
@@ -57,6 +60,8 @@ def main():
     ap.add_argument('--src', default=os.path.join(R, 'work/stockfish/src'))
     ap.add_argument('--bin-dir', default=os.path.join(R, 'build/linux/src'))
     ap.add_argument('--fork', action='store_true')
+    ap.add_argument('--project', action='store_true')
+    ap.add_argument('--run', action='store_true')
     ap.add_argument('-j', type=int, default=8)
     a = ap.parse_args()
     src = os.path.abspath(a.src)
@@ -66,6 +71,10 @@ def main():
     prefix = os.path.join(out, 'prefix.h')
     with open(prefix, 'w') as f:
         f.write(''.join('#include <%s>\n' % n for n in prefix_list(src)))
+        if a.project:
+            f.write(''.join('#include "%s"\n' % h for h in sorted(
+                os.path.join(d, n) for d, _, ns in os.walk(src)
+                for n in ns if n.endswith('.h'))))
     stat = os.path.join(out, 'stat')
     flags = ['-x', 'c++', '-std=c++17', '-fPIE', '-nostdinc++', '-isystem',
              LIBCXX, '-O' + a.level, '-DNDEBUG', '-DIS_64BIT',
@@ -105,6 +114,27 @@ def main():
     print('stop against own includes: defined symbols differ in %d' %
           len(changed), ' '.join(changed))
     failed += len(differ) + len(changed)
+    if a.run:
+        def node_count(name, objects):
+            exe = os.path.join(out, name + '.exe')
+            subprocess.run(['clang++', '-stdlib=libc++', '-pthread',
+                            '-no-pie', '-o', exe] + objects, check=True)
+            p = subprocess.run([exe, 'bench', '16', '1', '9', 'default',
+                                'depth'], cwd=src, capture_output=True,
+                               text=True, timeout=600)
+            found = re.search(r'Nodes searched\s*:\s*(\d+)', p.stdout + p.stderr)
+            return p.returncode, found and found.group(1)
+
+        for s in tus:
+            subprocess.run(['clang++', '-stdlib=libc++'] +
+                           [f for f in flags if f not in
+                            ('-x', 'c++', '-nostdinc++', '-isystem', LIBCXX)] +
+                           [s, '-o', obj('clang', s)], cwd=src, check=True)
+        want = node_count('clang', [obj('clang', s) for s in tus])
+        for mode in ('own', 'stop'):
+            got = node_count(mode, [obj(mode, s) for s in tus])
+            print('bench %-5s %s (clang++ %s)' % (mode, got, want))
+            failed += got != want
     if a.fork:
         jobs = os.path.join(out, 'jobs')
         with open(jobs, 'w') as f:

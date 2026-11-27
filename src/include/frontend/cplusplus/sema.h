@@ -5852,6 +5852,13 @@ class semantic_analysis
                                                    entity_index f);
     /* the definitions pending_definitions waits for */
     void instantiate_pending(bool at_end = true);
+    /* before the end only a system header's templates: the program may not
+       specialize what those call, so their point of instantiation is free;
+       a project's may be followed by a specialization ([temp.point]/7) */
+    bool instantiable_early(SyntaxRef declaration) const
+    {
+        return in_system_header(tree[declaration].first_token);
+    }
     /* a lazily named specialization (instantiation_record::lazy) defined
        now: a use that needs the class complete (a call's result, a member
        lookup, its size); nothing for any other class */
