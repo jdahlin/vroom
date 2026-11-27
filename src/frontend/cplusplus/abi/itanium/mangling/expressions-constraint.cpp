@@ -328,6 +328,8 @@ bool itanium_mangler::template_args_of_constraint(entity_index t,
             continue;
         }
         entity_index pe = analysis.constraint_parameter(t, a.token());
+        if (!pe)
+            pe = analysis.constraint_alias_parameter(t, a.token());
         if (pe) {
             if (!template_param_of_constraint(t, pe))
                 return false;
