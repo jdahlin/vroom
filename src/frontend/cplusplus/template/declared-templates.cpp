@@ -562,7 +562,7 @@ analysis_result semantic_analysis::declare_template_parameters(
         if (form.template_template) {
             e = entity_table.make(entity_kind::template_entity, name, scope);
             template_templates.append(static_cast<uint32_t>(i));
-            template_parameter_entities[first + i] = e;
+            set_template_parameter_entity(first + static_cast<uint32_t>(i), e);
             VTRY(rr, template_template_record(n, node, e, scope));
         } else if (form.type) {
             e = entity_table.make(entity_kind::typedef_name, name, scope);
@@ -652,7 +652,7 @@ analysis_result semantic_analysis::declare_template_parameters(
             entity_table[e].instantiation = index + 1;
         if (name)
             entity_table.bind(scope, name, e);
-        template_parameter_entities[first + i] = e;
+        set_template_parameter_entity(first + static_cast<uint32_t>(i), e);
     }
     if (template_templates.empty())
         return analysis_result::well_formed;
@@ -1509,11 +1509,13 @@ uint32_t semantic_analysis::own_pack_parameter(uint32_t name) const
     for (entity_index s = current_scope;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
         if (e) {
-            for (size_t i = template_parameter_entities.size(); i-- > 0;)
-                if (template_parameter_entities[i] == e &&
-                    template_parameter_is_pack(static_cast<uint32_t>(i)))
-                    return static_cast<uint32_t>(i + 1);
-            return 0;
+            /* the last slot holding e that is a pack's */
+            uint32_t found = 0;
+            for (uint32_t k = first_parameter_slot(e); k;
+                 k = parameter_slot_next[k - 1])
+                if (k > found && template_parameter_is_pack(k - 1))
+                    found = k;
+            return found;
         }
         if (!s)
             return 0;

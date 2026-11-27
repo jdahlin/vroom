@@ -525,10 +525,13 @@ bool semantic_analysis::same_token_spelling(token_index a, token_index b)
 /* the function template whose entity (not held name) t is, plus one */
 uint32_t semantic_analysis::template_record(entity_index t) const
 {
-    for (size_t i = 0; i < function_templates.size(); i++)
-        if (function_templates[i].entity == t && t)
-            return static_cast<uint32_t>(i + 1);
-    return 0;
+    if (!t)
+        return 0;
+    templates_by_entity.update(function_templates,
+                               [](const function_template &f) {
+                                   return static_cast<size_t>(f.entity);
+                               });
+    return templates_by_entity.first(t);
 }
 
 SyntaxElement semantic_analysis::template_constraint(entity_index t) const
