@@ -933,9 +933,7 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
         return class_initialization(at, m, type, direct, result);
     case type_kind::ext_vector:
     case type_kind::vector:
-        /* [ext:gnu_vector_size] a vector is initialized from a vector of
-           its type, a copy of its bytes (other conversions not analysed) */
-        return same_type_copy(at, m, type, constness::not_constant, result);
+        return vector_initialization(at, m, type, result);
     case type_kind::complex:
         /* [ext:gnu_complex] a complex value initialized from the same
            complex type */
@@ -943,6 +941,101 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
     default:
         return scalar_initialization(at, m, type, direct, list, result);
     }
+}
+
+/* [ext:clang_ext_vector_type] the bytes of a vector's lanes, without the
+   padding that rounds a vector of three up */
+uint64_t semantic_analysis::vector_value_bytes(qualified_type type) const
+{
+    const struct type &v = type_table[type.unqualified()];
+    return v.bound * size_of_type(v.operand);
+}
+
+/*
+ * A vector initialized by an expression, as clang does it:
+ * [ext:gnu_vector_size] from its own type, a copy of the bytes; a GNU
+ * vector from any vector of its size, and an ext_vector_type from a GNU
+ * vector of its size, the same bits; [ext:clang_ext_vector_type] an
+ * ext_vector_type from an arithmetic scalar, converted to the element type,
+ * in every lane.  Other sources (bool's splat too) are not analysed.
+ */
+analysis_result
+semantic_analysis::vector_initialization(SyntaxRef at, expression_meaning &m,
+                                         qualified_type type,
+                                         initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    const struct type source = type_table[m.type.unqualified()];
+    bool bits = m.type.unqualified() != type.unqualified() &&
+                is_vector_kind(source.kind) &&
+                (target.kind == type_kind::vector ||
+                 source.kind == type_kind::vector) &&
+                vector_value_bytes(m.type) == vector_value_bytes(type);
+    bool splat = target.kind == type_kind::ext_vector &&
+                 is_arithmetic(m.type) &&
+                 fundamental_of(m.type) != fundamental_type::bool_;
+    if (!bits && !splat)
+        return same_type_copy(at, m, type, constness::not_constant, result);
+    VTRY(r, operand_value(at, m));
+    if (splat) {
+        VTRY_SET(r, vector_splat(at, m, type));
+    } else {
+        vector_converted(m, type, conversion_kind::vector_cast);
+    }
+    result.evaluation = m.evaluation;
+    result.value = 0;
+    result.node = m.node;
+    return r;
+}
+
+/* [ext:clang_ext_vector_type] the scalar m, converted to the element type
+   of the vector type to, in every lane: of a constant, the vector of that
+   element value, a constant too */
+analysis_result semantic_analysis::vector_splat(SyntaxRef at,
+                                                expression_meaning &m,
+                                                qualified_type to)
+{
+    qualified_type element = type_table[to.unqualified()].operand;
+    VTRY(r, implicit_conversion(at, m, element, false));
+    constant_value v;
+    bool constant = false;
+    if (m.evaluation != constness::not_constant)
+        VTRY_SET(r, evaluate_constant(at, m.node, v, constant));
+    if (!constant) {
+        vector_converted(m, to, conversion_kind::vector_splat);
+        return r;
+    }
+    expression_meaning folded;
+    folded.type = m.type;
+    folded.category = value_category::prvalue;
+    evaluated_meaning(folded, v);
+    uint32_t lane =
+        expression_node(semantic_kind::constant, folded, at.first_token());
+    owned_array<uint32_t> lanes;
+    for (uint64_t i = 0; i < type_table[to.unqualified()].bound; i++)
+        lanes.append(lane);
+    initialized_value value;
+    aggregate_value(at, to, constness::constant, lanes, value);
+    m = expression_meaning();
+    m.type = qualified_type::make(to.unqualified(), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::constant;
+    m.beyond_integral_constant = true;
+    m.node = value.node;
+    return r;
+}
+
+/* m as a prvalue of the vector type to, by the conversion kind */
+void semantic_analysis::vector_converted(expression_meaning &m,
+                                         qualified_type to,
+                                         conversion_kind kind)
+{
+    m.evaluation = constness::not_constant;
+    m.beyond_integral_constant = true;
+    m.zero_literal = false;
+    m.category = value_category::prvalue;
+    m.type = qualified_type::make(to.unqualified(), cv_none);
+    converted(m, kind);
 }
 
 /* an extension type initialized from an object of its own type, which is
@@ -2746,10 +2839,33 @@ analysis_result semantic_analysis::aggregate_element_clause(
         }
         /* a conversion from another class (a constructor or conversion
            function) into a subaggregate */
-        if (type_table[e.type.unqualified()].kind == type_kind::class_type)
-            return not_supported_because(
-                list, "dcl.init.aggr",
-                "a subaggregate converted from another class");
+        if (type_table[e.type.unqualified()].kind == type_kind::class_type) {
+            /* [dcl.init.aggr]/16: the element is initialized from the
+               expression if an implicit conversion sequence reaches it;
+               else braces are elided into the subaggregate */
+            conversion_sequence reached =
+                implicit_conversion_sequence(e, element, true);
+            /* (elision that would bind a reference member first is not
+               followed: such an object's lifetime rules are not checked) */
+            const entity &sub = entity_table[record.entity];
+            bool binds = false;
+            if (sub.member_count) {
+                entity_index first = class_members[sub.first_member];
+                type_kind k =
+                    type_table[entity_table[first].type.unqualified()].kind;
+                binds = k == type_kind::lvalue_reference ||
+                        k == type_kind::rvalue_reference;
+            }
+            if (reached.kind == conversion_sequence::form::unknown ||
+                (reached.kind == conversion_sequence::form::bad && binds))
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "a subaggregate converted from another class");
+            if (reached.kind != conversion_sequence::form::bad) {
+                next++;
+                return initialize_with(at, e, element, false, true, one);
+            }
+        }
     }
     if (is_vector_kind(record.kind)) {
         /* /16: a clause that is a vector initializes the whole vector;

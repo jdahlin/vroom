@@ -1791,19 +1791,22 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     /* [class.mem]/1: member-declarator: declarator virt-specifier-seq_opt;
        a destructor's ([class.virtual]/4, /5): the declarator, its
        virt-specifiers in override_ and final_ */
-    bool override_ = false, final_ = false;
+    bool override_ = false, final_ = false, pure_ = false;
     auto special = [&](SyntaxElement d) {
         if (!d.is(syntax_kind::member_declarator) || d.size() < 2)
             return d;
         if (!d[0].is(syntax_kind::noptr_declarator) ||
             !d[0][0].is(syntax_kind::unqualified_id))
             return d;
-        bool o = false, f = false;
+        bool o = false, f = false, p = false;
         for (auto child : d.elements(1))
-            if (!virt_specifier(child, o, f))
+            if (!p && child.is(syntax_kind::pure_specifier))
+                p = true;
+            else if (p || !virt_specifier(child, o, f))
                 return d;
         override_ = o;
         final_ = f;
+        pure_ = p;
         return d[0];
     };
     if (!alignas_count && node.size() > lead + 1 &&
@@ -1840,10 +1843,11 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
                     "after the declarator");
             virt_override = override_;
             virt_final = final_;
+            virt_pure = pure_;
             analysis_result r = special_member_declarator(
                 c, node, special(node[at]), access, false, constexpr_specified,
                 virtual_specified, explicit_specified, inline_specified);
-            virt_override = virt_final = false;
+            virt_override = virt_final = virt_pure = false;
             return r;
         }
         uint32_t body_at = at + 1;

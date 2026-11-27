@@ -178,7 +178,9 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
                                    "be used only by members and friends of "
                                    "the class in which it is declared",
                                    "class.access");
-    const entity &x = entity_table[e];
+    /* a copy: a node's types are completed ([temp.inst]/2), and what that
+       instantiates moves the entities */
+    const entity x = entity_table[e];
     if (x.nonstatic_member && x.enclosing != object_class) {
         /* [class.derived]/1: a member of a base class, of the base class
            subobject (accessible() above already checked access to the member

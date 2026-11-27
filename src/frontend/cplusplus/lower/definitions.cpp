@@ -8,6 +8,11 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
 {
     const entity &x = analysis.entity_table[e];
     const semantic_node &body = node(x.definition);
+    if (x.target_features) {
+        const char *features = reinterpret_cast<const char *>(
+            analysis.target_strings.data() + x.target_features - 1);
+        ast_builder_symbol_target(c, s, features, strlen(features));
+    }
     labels.clear();
     label_paths.clear();
     label_paths_made = false;

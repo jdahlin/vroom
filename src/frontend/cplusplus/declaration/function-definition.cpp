@@ -298,6 +298,63 @@ void semantic_analysis::defer_needs_of_instantiated_body(entity_index f)
         needs_deferred_by = 0;
 }
 
+/*
+ * [ext:gnu_attributes] "target (string)" on a function: its features for this
+ * function alone.  They are the strings of the pragmas in effect where the
+ * definition starts ([ext:clang_pragma_attribute]), then those of the target
+ * attributes before the body; the lowering gives them to the symbol.
+ */
+void semantic_analysis::record_target_features(SyntaxRef definition,
+                                               entity_index f, token_index body)
+{
+    token_index first = definition.first_token();
+    uint32_t pragma = tokens.target_pragma_at(first);
+    owned_buffer features;
+    if (pragma) {
+        const char *s = reinterpret_cast<const char *>(
+            tokens.files.target_strings.data() + pragma - 1);
+        vbuffer_append(features.get(), s, strlen(s));
+    }
+    auto is = [&](token_index i, const char *word) {
+        owned_buffer spelling;
+        tokens.spelling(i, spelling.get());
+        return spelling.size() == strlen(word) &&
+               !memcmp(spelling.data(), word, spelling.size());
+    };
+    /* the parentheses open since an __attribute__ */
+    int depth = 0;
+    bool in_attribute = false;
+    for (token_index i = first; i < body; i++) {
+        if (!in_attribute) {
+            in_attribute = is(i, "__attribute__") || is(i, "__attribute");
+            continue;
+        }
+        if (is(i, "(")) {
+            depth++;
+        } else if (is(i, ")")) {
+            depth--;
+            if (!depth)
+                in_attribute = false;
+        } else if (depth == 2 && i + 2 < body &&
+                   (is(i, "target") || is(i, "__target__")) && is(i + 1, "(")) {
+            owned_buffer spelling;
+            tokens.spelling(i + 2, spelling.get());
+            if (spelling.size() < 2 || spelling.data()[0] != '"')
+                continue;
+            if (features.size())
+                vbuffer_append(features.get(), ",", 1);
+            vbuffer_append(features.get(), spelling.data() + 1,
+                           spelling.size() - 2);
+        }
+    }
+    if (!features.size())
+        return;
+    vbuffer_append(features.get(), "", 1);
+    entity_table[f].target_features =
+        static_cast<uint32_t>(target_strings.size() + 1);
+    vbuffer_append(target_strings.get(), features.data(), features.size());
+}
+
 /* the function being defined, last_declared, holds the reason a refused
    body gives: a constant expression that calls it is refused for that */
 analysis_result semantic_analysis::analyse_function_body(
@@ -314,6 +371,8 @@ analysis_result semantic_analysis::analyse_function_body(
             return analysis_result::well_formed;
         }
     }
+    if (f)
+        record_target_features(definition, f, first_token(compound));
     size_t before = unsupported.size();
     scoped_value<entity_index> deferring(needs_deferred_by, needs_deferred_by);
     defer_needs_of_instantiated_body(f);

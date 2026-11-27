@@ -397,6 +397,24 @@ void semantic_analysis::collect_written_casts(
             found.append(b);
         }
     }
+    /* N::C() and N::C(x), a class named by a qualified name: that class, for
+       cv <type> (cast the simple-type-specifier's node) */
+    if (x.is(syntax_kind::postfix_expression) && x.size() >= 3 &&
+        x[0].is(syntax_kind::simple_type_specifier) &&
+        x[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+        size_t unsupported_before = unsupported.size();
+        type_index named = 0;
+        uint32_t named_cv = 0;
+        analysis_result r = qualified_type_name(x[0], named, named_cv);
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed && named) {
+            written_binding b;
+            SyntaxRef ar = x[0];
+            b.cast = ar.index().index();
+            b.type = qualified_type::make(named, named_cv);
+            found.append(b);
+        }
+    }
     /* Q<args>:: in a nested-name-specifier, Q a class template: its
        (dependent) specialization, for the mangler (cast the template-id's
        node) */

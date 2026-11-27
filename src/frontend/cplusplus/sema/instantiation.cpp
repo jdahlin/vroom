@@ -438,6 +438,10 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     /* (leave_instantiation drops the claims of the template's expressions:
        they are about one specialization, which clang makes none of) */
     instantiation_context context;
+    /* [temp.deduct]/8: a definition instantiated while a candidate's
+       declaration is (a return type deduced) is outside the immediate
+       context of that substitution */
+    scoped_value<unsigned> outside(substituting, 0);
     uint32_t dependent_before = dependent_errors;
     uint32_t independent_before = independent_errors;
     enter_instantiation(context, instantiations[index].scope, ft.declaration);
@@ -1589,6 +1593,22 @@ analysis_result semantic_analysis::declare_variable_specialization(
     declared_names.append(d);
     declared_entity = e;
     return analysis_result::well_formed;
+}
+
+bool semantic_analysis::enumerator_value(entity_index e,
+                                         uint64_t &magnitude) const
+{
+    const entity &x = entity_table[e];
+    magnitude = x.value;
+    fundamental_type underlying = fundamental_of(x.type);
+    const struct type &record = type_table[x.type.unqualified()];
+    if (record.kind == type_kind::enumeration)
+        underlying = entity_table[record.entity].underlying;
+    if (!fundamental_type_is_signed(tokens.files.behavior, underlying) ||
+        static_cast<int64_t>(x.value) >= 0)
+        return false;
+    magnitude = 0 - x.value;
+    return true;
 }
 
 bool semantic_analysis::specialization_value(entity_index e, uint32_t i,

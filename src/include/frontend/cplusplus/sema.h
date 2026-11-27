@@ -513,6 +513,10 @@ struct entity {
        left undefined, and a use of it is refused (body_failures' index
        plus one) */
     uint32_t unsupported_body = 0;
+    /* [ext:gnu_attributes] a defined function: the features its target
+       attribute and [ext:clang_pragma_attribute] pragmas give it, the offset
+       plus one of a string in target_strings (0: none) */
+    uint32_t target_features = 0;
     /* [except.spec]/1: the function's exception specification, compared
        by redeclarations ([except.spec]/4) */
     exception_specification exceptions;
@@ -1723,6 +1727,9 @@ enum class conversion_kind : uint8_t {
     /* [ext:gnu_vector_size] a cast between a vector and a vector or a
        scalar of the same size: the same bits */
     vector_cast,
+    /* [ext:clang_ext_vector_type] a scalar of the element type in every
+       lane */
+    vector_splat,
 };
 
 /* [expr.cast]/4: the casts that may perform an explicit conversion */
@@ -1910,6 +1917,8 @@ class semantic_analysis
        (unknown_names): it gives them their reason when it is refused */
     owned_array<entity_index> unknown_scopes_pending;
     owned_array<unsupported_construct> body_failures;
+    /* the strings entity::target_features names, each NUL-terminated */
+    owned_buffer target_strings;
     /* whether the token is in a system header (clang's; lowering) */
     bool token_in_system_header(token_index at) const
     {
@@ -3140,6 +3149,8 @@ class semantic_analysis
         evaluation_cause = nullptr;
         return r;
     }
+    void record_target_features(SyntaxRef definition, entity_index f,
+                                token_index body);
     analysis_result defer_unsupported_body(SyntaxRef n, entity_index f,
                                            size_t before, analysis_result r);
     analysis_result gnu_compound_literal(SyntaxRef n, expression_meaning &m);
@@ -3892,6 +3903,8 @@ class semantic_analysis
     bool declared_defaulted(entity_index f) const;
     bool clang_trivial_special_members(entity_index c);
     bool class_trivially_copyable(entity_index c, bool &known);
+    bool offsetof_member(entity_index c, uint32_t name, uint64_t at,
+                         owned_array<entity_index> &found, uint64_t &offset);
     analysis_result gnu_offsetof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
     analysis_result gnu_va_arg(SyntaxRef n, expression_meaning &m);
@@ -6930,6 +6943,8 @@ class semantic_analysis
        magnitude, and whether it is negative; or, in a template's own
        declaration, the non-type template-parameter it names (its position
        plus one in parameter) */
+    /* an enumerator's value as magnitude; whether it is negative */
+    bool enumerator_value(entity_index e, uint64_t &magnitude) const;
     bool specialization_value(entity_index e, uint32_t i, uint64_t &magnitude,
                               bool &negative, uint32_t &parameter,
                               uint32_t element = 0) const;
@@ -7215,6 +7230,9 @@ class semantic_analysis
     uint32_t qualifiers_of(qualified_type t) const;
     /* whether object[index], object of class type, has no built-in
        candidate */
+    entity_index
+    preferred_pointer_conversion(const owned_array<entity_index> &functions,
+                                 uint32_t object);
     bool subscript_has_no_builtin(qualified_type object,
                                   qualified_type index) const;
     /* whether the class s has a non-explicit conversion function that may
@@ -7605,6 +7623,14 @@ class semantic_analysis
     analysis_result same_type_copy(SyntaxRef at, expression_meaning &m,
                                    qualified_type type, constness evaluation,
                                    initialized_value &result);
+    analysis_result vector_initialization(SyntaxRef at, expression_meaning &m,
+                                          qualified_type type,
+                                          initialized_value &result);
+    uint64_t vector_value_bytes(qualified_type type) const;
+    analysis_result vector_splat(SyntaxRef at, expression_meaning &m,
+                                 qualified_type to);
+    void vector_converted(expression_meaning &m, qualified_type to,
+                          conversion_kind kind);
     analysis_result reference_initialization(SyntaxRef at,
                                              expression_meaning &m,
                                              qualified_type type,

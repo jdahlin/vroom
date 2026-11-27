@@ -113,6 +113,9 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
     entity_table[conversion].nonstatic_member = true;
     entity_table[conversion].member_cv = cv_const;
     entity_table[conversion].conversion_function = true;
+    /* /11: constexpr from C++17 */
+    entity_table[conversion].constexpr_ =
+        tokens.files.behavior.edition >= standard_edition::cplusplus_17;
     entity_table[conversion].inline_ = true;
     entity_table[conversion].defined = true;
     entity_table.add_declaration(conversion, n);
