@@ -47,6 +47,9 @@ relative to it); `TODO.md` stays at the top.
   `CC_OPTIMIZATIONS` (`include/frontend/c/cc.h`) and a line in that document.
 - `PLAN-vir-inline.md` (steps I0-I5, a proposal): inlining on VIR instead of
   in the walker; what today's limit and clang's threshold measure.
+- `PLAN-mangling.md` (steps M0-M7, a proposal): restructuring the Itanium
+  mangler (`frontend/cplusplus/abi/itanium/mangling.cpp`): files by ABI
+  section, a builder apart from the encoder, each encoding letter in one table.
 - `PLAN-vir-eh.md` (steps E0-E8): Itanium exceptions in VIR, both lowerings and
   the direct emitter (`invoke`, landing pads, LSDA), and the AST nodes the C++
   front end will produce; RTTI and modules need nothing from VIR.
