@@ -406,6 +406,9 @@ the lowering spreads back to the lanes).  `x86` with a scalar `i32` result
 and two `i64x8` operands is a dword compare's mask bits.  `x86dot a, b, c`
 (`i64x8`, AVX-512 VNNI) is `vpdpbusd`: each dword of `a` plus the four
 products of the unsigned bytes of `b` and the signed bytes of `c`.
+`prefetch a, b` (x86-64) prefetches the line at `a`; `b` is 0 to 3 for
+`prefetchnta`, `t2`, `t1`, `t0`, 4 for `prefetchw`.  It writes nothing and
+is never removed.
 
 7.5.1b `bitcast` of a vector type takes any vector type: the same 128 bits.
 

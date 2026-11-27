@@ -168,6 +168,26 @@ VPRIV bool x64_vector_operation_exists(codegen_context *e, int op,
     return x64_simd_plan_for(e, op, vt, a_vector, b_vector, unary).op != NULL;
 }
 
+VPRIV const char *x64_prefetch_name(int kind)
+{
+    static const char *const names[] = {
+        "prefetchnta", "prefetcht2", "prefetcht1", "prefetcht0", "prefetchw"};
+
+    return names[kind];
+}
+
+static void x64_simd_text(codegen_context *e, const char *text);
+
+/* prefetch the line register r points at (the direct emitter) */
+VPRIV void x64_prefetch(codegen_context *e, int r, int kind)
+{
+    char text[64];
+
+    snprintf(text, sizeof text, "\t%s\t(%%%s)\n", x64_prefetch_name(kind),
+             x64_register_names_64[r]);
+    x64_simd_text(e, text);
+}
+
 static void x64_simd_text(codegen_context *e, const char *text)
 {
     record *r = x64_record_emit(e, X64_OP_RAW);

@@ -234,6 +234,10 @@ VPRIV codegen_value WALK_LOWER(wcvt)(
     ast_qualified_type to);                      /* __int128 on either side */
 VPRIV int WALK_LOWER(ftreg)(codegen_context *e); /* a free float temporary */
 VPRIV codegen_value WALK_LOWER(x86_instruction)(codegen_context *e, uint32_t n);
+/* __builtin_prefetch of the line at register r (x86-64 only): kinds 0-3 are
+   the localities, WALK_PREFETCH_WRITE a write with PRFCHW */
+#define WALK_PREFETCH_WRITE 4
+VPRIV void WALK_LOWER(prefetch)(codegen_context *e, int r, int kind);
 /* a shuffle of two 16-byte vectors at ra and rb into *d, bytes[16] the source
    of each result byte (16 up: the second operand, -1 any); false: none */
 VPRIV bool WALK_LOWER(vector_shuffle)(codegen_context *e, const int *bytes,

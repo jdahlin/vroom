@@ -264,6 +264,14 @@ VPRIV void virbuild_trap(codegen_context *e)
     virbuild_block_terminate(e, VIR_OP_TRAP, 0, 0, 0, 0);
 }
 
+VPRIV void virbuild_prefetch(codegen_context *e, int r, int kind)
+{
+    uint32_t address = virbuild_register_read(e, r, VIR_TYPE_PTR);
+
+    virbuild_insn_append(e, VIR_OP_PREFETCH, VIR_TYPE_VOID, 0, address,
+                         (uint32_t)kind, 0);
+}
+
 VPRIV void virbuild_barrier(codegen_context *e)
 {
     virbuild_insn_append(e, VIR_OP_BARRIER, VIR_TYPE_VOID, 0, 0, 0, 0);

@@ -187,6 +187,7 @@ enum {
         92, /* a landing pad's first instruction: multi (exception ptr, selector i32) */
     VIR_OP_EHTYPEID = 93, /* the selector of a catch clause's type (i32) */
     VIR_OP_X86 = 94,      /* an x86 instruction on vectors: c says which */
+    VIR_OP_PREFETCH = 96, /* x86-64: prefetch the line at a; b says which */
     VIR_OP_X86_DOT = 95,  /* vpdpbusd: a plus the byte products of b and c */
     VIR_OP_TARGET_FIRST =
         128, /* 128-255: target instructions introduced by lowering */
