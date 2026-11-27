@@ -154,7 +154,7 @@ class c_lowering
     /* [ext:clang_vla] the C type of each variable length array type (by
        the type's index), made once: its bound is lowered once, where the
        array is first named (its declaration) */
-    owned_array<ast_qualified_type> variable_arrays;
+    owned_array<ast_qualified_type, type_index> variable_arrays;
     /* a data member or base subobject: its field's number in its class's
        C struct, which has padding fields where C's layout would place a
        member earlier than the ABI does; a class: its C struct's number of

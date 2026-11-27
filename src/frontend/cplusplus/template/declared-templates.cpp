@@ -917,8 +917,7 @@ VPRIV bool made_of_template_parameter(const types &table, qualified_type t,
             return made_of_template_parameter(
                 table,
                 qualified_type::make(
-                    static_cast<type_index>((*parameters)[r.entity].value),
-                    cv_none),
+                    type_index_in((*parameters)[r.entity].value), cv_none),
                 parameters, from);
         return true;
     case type_kind::bit_int:
@@ -940,8 +939,7 @@ VPRIV bool made_of_template_parameter(const types &table, qualified_type t,
            to a dependent member type */
         if (!r.entity &&
             made_of_template_parameter(
-                table,
-                qualified_type::make(static_cast<type_index>(r.bound), cv_none),
+                table, qualified_type::make(type_index_in(r.bound), cv_none),
                 parameters, from))
             return true;
         return made_of_template_parameter(table, r.operand, parameters, from);

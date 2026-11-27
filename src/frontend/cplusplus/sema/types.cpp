@@ -72,7 +72,8 @@ void types::grow()
     slots.resize(size);
     for (type_index &slot : slots)
         slot = 0;
-    for (type_index t = 1; t < records.size(); t++) {
+    for (uint32_t n = 1; n < records.size(); n++) {
+        type_index t{n};
         size_t i = hash(records[t], parameters(t)) & (size - 1);
         while (slots[i])
             i = (i + 1) & (size - 1);
@@ -93,7 +94,7 @@ type_index types::intern(const type &t, const qualified_type *parameters)
     added.first_parameter = static_cast<uint32_t>(parameter_lists.size());
     for (uint32_t k = 0; k < t.parameter_count; k++)
         parameter_lists.append(parameters[k]);
-    type_index index = static_cast<type_index>(records.size());
+    type_index index = type_index{static_cast<uint32_t>(records.size())};
     records.append(added);
     slots[i] = index;
     /* at most half full */
@@ -241,7 +242,7 @@ type_index types::dependent_pointer_to_member(type_index class_type,
 {
     type t;
     t.kind = type_kind::pointer_to_member;
-    t.bound = class_type;
+    t.bound = class_type.index();
     t.operand = member;
     return intern(t, nullptr);
 }
