@@ -261,6 +261,21 @@ VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg,
                            x64_vir_register_number(reg), &a, false);
 }
 
+/* a register copy at the width of value v: x64_mov copies 16 bytes of an xmm
+   register, and a wide value has 32 or 64 */
+static void x64_vir_value_move(x64_vir_context *L, int d, int s, uint32_t v)
+{
+    int size = (int)vir_type_size(L->function->insns[v].type);
+
+    if (d == s)
+        return;
+    if (size > 16)
+        x64_record_emit_three_registers(L->context, X64_OP_MOV, size, d, s,
+                                        X64_REGISTER_NONE);
+    else
+        x64_mov(L->context, d, s);
+}
+
 VPRIV void vx_edit(x64_vir_context *L, const vir_edit *x)
 {
     unsigned bit = x->kind == VIR_EDIT_RELOAD          ? 0
@@ -280,15 +295,8 @@ VPRIV void vx_edit(x64_vir_context *L, const vir_edit *x)
         x64_vir_slot_access(L, false, x->src, L->allocation->slot[x->value]);
         break;
     case VIR_EDIT_MOVE:
-        if (vir_type_size(L->function->insns[x->value].type) > 16)
-            x64_record_emit_three_registers(
-                L->context, X64_OP_MOV,
-                (int)vir_type_size(L->function->insns[x->value].type),
-                x64_vir_register_number(x->dst),
-                x64_vir_register_number(x->src), X64_REGISTER_NONE);
-        else
-            x64_mov(L->context, x64_vir_register_number(x->dst),
-                    x64_vir_register_number(x->src));
+        x64_vir_value_move(L, x64_vir_register_number(x->dst),
+                           x64_vir_register_number(x->src), x->value);
         break;
     default:
         abort(); /* no swapped/tied operands in x64_vir_fixed_registers_get */
@@ -332,12 +340,12 @@ VPRIV void vx_edge_moves(x64_vir_context *L, uint32_t g)
                 x64_vir_slot_access(L, false, tmp, d);
         } else if (m->kind == VIR_EDIT_EXCHANGE) {
             /* Exchanges are register-only; use the second reserved scratch. */
-            x64_mov(L->context, x64_vir_register_number(tmp),
-                    x64_vir_register_number((uint8_t)d));
-            x64_mov(L->context, x64_vir_register_number((uint8_t)d),
-                    x64_vir_register_number((uint8_t)s));
-            x64_mov(L->context, x64_vir_register_number((uint8_t)s),
-                    x64_vir_register_number(tmp));
+            x64_vir_value_move(L, x64_vir_register_number(tmp),
+                               x64_vir_register_number((uint8_t)d), m->value);
+            x64_vir_value_move(L, x64_vir_register_number((uint8_t)d),
+                               x64_vir_register_number((uint8_t)s), m->value);
+            x64_vir_value_move(L, x64_vir_register_number((uint8_t)s),
+                               x64_vir_register_number(tmp), m->value);
         } else if (ds && ss) {
             x64_vir_slot_access(L, true, tmp, s);
             x64_vir_slot_access(L, false, tmp, d);
@@ -346,8 +354,8 @@ VPRIV void vx_edge_moves(x64_vir_context *L, uint32_t g)
         else if (ss)
             x64_vir_slot_access(L, true, (uint8_t)d, s);
         else
-            x64_mov(L->context, x64_vir_register_number((uint8_t)d),
-                    x64_vir_register_number((uint8_t)s));
+            x64_vir_value_move(L, x64_vir_register_number((uint8_t)d),
+                               x64_vir_register_number((uint8_t)s), m->value);
         vx_probe(L, bit);
         vx_mark(L, false, bit, 0, 0, 0, 0, 0, 0);
     }
