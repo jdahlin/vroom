@@ -1743,6 +1743,13 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         if (c != constness::constant)
             return c;
         if (!(whole & element_place) && state.objects[whole].opaque) {
+            /* an inherited member function called on such an object
+               (SkSpan's size()): the base class subobject nothing is read
+               through stands as the object (as base_subobject_place) */
+            if (state.member_call_object && entity_table[x.b].base_subobject) {
+                object = whole;
+                return constness::constant;
+            }
             /* a member of an automatic variable of the enclosing function:
                its address is no constant ([expr.const]/13) nor its value
                ([expr.const]/5.8) */
