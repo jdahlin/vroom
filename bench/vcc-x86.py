@@ -151,6 +151,10 @@ def reference(suite, name, path, flags, wd):
     return r
 
 def one(t):
+    """one test, with the inline suite's known gaps (vcc-ctests.py INLINE_XFAIL)"""
+    return ct.inline_xfail(*one_(t))
+
+def one_(t):
     suite, name, path = t
     src = open(path, 'rb').read().decode('latin-1')
     if suite == 'tcc' and name in ct.TCC_SKIP and ct.TCC_SKIP[name] != 'x86 asm':	# (those run here)
@@ -413,6 +417,7 @@ if __name__ == '__main__':
     for s, c in sorted(by.items()) + [('all', tot)]:
         run_ = c['pass'] + c['fail'] + c['error']
         det = ' '.join(f'{k}={v}' for k, v in sorted(c.items()) if ':' in k)
-        print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%), {c["skip"]} skipped   {det}')
+        xf = f', {c["xfail"]} xfail' if c['xfail'] else ''
+        print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%){xf}, {c["skip"]} skipped   {det}')
     print(f'{time.time() - t0:.1f} s')
     sys.exit(1 if tot['fail'] or tot['error'] else 0)
