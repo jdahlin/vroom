@@ -2704,8 +2704,11 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
        user-declared copy constructor, copy assignment operator, move
        assignment operator, or destructor": otherwise a copy copies each
        subobject by its copy constructor */
+    /* (a destructor declared implicitly, as a virtual one's override, is
+       not user-declared) */
+    bool user_destructor = x.destructor && !entity_table[x.destructor].implicit;
     bool move_implicitly_declared =
-        !declares_copy && !x.destructor && !x.user_copy_assignments &&
+        !declares_copy && !user_destructor && !x.user_copy_assignments &&
         !x.defaulted_copy_assignment && !x.defaulted_move_assignment;
     /* [class.copy.ctor]/8: the implicit move constructor X(X&&), declared
        when some subobject has a move constructor (otherwise a move copies
@@ -2713,6 +2716,9 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
        resolution ([over.match.funcs]/8), when a subobject can be neither
        moved nor copied */
     bool move_declared = false, move_deleted = false;
+    /* a subobject that only a trivial X(X&&) = default moves, and one
+       whose move does more than copy its bytes */
+    bool moved_by_bytes = false, not_by_bytes = false;
     for (entity_index k : classes) {
         const entity sub = entity_table[k];
         /* X() = default beside other constructors may be no entity
@@ -2789,8 +2795,6 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             if (!found.empty())
                 default_ok = true;
         }
-        if (move_seen && !copies_bytes(k))
-            move_declared = true;
         /* the subobject's move, by overload resolution on an xvalue: its
            move constructor if it declares one, else its copy constructor */
         /* [over.ics.ref]/3: a const member (unique_ptr const) does not bind
@@ -2810,6 +2814,12 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         /* [class.copy.ctor]/11: a trivial X(X&&) = default may be no
            entity: it moves where a deleted X(const X&) cannot copy */
         bool trivial_move_only = !move_seen && sub.defaulted_move_constructor;
+        if (move_seen && !copies_bytes(k))
+            move_declared = true;
+        if (trivial_move_only && !copy_ok && !const_member)
+            moved_by_bytes = true;
+        else if (!copies_bytes(k))
+            not_by_bytes = true;
         bool moves =
             ((move_seen && move_usable) || trivial_move_only) && !const_member;
         bool copies = copy_usable;
@@ -2928,6 +2938,8 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
        subobject's move is (the analysed case: each copies its bytes);
        /6: it makes the implicit copy constructor deleted */
     const entity &y = entity_table[c];
+    bool written_move =
+        y.defaulted_move_constructor || declares_move_constructor(c);
     if (y.defaulted_move_constructor || y.defaulted_move_assignment) {
         bool trivial_move = !y.dynamic;
         for (entity_index k : classes)
@@ -3037,6 +3049,19 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     if (destruction && !entity_table[c].destructor)
         declare_implicit(c, special_member::destructor, false);
     VTRY(assignments, implicit_assignments(c));
+    /* [class.copy.ctor]/8, /11: without a move constructor of its own the
+       class would copy a subobject that can only be moved: its implicit
+       one, trivial as that subobject's (no entity, as X(X&&) = default;
+       after the assignments, which a user-declared one would delete) */
+    if (move_implicitly_declared && !written_move && moved_by_bytes &&
+        !move_declared && !move_deleted &&
+        tokens.files.behavior.has(language_feature::rvalue_references)) {
+        if (!not_by_bytes && !entity_table[c].dynamic &&
+            !entity_table[c].union_)
+            entity_table[c].defaulted_move_constructor = true;
+        else if (!entity_table[c].union_)
+            declare_implicit(c, special_member::constructor, false, true);
+    }
     VTRY(accessible, defaulted_assignment_access(c, n));
     return inherit_constructors(c, n);
 }
