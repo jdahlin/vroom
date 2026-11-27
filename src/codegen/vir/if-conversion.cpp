@@ -278,9 +278,29 @@ VPRIV bool virbuild_if_convert(codegen_context *e)
         if (ef)
             virbuild_arm_hoist(V, F, b, cond);
         for (uint32_t k = 0; k < nsel; k++) {
-            uint32_t s = virbuild_block_insn_append(e, b, VIR_OP_SELECT,
-                                                    V->insns[sels[k]].insn.type,
-                                                    0, cond, tv[k], fv[k]);
+            uint32_t type = V->insns[sels[k]].insn.type, s;
+            int64_t yes, no;
+
+            /* a choice of 1 and 0 is the condition compared with zero (the
+			 * condition itself when it is 0 or 1), not a select */
+            if (type == VIR_TYPE_I32 &&
+                V->insns[cond].insn.type == VIR_TYPE_I32 &&
+                virbuild_value_integer_constant(
+                    V, virbuild_value_resolve(V, tv[k]), &yes) &&
+                virbuild_value_integer_constant(
+                    V, virbuild_value_resolve(V, fv[k]), &no) &&
+                (yes | no) == 1 && !(yes & no)) {
+                if (yes && virbuild_value_is_boolean(V, cond, 4)) {
+                    V->extra[V->insns[sels[k]].insn.b + it] = cond;
+                    continue;
+                }
+                s = virbuild_block_insn_append(
+                    e, b, VIR_OP_ICMP, VIR_TYPE_I32, (uint32_t)(yes != 0), cond,
+                    virbuild_constant_integer(e, VIR_TYPE_I32, 0), 0);
+            } else {
+                s = virbuild_block_insn_append(e, b, VIR_OP_SELECT, type, 0,
+                                               cond, tv[k], fv[k]);
+            }
             V->insns[s].location = V->insns[t].location;
             V->extra[V->insns[sels[k]].insn.b + it] = s;
         }

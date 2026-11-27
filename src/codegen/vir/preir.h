@@ -392,6 +392,9 @@ VPRIV uint32_t virbuild_preir_insn_insert(codegen_context *e, uint32_t b,
 VPRIV bool virbuild_vectors_from_elements(codegen_context *e);
 /* unroll.c */
 VPRIV bool virbuild_loops_unroll(codegen_context *e);
+/* v is 0 or 1 (depth bounds the search) */
+VPRIV bool virbuild_value_is_boolean(const virbuild_context *V, uint32_t v,
+                                     unsigned depth);
 VPRIV bool virbuild_compare_constants(uint32_t cc, uint32_t ty, int64_t a,
                                       int64_t b);
 /* load-of-slot-address.c */
