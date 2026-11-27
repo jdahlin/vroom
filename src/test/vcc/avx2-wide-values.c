@@ -85,7 +85,6 @@ __attribute__((noinline, target("avx2"))) static int signs(const __m256i *a)
            _mm256_movemask_ps(_mm256_castsi256_ps(
                _mm256_cmpgt_epi32(a[1], _mm256_setzero_si256())));
 }
-#endif
 /* values that trade registers on the loop's back edge keep every lane */
 __attribute__((noinline, target("avx2"))) static unsigned rotate256(const v8s *a,
                                                           int k)
@@ -113,8 +112,10 @@ __attribute__((noinline, target("avx2"))) static unsigned rotate256(const v8s *a
         h = h * 31 + (unsigned)s[i];
     return h;
 }
+#endif
 int main(void)
 {
+#ifdef __x86_64__
     {
         static int seed[32];
         for (int i = 0; i < 32; i++)
@@ -128,7 +129,6 @@ int main(void)
             for (int k = 0; k < 12; k++)
                 printf("%08x\n", rotate256((const v8s *)seed, k));
     }
-#ifdef __x86_64__
     static __attribute__((aligned(32))) int in[8][8];
     static __attribute__((aligned(32))) int out[5][8];
     for (int i = 0; i < 64; i++)
