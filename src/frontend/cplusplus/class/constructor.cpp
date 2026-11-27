@@ -3042,8 +3042,7 @@ analysis_result semantic_analysis::inheriting_using(UsingDeclarator n,
  * ([class.inhctor.init]/1); declared at the class's end, after the
  * implicit special members (which an inherited constructor does not
  * suppress, [class.default.ctor]/1).  Default arguments, ellipsis,
- * parameters of class type that does not copy its bytes and constructor
- * templates have no rules.
+ * constructor templates have no rules.
  */
 analysis_result semantic_analysis::inherit_constructors(entity_index c,
                                                         SyntaxRef n)
@@ -3134,13 +3133,6 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             for (uint32_t i = 0; i < base_type.parameter_count; i++) {
                 parameters.append(type_table.parameters(
                     entity_table[k].type.unqualified())[i]);
-                const struct type &p = type_table[parameters[i].unqualified()];
-                if (p.kind == type_kind::class_type &&
-                    (!copies_bytes(p.entity) || destroys(p.entity)))
-                    return not_supported_because(
-                        n, "class.inhctor.init",
-                        "an inherited constructor with a class parameter that "
-                        "is not trivially copied and destroyed");
             }
             /* hidden by a constructor of c with the signature */
             bool hidden = false;
@@ -3209,6 +3201,10 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
  * constructor" with the inheriting constructor's parameters: an xvalue
  * for one of class type or of rvalue reference type, the parameter
  * itself otherwise (the arguments are forwarded as std::forward would).
+ * [class.inhctor.init]/1: "as if by the invocation of the inherited
+ * constructor" on the original arguments, so a class parameter passed by
+ * address ([abi:calls]) is the base's parameter object itself: no copy or
+ * move, and the original caller destroys it.
  */
 analysis_result semantic_analysis::inherited_base_construct(
     token_index at, const struct inherited_call &call, entity_index base,
@@ -3237,6 +3233,11 @@ analysis_result semantic_analysis::inherited_base_construct(
         }
         from.evaluation = constness::not_constant;
         from.node = expression_node(semantic_kind::entity, from, at, p);
+        if (kind.kind == type_kind::class_type && !trivial_class(kind.entity)) {
+            semantics[from.node].op = 1;
+            nodes.append(from.node);
+            continue;
+        }
         initialized_value one;
         VTRY_SET(
             r, initialize_with(current_declaration, from,

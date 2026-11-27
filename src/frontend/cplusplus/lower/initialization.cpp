@@ -54,8 +54,16 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
         analysis.type_table.parameters(function_type.unqualified());
     for (uint32_t i = 0; i < n.count; i++) {
         uint32_t a = 0;
-        if (i < ft.parameter_count && collecting &&
-            passed_indirectly(parameters[i]))
+        const semantic_node &item = node(items[i]);
+        if (item.kind == semantic_kind::entity && item.op) {
+            /* the address this function's caller passed, handed on */
+            uint32_t s = symbol(item.a, at);
+            if (!s)
+                return 0;
+            ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_USED);
+            a = c_variable(c, s, parameter_type(parameters[i], at));
+        } else if (i < ft.parameter_count && collecting &&
+                   passed_indirectly(parameters[i]))
             a = indirect_argument(items[i], parameters[i], at);
         else
             a = expression(items[i]);

@@ -1410,7 +1410,9 @@ enum class semantic_kind : uint8_t {
     /* at: the string-literal; an lvalue of array type */
     string_literal,
     /* a: the variable or function named; a reference variable names the
-       object or function it refers to */
+       object or function it refers to.  op 1: an inheriting constructor's
+       parameter handed on as the inherited constructor's parameter object
+       itself ([class.inhctor.init]/1) */
     entity,
     /* op: a conversion_kind; a: the operand */
     conversion,
