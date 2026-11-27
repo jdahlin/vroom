@@ -3151,7 +3151,16 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         !((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration);
     if (dynamic_inline) {
         if (!deduced) {
+            qualified_type before = type;
             VTRY(r, initializer(init, type, value));
+            if (!(before == type)) {
+                /* [dcl.array]/7: an array of unknown bound completed by its
+                   initializer */
+                entity_table[e].type = type;
+                if (!declared_names.empty() &&
+                    declared_names.back().entity == e)
+                    declared_names.back().type = type;
+            }
         }
         entity &x = entity_table[e];
         x.definition = value.node;
