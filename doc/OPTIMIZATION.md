@@ -100,7 +100,9 @@ What a function gets, in order (the rows of `codegen/vir/pass-table.c`):
    and `vinsert`.
    Before `simplify`, `unroll` (`unroll.cpp`) unrolls in full a straight-line
    loop without calls whose counter, step and bound are constants, up to 16
-   iterations and 640 instructions.
+   iterations and 640 instructions;
+   with `-fvectorize`, a loop of scalars only up to 8, longer ones being the
+   vectorizer's.
 6. **Condition merge** (`condition-merge.c`): `a && b` and `a || b` whose
    result is a value become one compare chain (arm64: `ccmp`).
 7. **If-conversion** (`if-conversion.c`): diamonds and triangles with small

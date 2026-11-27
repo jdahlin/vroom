@@ -15,6 +15,8 @@
 #include "simplify.h"
 
 #define VIRBUILD_UNROLL_TRIPS 16
+/* with the vectorizer, which runs later: a longer loop of scalars is its */
+#define VIRBUILD_UNROLL_SCALAR_TRIPS_VECTORIZING 8
 #define VIRBUILD_UNROLL_SIZE 640 /* instructions after unrolling */
 #define VIRBUILD_UNROLL_BLOCKS 8
 #define VIRBUILD_UNROLL_PARAMETERS 24
@@ -29,6 +31,8 @@ typedef struct virbuild_unroll_loop {
     uint32_t counter; /* an index into parameter */
     int64_t first, step;
     uint32_t trips, size;
+    bool vectorizing; /* -fvectorize */
+    bool has_vector;  /* the loop computes with vectors already */
     uint32_t from[VIRBUILD_UNROLL_SIZE], to[VIRBUILD_UNROLL_SIZE];
     uint32_t mapped;
 } virbuild_unroll_loop;
@@ -61,6 +65,7 @@ static bool virbuild_unroll_copyable(const vir_insn *in)
 static bool virbuild_unroll_count(virbuild_context *V, virbuild_unroll_loop *L)
 {
     L->size = 0;
+    L->has_vector = false;
     for (uint32_t i = 0; i < L->block_count; i++)
         for (uint32_t q = V->blocks[L->block[i]].first_insn; q;
              q = V->insns[q].next) {
@@ -69,6 +74,7 @@ static bool virbuild_unroll_count(virbuild_context *V, virbuild_unroll_loop *L)
                 continue;
             if (!virbuild_unroll_copyable(&V->insns[q].insn))
                 return false;
+            L->has_vector |= vir_type_is_vector(V->insns[q].insn.type);
             L->size++;
         }
     return true;
@@ -189,6 +195,8 @@ static bool virbuild_unroll_find(virbuild_context *V, virbuild_unroll_loop *L,
             return false;
         return virbuild_unroll_trips(V, L, side == 0) &&
                virbuild_unroll_count(V, L) &&
+               (!L->vectorizing || L->has_vector ||
+                L->trips <= VIRBUILD_UNROLL_SCALAR_TRIPS_VECTORIZING) &&
                L->size * (L->trips + 1) <= VIRBUILD_UNROLL_SIZE;
     }
     return false;
@@ -324,6 +332,7 @@ VPRIV bool virbuild_loops_unroll(codegen_context *e)
 
     if (V->indirect_dispatch && V->indirect_dispatch != VIRBUILD_BLOCK_NONE)
         return false;
+    L.vectorizing = e->unit->options->optimize.vectorize;
     /* inner loops come later in the order: a loop whose inner one is gone may then qualify */
     for (uint32_t i = V->block_order_count; i-- > 0;)
         if (virbuild_unroll_find(V, &L, V->block_order[i])) {
