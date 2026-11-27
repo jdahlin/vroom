@@ -28,6 +28,12 @@ typedef struct driver_environment {
     const char *
         input_text; /* non-NULL: the input `-` already read (vccd keeps it for a fallback) */
     size_t input_length;
+    /* with -fcxx-prefix=: called at the stop after the prefix, and may give
+       the job another main file and output (vpp --cxx-prefix-batch forks
+       there).  Only for jobs without -g and -MD. */
+    void (*cxx_boundary)(void *context, const char **main_file,
+                         const char **output_file);
+    void *cxx_boundary_context;
 } driver_environment;
 
 /* the client's umask for files a job creates (-1: the process's own) */

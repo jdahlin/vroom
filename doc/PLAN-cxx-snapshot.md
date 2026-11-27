@@ -1,7 +1,8 @@
 # PLAN-cxx-snapshot: analysed C++ headers once per build, not once per TU
 
-Status: a plan, nothing implemented (2026-11-27).  Steps CS0-CS11, section 7;
-update a step's status there.
+Status: CS2-CS4 done (2026-11-27); CS4's results and the decision it asks for
+are there.  CS5 on not started.  Steps CS0-CS11, section 7; update a step's
+status there.
 
 Goal given: Stockfish 17.1 (`work/stockfish/src`, 23 TUs, libc++) compiled
 about 30x faster than clang++.  Which metric (cold build, rebuild, CPU, wall)
@@ -512,7 +513,14 @@ Verify: memory.cpp.o and movegen.cpp.o have the same symbols with and without
 `-include prefix.h`; suites; `bench/vcc-eh.py`.  Independent of everything
 else and right in itself.  Fallback: leave it, an unused undefined symbol.
 
-### CS2. A stop between the prefix and the TU.  Status: not started.
+### CS2. A stop between the prefix and the TU.  Status: done (2026-11-27).
+Done differently in two places: CS2a only with `-fcxx-prefix=` (a placeholder
+holds the main file's place on the include stack, so the normal path is
+unchanged), and `allocation_names_spelled` is not kept pending: if its answer
+changes after the stop the compile fails with that reason.  The boundary's
+assumptions of 2.2 are not asserted.  `bench/cxx-prefix.py`: 1393 programs of
+src/test/cxx/run, status, diagnostics and object as `-include` (C headers of
+the test runtime as the prefix).
 The largest front-end change, split so each part is byte-identical to before:
 - CS2a. `preprocessor::start` in two: the main file is opened and placed after
   the command line's includes.  Files: `preprocessor/preprocessing-file.cpp`,
@@ -550,7 +558,11 @@ The largest front-end change, split so each part is byte-identical to before:
   read only by the parser and the dumps.  Fallback: none needed, the option is
   off by default.
 
-### CS3. The meaning of the prefix against clang.  Status: not started.
+### CS3. The meaning of the prefix against clang.  Status: partly (2026-11-27).
+`bench/stockfish/prefix.py`: the 23 objects byte-identical to `-include`, and
+the defined symbols of the TU with its own includes at -O2 (at -O0
+position.cpp's and uci.cpp's differ; not looked into).  Not done: clang's
+depfile with a prefix, the node count of a linked binary.
 `-fcxx-prefix=P` accepted by the driver and the harnesses: `bench/cxx-run.py
 --prefix`, `bench/cxx-depfile.py --prefix` (the depfile of 6.6 against
 `clang++ -include P -MD`), `bench/stockfish/run.py --prefix` (the `bench` node
@@ -559,7 +571,21 @@ the three scripts.  No sharing yet: every TU still analyses the prefix.  After
 this step the meaning is fixed and tested, and everything later must be
 byte-identical to it.
 
-### CS4. Fork at the boundary: the experiment.  Status: not started.
+### CS4. Fork at the boundary: the experiment.  Status: done (2026-11-27).
+`vpp --cxx-prefix-batch`, driver_environment::cxx_boundary.  All 23 objects as
+CS3's at -O0 and -O2, one child at a time and 16, also under ASan+UBSan.
+- Instructions (-O2): 82.4G own includes, 37.2G forked.  The prediction of
+  32.4G missed 22 x 0.22G: each child does the end-of-TU analysis and lowering
+  of the prefix's declarations, which section 5 counted once (CS8 is part).
+  For memory.cpp, parent and child are exactly `-include`'s instructions.
+- CPU, back to back at load 7 (3 runs): clang++ 14.6-16.1 s, forked 3.8, 4.0,
+  5.4 s: about 4x, not the 7x predicted (section 5 used a clang++ time of
+  24.8 s taken under load).  Wall 1.5 s with -j 16 at load 27.
+- 1.1 M minor faults, 1.0 s of system time in the 4.7 s of one run (the 23
+  processes without a prefix: 1.4 M faults, 1.7 s).
+- Not measured: a child's Private_Dirty, fork latency, macOS.
+**The gate (under 4 s CPU) is met only in the best runs.**  CS5-CS7 wait for
+the user's decision.
 `vpp --cxx-prefix-batch JOBS -j N`: one process takes the first job to the
 boundary, then forks a child per job, N at a time; the child retargets the
 job (6.3) and finishes.  Files: `src/bin/vpp/vpp.cpp`, `src/driver/job.cpp`

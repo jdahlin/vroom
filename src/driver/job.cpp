@@ -216,6 +216,22 @@ static void driver_job_pp_options_finish(struct driver_job *job,
     }
 }
 
+#ifdef __cplusplus
+struct driver_cxx_boundary {
+    struct driver_job *job;
+    const driver_environment *env;
+};
+
+static void driver_cxx_boundary_reached(void *context, const char **path)
+{
+    struct driver_cxx_boundary *b = (struct driver_cxx_boundary *)context;
+
+    b->env->cxx_boundary(b->env->cxx_boundary_context, &b->job->main_file,
+                         &b->job->output_file);
+    *path = b->job->main_file;
+}
+#endif
+
 /* a C++ translation unit (frontend/cplusplus, doc/PLAN-cxx-sema.md S1e):
    the predefines and search path the driver resolved, the code generator's
    options C has; the C preprocessor p only reports the code generator's
@@ -249,6 +265,11 @@ static int driver_job_compile_cplusplus(struct driver_job *job, pp *p,
         size_t l = strlen(main);
         o.preprocessed_input = (l > 2 && !strcmp(main + l - 2, ".i")) ||
                                (l > 3 && !strcmp(main + l - 3, ".ii"));
+    }
+    struct driver_cxx_boundary boundary = {job, env};
+    if (env->cxx_boundary && !job->debug && !job->depfile) {
+        o.boundary = driver_cxx_boundary_reached;
+        o.boundary_context = &boundary;
     }
     return cplusplus_compile(&o, p, co) || pp_error_count(p) ? 1 : 0;
 #else
