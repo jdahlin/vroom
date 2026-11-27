@@ -219,7 +219,11 @@ bool semantic_analysis::names_dependent_entity(token_index first,
             address_parameter_type(entity_table[e].type) &&
             !depends_on_template_parameter(entity_table[e].type))
             continue;
-        if (k == entity_kind::none || is_template_template_parameter(e))
+        if ((k == entity_kind::none &&
+             (entity_table[e].instantiation ||
+              (entity_table[e].argument_bound &&
+               depends_on_template_parameter(entity_table[e].type)))) ||
+            is_template_template_parameter(e))
             return true;
         if ((k == entity_kind::variable || k == entity_kind::typedef_name) &&
             depends_on_template_parameter(entity_table[e].type))
