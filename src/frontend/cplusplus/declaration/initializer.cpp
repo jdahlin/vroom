@@ -2966,6 +2966,10 @@ analysis_result semantic_analysis::aggregate_element_clause(
        type_table's */
     const struct type record = type_table[element.unqualified()];
     bool braced = clause.is(syntax_kind::braced_init_list);
+    /* (a class template's specialization may not be instantiated yet:
+       whether it is an aggregate is known of the complete class) */
+    if (record.kind == type_kind::class_type)
+        require_complete(record.entity);
     bool subaggregate =
         record.kind == type_kind::array || is_vector_kind(record.kind) ||
         (record.kind == type_kind::class_type &&
