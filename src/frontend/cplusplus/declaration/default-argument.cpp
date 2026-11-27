@@ -43,7 +43,7 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
         return analysis_result::well_formed;
     /* a default argument added after a using-declaration named the
        function (so by a redeclaration): the standard's using-declaration
-       sees it, clang's does not */
+       sees it, clang's does not [impl.clang] */
     if (kind == entity_kind::function && f && !specialization &&
         entity_table[f].named_by_using)
         return not_supported_because(
