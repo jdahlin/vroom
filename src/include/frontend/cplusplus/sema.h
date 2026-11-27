@@ -6996,6 +6996,8 @@ class semantic_analysis
        classes or closure types other translation units name too: its
        symbol has its template's linkage (basic/translation-unit.cpp) */
     bool specialization_visible(entity_index e) const;
+    bool unit_local(entity_index e) const;
+    bool argument_unit_local(const template_argument &a) const;
     bool type_without_external_linkage(qualified_type t, bool visible = false,
                                        bool arguments = false) const;
     uint32_t specialization_argument_count(entity_index e) const

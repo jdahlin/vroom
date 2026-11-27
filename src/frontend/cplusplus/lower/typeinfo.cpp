@@ -63,7 +63,7 @@ uint32_t vmi_flags(const semantic_analysis &analysis, entity_index base,
 bool c_lowering::class_internal(entity_index k) const
 {
     const entity &x = analysis.entity_table[k];
-    return x.linkage_of_name == linkage::internal ||
+    return x.linkage_of_name == linkage::internal || analysis.unit_local(k) ||
            (x.linkage_of_name == linkage::none &&
             !visible_local_class(analysis.entity_table, k)) ||
            (x.instantiation &&

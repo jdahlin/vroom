@@ -96,7 +96,75 @@ bool semantic_analysis::specialization_visible(entity_index e) const
            x.instantiation && x.linkage_of_name == linkage::internal &&
            entity_table[specialized_template(e)].linkage_of_name ==
                linkage::external &&
-           !type_without_external_linkage(x.type, true, true);
+           !unit_local(e) && !type_without_external_linkage(x.type, true, true);
+}
+
+/* [basic.link]/4: whether a template argument names an entity that no
+   other translation unit can name: a type without external linkage, the
+   address of a function or object of internal linkage, such a template, or
+   a pack with one of these */
+bool semantic_analysis::argument_unit_local(const template_argument &a) const
+{
+    switch (a.kind) {
+    case template_argument::kind_t::type:
+        return type_without_external_linkage(a.type, true, true);
+    case template_argument::kind_t::value:
+        if (a.template_entity || !a.value)
+            return false;
+        if (type_table[a.type.unqualified()].kind !=
+                type_kind::pointer_to_member &&
+            !address_parameter_type(a.type))
+            return false;
+        {
+            entity_index named = static_cast<entity_index>(a.value);
+            return entity_table[named].linkage_of_name == linkage::internal ||
+                   unit_local(named);
+        }
+    case template_argument::kind_t::template_name: {
+        if (a.template_entity)
+            return false;
+        entity_index named = static_cast<entity_index>(a.value);
+        return entity_table[named].linkage_of_name == linkage::internal ||
+               unit_local(named);
+    }
+    case template_argument::kind_t::pack:
+        for (uint32_t k = 0; k < a.count; k++)
+            if (argument_unit_local(pack_arguments[a.value + k]))
+                return true;
+        return false;
+    }
+    return false;
+}
+
+/*
+ * [basic.link]/4, [impl.clang]: whether e is of one translation unit though
+ * its own declaration does not say so: it, or a class or function it is
+ * declared in, is a specialization with such an argument, a closure type of
+ * namespace scope that no inline variable's initializer has, or a function
+ * of internal linkage.  Its symbols are local: another unit's of the same
+ * name (a $_0, a _GLOBAL__N_1) is another entity.
+ */
+bool semantic_analysis::unit_local(entity_index e) const
+{
+    for (entity_index k = e; k; k = entity_table[k].enclosing) {
+        const entity &x = entity_table[k];
+        if (x.kind == entity_kind::class_type && x.lambda &&
+            !x.closure_variable &&
+            (!x.enclosing ||
+             entity_table[x.enclosing].kind == entity_kind::namespace_entity))
+            return true;
+        if (x.kind == entity_kind::function && k != e && !x.instantiation &&
+            x.linkage_of_name == linkage::internal)
+            return true;
+        if (!x.instantiation)
+            continue;
+        const instantiation_record &made = instantiations[x.instantiation - 1];
+        for (uint32_t i = 0; i < made.argument_count; i++)
+            if (argument_unit_local(
+                    template_arguments[made.first_argument + i]))
+                return true;
+    }
+    return false;
 }
 
 /* [basic.link]/4: a class or enumeration of an unnamed namespace has
@@ -118,8 +186,11 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
             x.kind != entity_kind::enumeration)
             return false;
         if (visible && x.linkage_of_name == linkage::none &&
-            visible_local_class(entity_table, record.entity))
+            visible_local_class(entity_table, record.entity) &&
+            !unit_local(record.entity))
             return false;
+        if (arguments && x.lambda && unit_local(record.entity))
+            return true;
         if (x.linkage_of_name != linkage::external)
             return true;
         /* [basic.link]/4: an unnamed enumeration of namespace scope with
@@ -137,22 +208,10 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
         if (arguments && x.kind == entity_kind::class_type && x.instantiation) {
             const instantiation_record &made =
                 instantiations[x.instantiation - 1];
-            for (uint32_t i = 0; i < made.argument_count; i++) {
-                const template_argument &a =
-                    template_arguments[made.first_argument + i];
-                if (a.kind == template_argument::kind_t::type &&
-                    type_without_external_linkage(a.type, true, true))
+            for (uint32_t i = 0; i < made.argument_count; i++)
+                if (argument_unit_local(
+                        template_arguments[made.first_argument + i]))
                     return true;
-                if (a.kind != template_argument::kind_t::pack)
-                    continue;
-                for (uint32_t k = 0; k < a.count; k++) {
-                    const template_argument &element =
-                        pack_arguments[a.value + k];
-                    if (element.kind == template_argument::kind_t::type &&
-                        type_without_external_linkage(element.type, true, true))
-                        return true;
-                }
-            }
         }
         return false;
     }
