@@ -422,6 +422,9 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         {"vmovdqu64", VECTOR_STORE, 1, 0x7f, 2, 1, 64},
         {"vmovdqa64", VECTOR_STORE, 1, 0x7f, 1, 1, 64},
         {"vpbroadcastq", BROADCAST, 2, 0x59, 1, 1, 8},
+        {"vpbroadcastd", BROADCAST, 2, 0x58, 1, 0, 4},
+        {"vpbroadcastw", BROADCAST, 2, 0x79, 1, 0, 2},
+        {"vpbroadcastb", BROADCAST, 2, 0x78, 1, 0, 1},
         {"vpsraw", MOVE_SHIFT, 1, 0x71, 1, 0, 64, 4},
         {"vpsllw", MOVE_SHIFT, 1, 0x71, 1, 0, 64, 6},
         {"vpslld", MOVE_SHIFT, 1, 0x72, 1, 0, 64, 6},
@@ -481,6 +484,9 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
             !(n == 3 && o[0].kind == XK_IMM))
             continue;
         if (form == COUNT_SHIFT && n == 3 && o[0].kind == XK_IMM)
+            continue;
+        if (form == BROADCAST &&
+            !(n == 2 && o[0].kind == XK_REG && o[0].cls == XR_XMM))
             continue;
         if (form == VECTOR_STORE || form == BROADCAST) {
             XOp *reg = &o[1], *mem = &o[0];

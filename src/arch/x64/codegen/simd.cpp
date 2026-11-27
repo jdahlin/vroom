@@ -1059,21 +1059,21 @@ VPRIV codegen_value x64_x86_instruction(codegen_context *e, uint32_t n)
 
 /* the lane-wise operators' single instructions */
 static const char *const x64_x86_operators[] = {
-    "paddb",      "paddw",     "paddd",     "paddq",     "psubb",
-    "psubw",      "psubd",     "psubq",     "pmullw",    "pand",
-    "por",        "pxor",      "pcmpeqb",   "pcmpeqw",   "pcmpeqd",
-    "pcmpgtb",    "pcmpgtw",   "pcmpgtd",   "addps",     "addpd",
-    "subps",      "subpd",     "mulps",     "mulpd",     "divps",
-    "divpd",      "cmpeqps",   "cmpeqpd",   "cmpneqps",  "cmpneqpd",
-    "cmpltps",    "cmpltpd",   "cmpleps",   "cmplepd",   "psllw",
-    "pslld",      "psllq",     "psraw",     "psrad",     "psrlw",
-    "psrld",      "psrlq",     "punpcklbw", "punpcklwd", "punpckldq",
-    "punpcklqdq", "punpckhbw", "punpckhwd", "punpckhdq", "punpckhqdq",
-    "pshufd",     "shufps",    "pshuflw",   "pshufhw",   "psrldq",
-    "pslldq",     "packuswb",  "packssdw",  "packsswb",  "packusdw",
-    "pmaddubsw",  "pmaddwd",   "pmulhw",    "pmulhuw",   "pmulhrsw",
-    "pshufb",     "pminsw",    "pmaxsw",    "movmskps",  "pext",
-    "pdep"};
+    "paddb",      "paddw",       "paddd",       "paddq",      "psubb",
+    "psubw",      "psubd",       "psubq",       "pmullw",     "pand",
+    "por",        "pxor",        "pcmpeqb",     "pcmpeqw",    "pcmpeqd",
+    "pcmpgtb",    "pcmpgtw",     "pcmpgtd",     "addps",      "addpd",
+    "subps",      "subpd",       "mulps",       "mulpd",      "divps",
+    "divpd",      "cmpeqps",     "cmpeqpd",     "cmpneqps",   "cmpneqpd",
+    "cmpltps",    "cmpltpd",     "cmpleps",     "cmplepd",    "psllw",
+    "pslld",      "psllq",       "psraw",       "psrad",      "psrlw",
+    "psrld",      "psrlq",       "punpcklbw",   "punpcklwd",  "punpckldq",
+    "punpcklqdq", "punpckhbw",   "punpckhwd",   "punpckhdq",  "punpckhqdq",
+    "pshufd",     "shufps",      "pshuflw",     "pshufhw",    "psrldq",
+    "pslldq",     "packuswb",    "packssdw",    "packsswb",   "packusdw",
+    "pmaddubsw",  "pmaddwd",     "pmulhw",      "pmulhuw",    "pmulhrsw",
+    "pshufb",     "pminsw",      "pmaxsw",      "movmskps",   "pext",
+    "pdep",       "pbroadcastb", "pbroadcastw", "pbroadcastd"};
 
 /* whether the operator can be emitted on zmm registers: a byte or word
    compare, through a mask register; no other compare, and no shuffle */
