@@ -6466,8 +6466,8 @@ class semantic_analysis
     /* a type partial ordering compares with deduce_type's rules alone;
        pack_argument set when a specialization in it has a pack of
        arguments */
-    bool orderable(qualified_type t, bool packs,
-                   bool *pack_argument = nullptr) const;
+    bool orderable(qualified_type t, bool packs, bool *pack_argument = nullptr,
+                   unsigned *value_kinds = nullptr) const;
     bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
                                  bool &unknown, bool f_reversed = false,
                                  bool g_reversed = false);
