@@ -7230,6 +7230,9 @@ class semantic_analysis
     uint32_t qualifiers_of(qualified_type t) const;
     /* whether object[index], object of class type, has no built-in
        candidate */
+    entity_index
+    preferred_pointer_conversion(const owned_array<entity_index> &functions,
+                                 uint32_t object);
     bool subscript_has_no_builtin(qualified_type object,
                                   qualified_type index) const;
     /* whether the class s has a non-explicit conversion function that may

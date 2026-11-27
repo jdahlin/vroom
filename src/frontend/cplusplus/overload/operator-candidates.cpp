@@ -118,6 +118,52 @@ bool semantic_analysis::converts_to_callable(entity_index c) const
     return false;
 }
 
+/*
+ * [over.match.best]/1: of the non-explicit conversion functions of a class,
+ * all yielding pointers to one type, the one whose cv-qualifiers are the
+ * object's, when the others add them to the pointee: each built-in
+ * candidate's argument converts through it (its object binding is the
+ * best, [over.ics.rank]/3.2.6).  0 when the functions are not of that
+ * shape.
+ */
+entity_index semantic_analysis::preferred_pointer_conversion(
+    const owned_array<entity_index> &functions, uint32_t object)
+{
+    uint32_t cv = object_cv(object);
+    entity_index preferred = 0;
+    for (entity_index f : functions) {
+        if (entity_table[f].explicit_)
+            continue;
+        if (entity_table[f].member_cv & (cv_ref_lvalue | cv_ref_rvalue))
+            return 0;
+        if (object_cv(entity_table[f].member_cv) != cv)
+            continue;
+        if (preferred)
+            return 0;
+        preferred = f;
+    }
+    if (!preferred)
+        return 0;
+    const struct type best =
+        type_table[conversion_function_result(preferred).type.unqualified()];
+    if (best.kind != type_kind::pointer)
+        return 0;
+    for (entity_index f : functions) {
+        if (entity_table[f].explicit_ || f == preferred)
+            continue;
+        /* (not viable for the object) */
+        if ((object_cv(entity_table[f].member_cv) & cv) != cv)
+            continue;
+        const struct type &r =
+            type_table[conversion_function_result(f).type.unqualified()];
+        if (r.kind != type_kind::pointer ||
+            r.operand.unqualified() != best.operand.unqualified() ||
+            (r.operand.cv() & best.operand.cv()) != best.operand.cv())
+            return 0;
+    }
+    return preferred;
+}
+
 bool semantic_analysis::subscript_has_no_builtin(qualified_type object,
                                                  qualified_type index) const
 {
@@ -802,9 +848,15 @@ analysis_result semantic_analysis::overloaded_operator(
                         n, "over.built",
                         "a built-in operator on a class whose conversion "
                         "functions are unknown");
+                /* pointer conversion functions that differ in the cv of
+                   the object and of the pointee (operator T *() and
+                   operator const T *() const) are one choice */
+                entity_index preferred =
+                    preferred_pointer_conversion(fns, op_val.type.cv());
                 qualified_type target;
                 for (entity_index f : fns) {
-                    if (entity_table[f].explicit_)
+                    if (entity_table[f].explicit_ ||
+                        (preferred && f != preferred))
                         continue;
                     expression_meaning result = conversion_function_result(f);
                     qualified_type rt = result.type;
@@ -1190,6 +1242,24 @@ analysis_result semantic_analysis::overloaded_operator(
             arguments.size() == 2 &&
             subscript_has_no_builtin(arguments[0].type, arguments[1].type))
             beats_builtin = true;
+        /* [over.built]/14: a member operator[] binds the object better
+           than the built-in subscript, which converts it, and beats it
+           when its index converts no worse than to std::ptrdiff_t */
+        if (!beats_builtin && op == preprocessing_op_or_punc::LEFT_BRACKET &&
+            win.member && arguments.size() == 2 && ft.parameter_count == 1 &&
+            is_integral(arguments[1].type)) {
+            conversion_sequence seq =
+                implicit_conversion_sequence(arguments[1], params[0], false);
+            conversion_sequence builtin = implicit_conversion_sequence(
+                arguments[1],
+                qualified_type::make(
+                    type_table.fundamental(fundamental_type::long_int),
+                    cv_none),
+                false);
+            beats_builtin = seq.kind == conversion_sequence::form::standard &&
+                            builtin.kind == seq.kind &&
+                            seq.rank <= builtin.rank;
+        }
         if (!beats_builtin)
             return not_supported_because(n, "over.built",
                                          "a viable operator function that may "
