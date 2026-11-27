@@ -1326,7 +1326,8 @@ bool semantic_analysis::copy_argument_candidate(
         return false;
     const struct type &t = type_table[arguments[0].type.unqualified()];
     if (t.kind == type_kind::fundamental || t.kind == type_kind::pointer ||
-        t.kind == type_kind::enumeration || t.kind == type_kind::array)
+        t.kind == type_kind::enumeration || t.kind == type_kind::array ||
+        t.kind == type_kind::function || t.kind == type_kind::pointer_to_member)
         return false;
     /* anything else not analysed is taken as a candidate */
     if (t.kind != type_kind::class_type)
