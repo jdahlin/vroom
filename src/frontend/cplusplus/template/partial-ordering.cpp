@@ -235,8 +235,14 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
     if (gfixed && type_table[gp[gfixed - 1].unqualified()].kind ==
                       type_kind::pack_expansion)
         gfixed--;
-    if (arguments < ffixed || arguments < gfixed ||
-        (ffixed == fr.parameter_count && arguments != ffixed) ||
+    /* [temp.deduct.partial]/3.1: only the parameter types "for which the
+       function call has arguments" are used: the parameters after them,
+       which have default arguments, take no part */
+    if (arguments < ffixed)
+        ffixed = static_cast<uint32_t>(arguments);
+    if (arguments < gfixed)
+        gfixed = static_cast<uint32_t>(arguments);
+    if ((ffixed == fr.parameter_count && arguments != ffixed) ||
         (gfixed == gr.parameter_count && arguments != gfixed)) {
         unknown = true;
         return false;
