@@ -799,10 +799,35 @@ bool itanium_mangler::constraint_template_args(entity_index t, SyntaxElement c)
         SyntaxElement a = written[wi];
         if (a.is(preprocessing_op_or_punc::COMMA))
             continue;
+        /* (a pack expansion: the type-id's '...') */
+        bool expansion = a.is_node() && a.is(syntax_kind::type_id) &&
+                         a.size() == 2 &&
+                         a[1].is(preprocessing_op_or_punc::ELLIPSIS);
+        SyntaxElement whole = a;
+        if (expansion)
+            a = a[0];
         /* a type-id that is one template parameter's name */
         while (a.is_node() && a.size() == 1 &&
                a.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
             a = a[0];
+        /* decltype(p), p a function parameter of t: Dt <function-param>
+           E; expanded, a pack's, after Dp ([abi:expressions]) */
+        if (a.is_node() && a.is(syntax_kind::decltype_specifier) &&
+            a.size() == 4 && a[2].is_token()) {
+            if (uint32_t parameter =
+                    analysis.function_parameter_position(t, a[2].token())) {
+                if (expansion)
+                    text("Dp");
+                text("Dtfp");
+                if (parameter > 1)
+                    number(parameter - 2);
+                text("_E");
+                continue;
+            }
+        }
+        /* (other expansions are not mangled yet) */
+        if (expansion)
+            a = whole;
         if (!a.is_token()) {
             /* another type (an alias template's specialization, a
                typename, ...): analysed in the template's parameter scope */
