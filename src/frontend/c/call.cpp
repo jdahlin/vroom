@@ -295,24 +295,12 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
         int nl, k = AST_TYPE_KIND(c, AST_TYPE(c, ft)->base);
         const char *nm =
             cc_identifier_name(c->syms[AST_NODE(callee)->a].name, &nl);
-        int want = nl == 3 && !memcmp(nm, "abs", 3)     ? AST_TYPE_INT
-                   : nl == 4 && !memcmp(nm, "labs", 4)  ? AST_TYPE_LONG
-                   : nl == 5 && !memcmp(nm, "llabs", 5) ? AST_TYPE_LONG_LONG
-                                                        : -1;
 
-        if (k == want && f->n == 1 &&
-            AST_TYPE_KIND(c, c->params[f->aux]) == want) {
-            ast_qualified_type t = cc_type_basic(want);
-            uint32_t pre, x = cc_lowering_once(c, args.v[0], &pre);
-            uint32_t neg =
-                cc_node_binary_new(c, LEX_TOKEN_MINUS, t,
-                                   cc_node_integer_new(c, 0, t, loc), x, loc);
-            uint32_t lt = cc_node_binary_new(
-                c, LEX_TOKEN_LESS, cc_type_basic(AST_TYPE_INT), x,
-                cc_node_integer_new(c, 0, t, loc), loc);
-
-            return cc_lowering_sequence(
-                c, pre, cc_conditional_build(c, lt, neg, x, loc));
+        if (f->n == 1 && AST_TYPE_KIND(c, c->params[f->aux]) == k) {
+            uint32_t absolute =
+                cc_builtin_abs_build(c, nm, (size_t)nl, args.v[0], loc);
+            if (absolute)
+                return absolute;
         }
         if (k == AST_TYPE_DOUBLE && f->n == 1 &&
             !(f->flags &

@@ -572,6 +572,13 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
             if (folded)
                 return folded;
         }
+        if (b->id == CC_BUILTIN_LIBRARY && args.n == 1) {
+            /* (__builtin_abs is computed whatever -fno-builtin says) */
+            uint32_t absolute = cc_builtin_abs_build(
+                c, b->name + 10, strlen(b->name + 10), args.v[0], loc);
+            if (absolute)
+                return absolute;
+        }
         if (b->id == CC_BUILTIN_LIBRARY) {
             uint32_t result = cc_builtin_fp_sign_build(
                 c, b->name + 10, strlen(b->name + 10), ft, &args, loc);

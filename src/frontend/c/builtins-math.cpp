@@ -130,3 +130,33 @@ CC_PRIVATE uint32_t cc_builtin_math_call_build(cc *c, const cc_builtin *b,
         return 0;
     }
 }
+
+/* abs, labs and llabs (name[0..length)) of an argument of their own type,
+   computed here, as clang: x < 0 ? 0 - x : x; 0 for any other call */
+CC_PRIVATE uint32_t cc_builtin_abs_build(cc *c, const char *name, size_t length,
+                                         uint32_t arg, uint32_t loc)
+{
+    static const struct {
+        const char *name;
+        int kind;
+    } functions[] = {{"abs", AST_TYPE_INT},
+                     {"labs", AST_TYPE_LONG},
+                     {"llabs", AST_TYPE_LONG_LONG}};
+
+    for (const auto &f : functions) {
+        if (strlen(f.name) != length || memcmp(f.name, name, length) ||
+            AST_TYPE_KIND(c, AST_NODE(arg)->ty) != f.kind)
+            continue;
+        ast_qualified_type t = cc_type_basic(f.kind);
+        uint32_t pre, x = cc_lowering_once(c, arg, &pre);
+        uint32_t neg = cc_node_binary_new(
+            c, LEX_TOKEN_MINUS, t, cc_node_integer_new(c, 0, t, loc), x, loc);
+        uint32_t lt =
+            cc_node_binary_new(c, LEX_TOKEN_LESS, cc_type_basic(AST_TYPE_INT),
+                               x, cc_node_integer_new(c, 0, t, loc), loc);
+
+        return cc_lowering_sequence(c, pre,
+                                    cc_conditional_build(c, lt, neg, x, loc));
+    }
+    return 0;
+}
