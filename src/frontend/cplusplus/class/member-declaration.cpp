@@ -194,10 +194,28 @@ node_index parser::class_body(uint32_t name, scope_index region,
        member function's body before it may use: read in the first pass */
     bool anonymous_members =
         !name && at(preprocessing_op_or_punc::SEMICOLON, group_end(0));
-    if (collecting_members && !anonymous_members)
-        /* a nested class in its enclosing class's first pass: its members
-           are its own, read when the enclosing class is read in full */
+    if (collecting_members && !anonymous_members) {
+        /* a nested class in its enclosing class's first pass: read in full
+           with the enclosing class.  Its member names are collected all
+           the same: a member function body before it may name them
+           ([class.mem]/6, the complete-class context) */
+        if (name) {
+            tentative_parse names_only(*this);
+            scope_index outer = names.current();
+            add_token(); /* { */
+            names.reenter(region);
+            names.declare(name, name_kind::type_name, region);
+            uint32_t enclosing_class = member_class_name;
+            member_class_name = name;
+            enclosing_braces++;
+            member_specification();
+            enclosing_braces--;
+            member_class_name = enclosing_class;
+            names.set_complete(region, names.snapshot(region));
+            names.reenter(outer);
+        }
         return unparsed_group();
+    }
     add_token(); /* { */
     scope_index outer = names.current();
     /* [temp.local]/1: a class template's injected-class-name is a
