@@ -2086,9 +2086,16 @@ analysis_result semantic_analysis::class_list_initialization(
             size_t next = 0;
             return aggregate_elements(list, clauses, next, type, result);
         }
-        if (clauses.empty() || (!entity_table[c].first_constructor &&
-                                !entity_table[c].constructor_template &&
-                                !entity_table[c].constructor_templates))
+        bool none_declared = !entity_table[c].first_constructor &&
+                             !entity_table[c].constructor_template &&
+                             !entity_table[c].constructor_templates;
+        /* [over.match.list], [over.match.ctor]: a class with neither bases
+           nor other constructors has the implicit and defaulted ones alone,
+           none of two parameters (std::allocator_arg_t) */
+        if (none_declared && clauses.size() > 1 && !entity_table[c].base_count)
+            return ill_formed(list, "no constructor takes the elements",
+                              "over.match.list");
+        if (clauses.empty() || none_declared)
             return not_supported_because(
                 list, "over.match.list",
                 "list-initialization of a non-aggregate with no constructor "
