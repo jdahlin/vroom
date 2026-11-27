@@ -819,6 +819,8 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                 r = function(d, probe);
                 if (r == analysis_result::well_formed) {
                     open_parameter_scope();
+                    /* [dcl.spec.auto]/3: -> auto, -> decltype(auto) */
+                    placeholder_allowed = true;
                     r = type_id(part[1], returns);
                 }
                 current_scope = outer;
