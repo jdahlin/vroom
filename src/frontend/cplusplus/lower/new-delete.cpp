@@ -93,6 +93,35 @@ static uint32_t declared_symbol(cc *c, owned_array<uint32_t> &items,
     return s;
 }
 
+/* [dcl.init]/6: memset (first, 0, count * sizeof (element)); zero is not a
+   null pointer to data member ([abi:data-member-pointers]) */
+uint32_t c_lowering::zero_elements(qualified_type element, uint32_t first,
+                                   uint32_t count, ast_qualified_type size,
+                                   token_index at)
+{
+    if (holds_data_member_pointer(element))
+        return fail("a zero-initialized array with a pointer to data member "
+                    "in it",
+                    at);
+    ast_qualified_type v = pointer_to(void_type);
+    ast_qualified_type parameters[3] = {v, ast_builder_type_basic(AST_TYPE_INT),
+                                        size};
+    uint32_t bytes =
+        make(AST_NODE_BINARY, size, c_variable(c, count, size),
+             ast_builder_integer(
+                 c, size, static_cast<int64_t>(analysis.size_of_type(element))),
+             0, LEX_TOKEN_STAR, 0);
+    ast_qualified_type pointer = pointer_to(type(element, at));
+    uint32_t arguments[3] = {
+        cast(c_variable(c, first, pointer), v, AST_CAST_POINTER_TO_POINTER),
+        ast_builder_integer(c, parameters[1], 0), bytes};
+    uint32_t call =
+        runtime_call(memset_function, "memset", v, parameters, arguments, 3);
+    if (!call)
+        return 0;
+    return cast(call, void_type, AST_CAST_VOID);
+}
+
 /* [expr.new]/22 and [abi:array-cookies]: ({ size_t k = count; char *raw =
    allocation; T *p = (T *)raw; if (raw) { *(size_t *)raw = k; p = (T *)(raw
    + cookie); for each element: its initialization; } p; }), the test only
@@ -139,7 +168,13 @@ uint32_t c_lowering::new_array(const semantic_node &n, ast_qualified_type t)
                       offset_pointer(variable(raw, bytes),
                                      static_cast<int64_t>(n.value), t))));
     }
-    if (n.b) {
+    if (n.b && node(n.b).kind == semantic_kind::zero) {
+        /* [dcl.init]/8: the elements zero-initialized, all at once */
+        uint32_t zeroed = zero_elements(element, p, count, size, n.at);
+        if (!zeroed)
+            return 0;
+        body.append(c_statement(c, zeroed));
+    } else if (n.b) {
         uint32_t loop = element_loop(p, object, size, count, false, n.b);
         if (!loop)
             return 0;
