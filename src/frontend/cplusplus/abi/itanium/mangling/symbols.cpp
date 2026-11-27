@@ -61,10 +61,10 @@ bool itanium_mangler::mangled_name(entity_index e)
     if (x.c_language_linkage ||
         (global && !internal_variable && !specialization && !binding &&
          (x.kind == entity_kind::variable || is_main))) {
-        vbuffer_append(out, identifier, length);
+        enc.unmangled(identifier, length);
         return true;
     }
-    text("_Z");
+    enc.write(terminal::mangled_name);
     return encoding(e);
 }
 
@@ -110,7 +110,7 @@ bool itanium_mangler::encoding(entity_index e)
             entity_index pattern = analysis.specialized_template(x.enclosing);
             if (!pattern)
                 return false;
-            text("Q");
+            enc.write(terminal::requires_clause);
             return expression_of_constraint(pattern, part[1]);
         }
     }
@@ -166,7 +166,7 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
         local = local_function(e, &local_class);
         if (member && local && !local_name_scope(local))
             return false;
-        text("N");
+        enc.write(terminal::nested_name);
         if (member && x.nonstatic_member)
             member_cv_ref_qualifiers(x);
     }
@@ -178,13 +178,13 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
             if (!prefix(scope))
                 return false;
         } else if (scope) {
-            text("St");
+            enc.write(terminal::std_prefix);
         }
         if (!unqualified_name(e))
             return false;
         candidate c;
         c.scope = pattern_of;
-        candidates.append(c);
+        enc.add_candidate(c);
     }
     /* [impl.clang]: only a function template's specialization has the
        parameters' types ("Tn") before its arguments; a variable's has not */
@@ -205,14 +205,14 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
        expression, E; the requires-clause of the template-head */
     SyntaxElement constraint = analysis.template_constraint(pattern_of);
     if (constraint && !table[scope].lambda) {
-        out->n--;
-        text("Q");
+        enc.take_back(terminal::end);
+        enc.write(terminal::requires_clause);
         if (!expression_of_constraint(pattern_of, constraint))
             return false;
-        text("E");
+        enc.write(terminal::end);
     }
     if (nested)
-        text("E");
+        enc.write(terminal::end);
     if (local)
         local_class_discriminator(local_class, local);
     /* a variable template's specialization: <data name> */
@@ -243,7 +243,7 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
     else if ((constraint = analysis.template_trailing_constraint(pattern_of)))
         trailing = true;
     if (constraint && trailing) {
-        text("Q");
+        enc.write(terminal::requires_clause);
         return expression_of_constraint(pattern_of, constraint);
     }
     return true;

@@ -22,9 +22,7 @@ bool itanium_mangler::class_template_args(entity_index c)
          x.kind != entity_kind::template_specialization) ||
         !x.instantiation)
         return true;
-    candidate t;
-    t.scope = analysis.specialized_template(c);
-    candidates.append(t);
+    add_candidate(analysis.specialized_template(c));
     return template_args(c);
 }
 
@@ -40,10 +38,8 @@ bool itanium_mangler::class_template_args(entity_index c)
 bool itanium_mangler::non_type_parameter_type(entity_index c, uint32_t i,
                                               qualified_type declared)
 {
-    size_t length = out->n;
+    itanium_encoder::mark length = enc.position();
     owned_array<candidate> saved;
-    for (const candidate &x : candidates)
-        saved.append(x);
     const char *before = refused;
     alias_value_refused = false;
     if (type(declared))
@@ -52,16 +48,14 @@ bool itanium_mangler::non_type_parameter_type(entity_index c, uint32_t i,
         return false;
     const char *why = refused, *where = refused_in;
     refused = nullptr;
-    out->n = length;
-    candidates.clear();
+    enc.rewind(length);
+    enc.take_candidates(saved);
     uint64_t written = template_params_written;
     alias_value_trial = true;
     bool resolved = type(declared) && written == template_params_written;
     alias_value_trial = false;
-    out->n = length;
-    candidates.clear();
-    for (const candidate &x : saved)
-        candidates.append(x);
+    enc.rewind({length.bytes, 0});
+    enc.give_back_candidates(saved);
     if (!resolved) {
         refused = why;
         refused_in = where;
@@ -86,7 +80,7 @@ bool itanium_mangler::non_type_parameter_type(entity_index c, uint32_t i,
 bool itanium_mangler::template_args(entity_index c, entity_index function,
                                     bool pack_brackets, uint32_t limit)
 {
-    text("I");
+    enc.write(terminal::template_args);
     uint32_t count = analysis.specialization_argument_count(c);
     if (limit < count)
         count = limit;
@@ -111,7 +105,8 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
                the type is then not deduced from the arguments */
             if (pack == 1 ||
                 analysis.dependent_parameter_type(function, i, declared)) {
-                text("TpTn");
+                enc.write(terminal::pack_parameter_decl);
+                enc.write(terminal::non_type_parameter_decl);
                 const char *outer_part = mangling_part;
                 mangling_part = "a non-type template parameter's type";
                 bool typed = type(value_type);
@@ -124,7 +119,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
             if (pack)
                 return refuse("a non-type template parameter pack of a "
                               "dependent type");
-            text("Tn");
+            enc.write(terminal::non_type_parameter_decl);
             const char *outer_part = mangling_part;
             mangling_part = "a non-type template parameter's type";
             bool typed = non_type_parameter_type(c, i, declared);
@@ -147,7 +142,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
                              q[1].is_identifier();
             if (pack || !q.size() || (!qualified && !q[0].is_identifier()))
                 return false;
-            text("Tk");
+            enc.write(terminal::constrained_parameter_decl);
             if (!type_constraint(function, q))
                 return false;
         }
@@ -164,15 +159,16 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
             if ((!pack || pack > 1) &&
                 analysis.specialization_template_name(c, i, named,
                                                       own_parameter, element)) {
-                owned_buffer decl;
+                entity_index decl_parameter = 0;
                 if (own_parameter || !analysis.template_argument_declaration(
-                                         function, i, named, decl.get()))
+                                         function, i, named, decl_parameter))
                     return refuse("a template template argument that may need "
                                   "a template-param-decl");
-                if (pack && decl.size())
+                if (pack && decl_parameter)
                     return refuse("a pack of template template arguments with "
                                   "template-param-decls");
-                vbuffer_append(out, decl.data(), decl.size());
+                if (decl_parameter)
+                    template_template_param_decl(decl_parameter);
             }
         }
         if (!pack) {
@@ -186,7 +182,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
                <template-arg> ::= J <template-arg>* E
         */
         if (pack_brackets)
-            text("J");
+            enc.write(terminal::template_arg_pack);
         for (uint32_t k = 1; k < pack; k++) {
             /* a template's own pack expanded (res<A...> in its own
                declaration): [abi:mangle.function-type]'s pack expansion of the
@@ -195,9 +191,10 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
                 /* a non-type pack: the expansion of the parameter as an expression
                    (sp), in a template argument (X ... E) */
                 if (analysis.entity_table[own].kind == entity_kind::none) {
-                    text("Xsp");
+                    enc.write(terminal::template_arg_expression);
+                    enc.write(terminal::pack_expansion_expression);
                     template_param(analysis.entity_table[own].value);
-                    text("E");
+                    enc.write(terminal::end);
                     continue;
                 }
                 /* a pattern written as a type-id (tup<T&&...>): the pack
@@ -231,9 +228,9 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
                 return false;
         }
         if (pack_brackets)
-            text("E");
+            enc.write(terminal::end);
     }
-    text("E");
+    enc.write(terminal::end);
     return true;
 }
 
@@ -243,8 +240,8 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
  */
 bool itanium_mangler::own_pack_expansion(qualified_type pattern)
 {
-    for (size_t i = 0; i < candidates.size(); i++) {
-        const candidate &c = candidates[i];
+    for (size_t i = 0; i < enc.candidate_count(); i++) {
+        const candidate &c = enc.candidate_at(i);
         if (c.scope || c.member_class)
             continue;
         bool same = false;
@@ -254,17 +251,17 @@ bool itanium_mangler::own_pack_expansion(qualified_type pattern)
                  record(c.type).kind == type_kind::pack_expansion)
             same = same_candidate(record(c.type).operand, pattern);
         if (same) {
-            substitution_at(i);
+            enc.substitution(i);
             return true;
         }
     }
-    text("Dp");
+    enc.write(terminal::pack_expansion);
     if (!type(pattern))
         return false;
     candidate c;
     c.type = pattern;
     c.expansion = true;
-    candidates.append(c);
+    enc.add_candidate(c);
     return true;
 }
 
@@ -286,7 +283,7 @@ bool itanium_mangler::template_template_arg(entity_index t, uint32_t parameter)
     x.scope = t;
     if (parameter) {
         template_param(parameter - 1);
-        candidates.append(x);
+        enc.add_candidate(x);
         return true;
     }
     const entities &table = analysis.entity_table;
@@ -294,14 +291,14 @@ bool itanium_mangler::template_template_arg(entity_index t, uint32_t parameter)
     if (scope && !is_std(scope)) {
         if (table[scope].kind != entity_kind::namespace_entity)
             return false;
-        text("N");
+        enc.write(terminal::nested_name);
         if (!prefix(scope) || !unqualified_name(t))
             return false;
-        text("E");
+        enc.write(terminal::end);
     } else if (!unscoped_name(t)) {
         return false;
     }
-    candidates.append(x);
+    enc.add_candidate(x);
     return true;
 }
 
@@ -345,18 +342,18 @@ bool itanium_mangler::template_arg_of_dependent_value(entity_index d)
                 done = type(b.type);
             }
         if (!pattern) {
-            text("X");
+            enc.write(terminal::template_arg_expression);
             done = expression_of_written(n);
-            text("E");
+            enc.write(terminal::end);
         }
         written_first = saved_first;
         written_count = saved_count;
         return done;
     }
-    text("X");
+    enc.write(terminal::template_arg_expression);
     if (!expression_of_dependent_value(d))
         return false;
-    text("E");
+    enc.write(terminal::end);
     return true;
 }
 
@@ -398,22 +395,22 @@ bool itanium_mangler::template_arg_of(entity_index c, uint32_t i,
             parameter_type.kind == type_kind::pointer &&
             record(parameter_type.operand).kind != type_kind::array;
         if (!reference) {
-            text("X");
-            text(itanium_operator::address_of);
+            enc.write(terminal::template_arg_expression);
+            enc.write(itanium_operator::address_of);
         }
         if (element_of) {
-            text("so");
+            enc.write(terminal::subobject);
             if (!type(object.operand))
                 return false;
         }
-        text("L_Z");
+        enc.write(terminal::external_name);
         if (!encoding(named))
             return false;
-        text("E");
+        enc.write(terminal::end);
         if (element_of)
-            text("E");
+            enc.write(terminal::end);
         if (!reference)
-            text("E");
+            enc.write(terminal::end);
         return true;
     }
     if (analysis.specialization_dependent_value(c, i, element))
@@ -427,9 +424,9 @@ bool itanium_mangler::template_arg_of(entity_index c, uint32_t i,
 
                <template-arg> ::= X <expression> E
         */
-        text("X");
+        enc.write(terminal::template_arg_expression);
         template_param(parameter - 1);
-        text("E");
+        enc.write(terminal::end);
         return true;
     }
     qualified_type of = analysis.specialization_argument(c, i, element);
@@ -438,22 +435,47 @@ bool itanium_mangler::template_arg_of(entity_index c, uint32_t i,
            the member, member_pointer_argument): the address of the
            member's external name, X ad L _Z <encoding> E E; a null one is
            the <expr-primary> below, L <type> 0 E */
-        text("X");
-        text(itanium_operator::address_of);
-        text("L_Z");
+        enc.write(terminal::template_arg_expression);
+        enc.write(itanium_operator::address_of);
+        enc.write(terminal::external_name);
         if (!encoding(static_cast<entity_index>(v)))
             return false;
-        text("EE");
+        enc.write(terminal::end);
+        enc.write(terminal::end);
         return true;
     }
-    text("L");
+    enc.write(terminal::expr_primary);
     if (!type(of))
         return false;
     if (negative)
-        text("n");
-    number(v);
-    text("E");
+        enc.write(terminal::negative);
+    enc.number(v);
+    enc.write(terminal::end);
     return true;
+}
+
+} // namespace cplusplus
+
+namespace cplusplus
+{
+
+/* [impl.clang] the template-param-decl of a template template-parameter
+   whose parameters are types (a later revision of [abi:mangle.template-arg]
+   than the one quoted here): Tt, Ty for each parameter (Tp before a
+   pack's), E */
+void itanium_mangler::template_template_param_decl(entity_index parameter)
+{
+    enc.write(terminal::template_parameter_decl);
+    uint32_t count = analysis.template_parameter_count(parameter);
+    for (uint32_t k = 0; k < count; k++) {
+        bool pack = false;
+        qualified_type value_type;
+        analysis.template_parameter_kind(parameter, k, pack, value_type);
+        if (pack)
+            enc.write(terminal::pack_parameter_decl);
+        enc.write(terminal::type_parameter_decl);
+    }
+    enc.write(terminal::end);
 }
 
 } // namespace cplusplus

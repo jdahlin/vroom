@@ -7027,12 +7027,15 @@ class semantic_analysis
     entity_index constraint_own_type_parameter(entity_index t,
                                                uint64_t position) const;
     bool constraint_parameter_is_own(entity_index t, entity_index p) const;
-    /* [abi:mangle.template-arg] the template-param-decl clang writes
-       before a template argument whose template-parameter-list is not its
-       template template-parameter's (parameter i of function template t):
-       in decl; empty when they agree.  False when it has none to give */
+    /* [abi:mangle.template-arg] whether clang writes a template-param-decl
+       before a template argument (named) whose template-parameter-list is
+       not its template template-parameter's (parameter i of function
+       template t): declared that parameter, whose parameters (types only)
+       the decl lists, or 0 when they agree.  False when it has no rule for
+       it */
     bool template_argument_declaration(entity_index t, uint32_t i,
-                                       entity_index named, vbuffer *decl) const;
+                                       entity_index named,
+                                       entity_index &declared) const;
     /* the type a type-id written in t's requires-clause names, analysed in
        t's template-parameter scope (what [abi:mangle.template-args] spells) */
     bool constraint_type(entity_index t, SyntaxElement written,

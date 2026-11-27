@@ -107,7 +107,7 @@ void itanium_mangler::local_class_discriminator(entity_index c,
     if (x.lambda || (!x.name && !x.linkage_name))
         return;
     if (uint64_t ordinal = local_class_ordinal(c, function))
-        discriminator(ordinal - 1);
+        enc.discriminator(ordinal - 1);
 }
 
 /* [abi:mangling-scope]: Z <function encoding> E, the scope of a
@@ -120,13 +120,13 @@ bool itanium_mangler::local_name_scope(entity_index function)
     bool is_main =
         !f.enclosing && length == 4 && !memcmp(identifier, "main", 4);
 
-    text("Z");
+    enc.write(terminal::local_name);
     if (is_main) {
         if (!unqualified_name(function))
             return false;
     } else if (!encoding(function))
         return false;
-    text("E");
+    enc.write(terminal::end);
     return true;
 }
 
@@ -162,7 +162,7 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
             enclosing_function(table, other) == function)
             earlier++;
     if (earlier)
-        discriminator(earlier - 1);
+        enc.discriminator(earlier - 1);
     return true;
 }
 
@@ -219,8 +219,7 @@ bool itanium_mangler::translation_unit_number(entity_index c)
     owned_buffer written;
     vbuffer_format_append(written.get(), "$_%llu",
                           static_cast<unsigned long long>(n));
-    number(written.size());
-    vbuffer_append(out, written.data(), written.size());
+    enc.source_name(written.data(), written.size());
     return true;
 }
 
@@ -251,12 +250,12 @@ bool itanium_mangler::closure_type_name(entity_index c)
     if (variable) {
         if (!source_name(table[variable].name))
             return false;
-        text("M");
+        enc.write(terminal::closure_prefix);
         candidate x;
         x.scope = variable;
-        candidates.append(x);
+        enc.add_candidate(x);
     }
-    text("Ul");
+    enc.write(terminal::closure_type);
     /* [impl.clang] (the ABI's later template-param-decl) before the
        parameter types, one per template-parameter of a lambda's
        template-parameter-list: Ty for a type-parameter (the only ones
@@ -276,11 +275,11 @@ bool itanium_mangler::closure_type_name(entity_index c)
                 semantic_analysis::template_parameter_form_kind::template_)
                 return false;
             if (pack)
-                text("Tp");
+                enc.write(terminal::pack_parameter_decl);
             if (kind == semantic_analysis::template_parameter_form_kind::type) {
-                text("Ty");
+                enc.write(terminal::type_parameter_decl);
             } else {
-                text("Tn");
+                enc.write(terminal::non_type_parameter_decl);
                 if (!type(value_type))
                     return false;
             }
@@ -291,7 +290,7 @@ bool itanium_mangler::closure_type_name(entity_index c)
         SyntaxElement constraint =
             analysis.lambda_constraint(table[c].lambda, &trailing);
         if (constraint && !trailing) {
-            text("Q");
+            enc.write(terminal::requires_clause);
             if (!expression_of_constraint(call, constraint))
                 return false;
         }
@@ -299,7 +298,7 @@ bool itanium_mangler::closure_type_name(entity_index c)
     qualified_type signature = table[call].type;
     if (!bare_function_type(signature))
         return false;
-    text("E");
+    enc.write(terminal::end);
     entity_index context = enclosing_function(table, c);
     uint64_t earlier = 0;
     for (entity_index other = 1; other < c; other++) {
@@ -322,29 +321,9 @@ bool itanium_mangler::closure_type_name(entity_index c)
             earlier++;
     }
     if (earlier)
-        number(earlier - 1);
-    text("_");
+        enc.number(earlier - 1);
+    enc.write(terminal::underscore);
     return true;
-}
-
-/*
- * [abi:mangling-scope]:
- *
- *     <discriminator> ::= _ <non-negative number>
- *
- * The section's second form, for a number of 10 or more, puts it between
- * "__" and "_".
- */
-void itanium_mangler::discriminator(uint64_t n)
-{
-    if (n < 10) {
-        text("_");
-        number(n);
-        return;
-    }
-    text("__");
-    number(n);
-    text("_");
 }
 
 } // namespace cplusplus

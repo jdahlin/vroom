@@ -31,46 +31,47 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
     };
     for (const auto &b : dependent_value_operators)
         if (is(b.form)) {
-            text(operator_written(b.op, 2));
+            enc.write(operator_written(b.op, 2));
             return expression_of_dependent_value(x.enclosing) &&
                    expression_of_dependent_value(x.name);
         }
     if (is(form::sizeof_type)) {
-        text("st");
+        enc.write(terminal::sizeof_type);
         return type(x.type);
     }
     if (is(form::integer_literal)) {
-        text("L");
+        enc.write(terminal::expr_primary);
         builtin_type(fundamental_type::int_);
-        number(x.name);
-        text("E");
+        enc.number(x.name);
+        enc.write(terminal::end);
         return true;
     }
     if (is(form::member_call)) {
-        text("clsr");
+        enc.write(itanium_operator::call);
+        enc.write(terminal::unresolved_scope);
         if (!type(x.type) || !source_name(x.name))
             return false;
-        text("E");
+        enc.write(terminal::end);
         return true;
     }
     if (is(form::static_member)) {
         /* a static data member: an external name, L_Z <encoding> E */
-        text("L_Z");
+        enc.write(terminal::external_name);
         if (!encoding(x.name))
             return false;
-        text("E");
+        enc.write(terminal::end);
         return true;
     }
     if (is(form::logical_not)) {
-        text(itanium_operator::logical_not);
+        enc.write(itanium_operator::logical_not);
         return expression_of_dependent_value(x.enclosing);
     }
     auto written_arguments = [&]() {
-        text("I");
+        enc.write(terminal::template_args);
         for (uint32_t i = 0; i < x.member_count; i++)
             if (!type(analysis.dependent_value_arguments[x.first_member + i]))
                 return false;
-        text("E");
+        enc.write(terminal::end);
         return true;
     };
     if (is(form::member_template_call)) {
@@ -81,14 +82,15 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
                <unresolved-name> ::= [gs] sr <unresolved-qualifier-level>+ E <base-unresolved-name>
          */
         entity_index c = record(x.type).entity;
-        text("clsr");
+        enc.write(itanium_operator::call);
+        enc.write(terminal::unresolved_scope);
         if (!source_name(analysis.entity_table[c].name) ||
             !template_args(c, 0, false))
             return false;
-        text("E");
+        enc.write(terminal::end);
         if (!source_name(x.name) || !written_arguments())
             return false;
-        text("E");
+        enc.write(terminal::end);
         return true;
     }
     bool negated = x.value & dependent_value_negated;
@@ -100,8 +102,8 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
         /* [!] [ns::] A<args>::name, A an alias template: its name and
            arguments as written (clang) */
         if (negated)
-            text(itanium_operator::logical_not);
-        text("sr");
+            enc.write(itanium_operator::logical_not);
+        enc.write(terminal::unresolved_scope);
         if (x.enclosing) {
             uint32_t depth = dependent_value_namespaces(x.value);
             if (!depth)
@@ -119,7 +121,7 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
         if (!source_name(dependent_value_identifier(x.value) - 1) ||
             !written_arguments())
             return false;
-        text("E");
+        enc.write(terminal::end);
         return source_name(x.name);
     }
     entity_index q = record(x.type).entity;
@@ -129,12 +131,12 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
         /* a variable template's specialization, [!] [ns::] v<args>:
            [abi:expressions]' unresolved-name */
         if (negated)
-            text(itanium_operator::logical_not);
+            enc.write(itanium_operator::logical_not);
         if (x.enclosing) {
-            text("sr");
+            enc.write(terminal::unresolved_scope);
             if (!source_name(analysis.entity_table[x.enclosing].name))
                 return false;
-            text("E");
+            enc.write(terminal::end);
         }
         return source_name(spec.name) && template_args(q, 0, false);
     }
@@ -146,13 +148,13 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
            spells the qualifier as an <unresolved-type>, sr T_ I <args> E
            name, with no E closing a level */
         if (negated)
-            text(itanium_operator::logical_not);
-        text("sr");
+            enc.write(itanium_operator::logical_not);
+        enc.write(terminal::unresolved_scope);
         return class_enum_type(x.type) && source_name(x.name);
     }
     if (negated)
-        text(itanium_operator::logical_not);
-    text("sr");
+        enc.write(itanium_operator::logical_not);
+    enc.write(terminal::unresolved_scope);
     if (x.enclosing) {
         uint32_t depth = dependent_value_namespaces(x.value);
         if (!depth)
@@ -178,7 +180,7 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
     if (uint32_t member_class = dependent_value_identifier(x.value))
         if (!source_name(member_class - 1))
             return false;
-    text("E");
+    enc.write(terminal::end);
     return source_name(x.name);
 }
 

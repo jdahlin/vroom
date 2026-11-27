@@ -31,10 +31,14 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
         for (size_t i = 0; i < spelling.size(); i++)
             if (spelling.data()[i] < '0' || spelling.data()[i] > '9')
                 return false;
-        text("L");
+        uint64_t value = 0;
+        for (size_t i = 0; i < spelling.size(); i++)
+            value =
+                value * 10 + static_cast<uint64_t>(spelling.data()[i] - '0');
+        enc.write(terminal::expr_primary);
         builtin_type(fundamental_type::int_);
-        vbuffer_append(out, spelling.data(), spelling.size());
-        text("E");
+        enc.number(value);
+        enc.write(terminal::end);
         return true;
     }
     switch (c.kind()) {
@@ -46,9 +50,9 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
             return false;
         if (c.kind() == syntax_kind::constraint_logical_or_expression ||
             c.kind() == syntax_kind::logical_or_expression)
-            text(itanium_operator::logical_or);
+            enc.write(itanium_operator::logical_or);
         else
-            text(itanium_operator::logical_and);
+            enc.write(itanium_operator::logical_and);
         return expression_of_constraint(t, c[0]) &&
                expression_of_constraint(t, c[2]);
     case syntax_kind::primary_expression:
@@ -70,7 +74,7 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
                 !a.is_token())
                 return false;
             entity_index pe = analysis.constraint_parameter(t, a.token());
-            text("st");
+            enc.write(terminal::sizeof_type);
             return pe && template_param_of_constraint(t, pe);
         }
         /* sizeof ... ( P ), P a template parameter pack: sZ
@@ -82,14 +86,14 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
             /* (an expression's <template-param>: no candidate) */
             if (!pe || !analysis.constraint_parameter_is_own(t, pe))
                 return false;
-            text("sZ");
+            enc.write(terminal::sizeof_pack);
             template_param(analysis.entity_table[pe].value);
             return true;
         }
         if (c.size() != 2 ||
             !punctuator(c[0], preprocessing_op_or_punc::EXCLAMATION))
             return false;
-        text(itanium_operator::logical_not);
+        enc.write(itanium_operator::logical_not);
         return expression_of_constraint(t, c[1]);
     case syntax_kind::multiplicative_expression:
     case syntax_kind::additive_expression:
@@ -100,7 +104,7 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
         itanium_operator o = operator_written(c[1], 2);
         if (o == itanium_operator::none)
             return false;
-        text(o);
+        enc.write(o);
         return expression_of_constraint(t, c[0]) &&
                expression_of_constraint(t, c[2]);
     }
@@ -123,11 +127,11 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
         }
         if (!count)
             return false;
-        text("rq");
+        enc.write(terminal::requires_expression);
         for (uint32_t i = first; i < first + count; i++) {
             SyntaxElement req = body[i];
             if (req.is(syntax_kind::simple_requirement) && req.size() >= 1) {
-                text("X");
+                enc.write(terminal::requirement);
                 if (!expression_of_written(req[0]))
                     return false;
             } else if (req.is(syntax_kind::compound_requirement)) {
@@ -137,7 +141,7 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
                 return false;
             }
         }
-        text("E");
+        enc.write(terminal::end);
         return true;
     }
     case syntax_kind::simple_template_id:
@@ -167,11 +171,11 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
         if (!analysis.constraint_class_template(
                 analysis.entity_table[t].enclosing, q[0].token()))
             return false;
-        text("sr");
+        enc.write(terminal::unresolved_scope);
         if (!source_name(analysis.token_identifier(q[0].token())) ||
             !template_args_of_constraint(t, q))
             return false;
-        text("E");
+        enc.write(terminal::end);
         return source_name(analysis.token_identifier(c[1].token()));
     }
     default:
@@ -185,12 +189,12 @@ bool itanium_mangler::compound_requirement(entity_index t, SyntaxElement req)
 {
     if (req.size() < 3)
         return false;
-    text("X");
+    enc.write(terminal::requirement);
     if (!expression_of_written(req[1]))
         return false;
     for (uint32_t i = 3; i < req.size(); i++) {
         if (req[i].is(standard_keyword::noexcept_)) {
-            text("N");
+            enc.write(terminal::noexcept_requirement);
             continue;
         }
         if (!req[i].is(syntax_kind::return_type_requirement))
@@ -201,7 +205,7 @@ bool itanium_mangler::compound_requirement(entity_index t, SyntaxElement req)
         if (!q.is(syntax_kind::type_constraint) || !q.size() ||
             !q[0].is_identifier())
             return false;
-        text("R");
+        enc.write(terminal::return_type_requirement);
         if (!type_constraint(t, q))
             return false;
     }
@@ -240,11 +244,11 @@ bool itanium_mangler::unresolved_name_of_constraint_member(
     }
     if (!analysis.constraint_namespace_template(scope, id[0].token()))
         return false;
-    text("sr");
+    enc.write(terminal::unresolved_scope);
     for (uint32_t i = 0; i + 1 < qualifier.size(); i += 2)
         if (!source_name(analysis.token_identifier(qualifier[i].token())))
             return false;
-    text("E");
+    enc.write(terminal::end);
     if (!source_name(analysis.token_identifier(id[0].token())))
         return false;
     return template_args_of_constraint(t, id);
@@ -256,7 +260,7 @@ bool itanium_mangler::unresolved_name_of_constraint_member(
 bool itanium_mangler::template_args_of_constraint(entity_index t,
                                                   SyntaxElement c)
 {
-    text("I");
+    enc.write(terminal::template_args);
     /* (more than one argument: a template-argument-list) */
     owned_array<SyntaxElement> written;
     for (uint32_t i = 2; i + 1 < c.size(); i++) {
@@ -288,11 +292,13 @@ bool itanium_mangler::template_args_of_constraint(entity_index t,
             if (uint32_t parameter =
                     analysis.function_parameter_position(t, a[2].token())) {
                 if (expansion)
-                    text("Dp");
-                text("Dtfp");
+                    enc.write(terminal::pack_expansion);
+                enc.write(terminal::decltype_entity);
+                enc.write(terminal::function_param);
                 if (parameter > 1)
-                    number(parameter - 2);
-                text("_E");
+                    enc.number(parameter - 2);
+                enc.write(terminal::underscore);
+                enc.write(terminal::end);
                 continue;
             }
         }
@@ -350,7 +356,7 @@ bool itanium_mangler::template_args_of_constraint(entity_index t,
         if (!k || !type(analysis.entity_table[k].type))
             return false;
     }
-    text("E");
+    enc.write(terminal::end);
     return true;
 }
 
@@ -405,30 +411,28 @@ bool itanium_mangler::type_constraint(entity_index t, SyntaxElement q)
        nested-name's) */
     entity_index scope = analysis.entity_table[found].enclosing;
     bool wrapped = scope && !is_std(scope);
-    size_t before = out->n;
+    itanium_encoder::mark before = enc.position();
     if (wrapped)
-        text("N");
+        enc.write(terminal::nested_name);
     if (substitution(found)) {
         if (!template_args_of_constraint(t, q))
             return false;
         if (wrapped)
-            text("E");
+            enc.write(terminal::end);
         return true;
     }
-    out->n = before;
+    enc.rewind(before);
     if (!name(found))
         return false;
     /* (a nested-name's E closes after the arguments) */
-    bool nested = out->n && out->p[out->n - 1] == 'E';
+    bool nested = enc.last_was(terminal::end);
     if (nested)
-        out->n--;
-    candidate y;
-    y.scope = found;
-    candidates.append(y);
+        enc.take_back(terminal::end);
+    add_candidate(found);
     if (!template_args_of_constraint(t, q))
         return false;
     if (nested)
-        text("E");
+        enc.write(terminal::end);
     return true;
 }
 
@@ -470,17 +474,15 @@ bool itanium_mangler::template_param_of_constraint(entity_index t,
     if (is_type && substitution(parameter))
         return true;
     uint64_t position = table[parameter].value;
-    text("TL");
-    number(level - 1);
-    text("_");
+    enc.write(terminal::leveled_template_param);
+    enc.number(level - 1);
+    enc.write(terminal::underscore);
     if (position)
-        number(position - 1);
-    text("_");
+        enc.number(position - 1);
+    enc.write(terminal::underscore);
     if (!is_type)
         return true;
-    candidate y;
-    y.scope = parameter;
-    candidates.append(y);
+    add_candidate(parameter);
     return true;
 }
 

@@ -1,78 +1,38 @@
 /*
- * mangling/encoder.cpp: [abi:mangling-compression], [abi:mangle.number] and [abi:mangle.seq-id]:
- * the substitutions, numbers and sequence ids (doc/PLAN-mangling.md).
+ * mangling/encoder.cpp: the encoder (mangling-internal.h): the bytes of the
+ * tables' terminals, numbers ([abi:mangle.number]), <source-name>s, the
+ * <discriminator> and [abi:mangling-compression]'s <substitution> and
+ * <seq-id> (doc/PLAN-mangling.md).
  */
 #include "mangling-internal.h"
 
 namespace cplusplus
 {
 
-/* whether t is ::std::NAME<char> (NAME of length n: char_traits,
-   allocator), outside an inline namespace */
-bool itanium_mangler::is_std_class_of_char(qualified_type t, const char *name,
-                                           size_t n) const
+/* productions.inc's codes, in its order */
+static const char *const terminal_codes[] = {
+#define ITANIUM_TERMINAL(name, code) code,
+#include "productions.inc"
+#undef ITANIUM_TERMINAL
+};
+
+void itanium_encoder::write(terminal t)
 {
-    const struct type &r = record(t);
-    if (t.cv() || r.kind != type_kind::class_type)
-        return false;
-    entity_index c = r.entity;
-    const entity &x = analysis.entity_table[c];
-    if (!x.instantiation || !x.name || !is_std(x.enclosing) ||
-        in_inline_namespace(c))
-        return false;
-    size_t length = 0;
-    const char *identifier = spelling(x.name, &length);
-    if (length != n || memcmp(identifier, name, n) ||
-        analysis.specialization_argument_count(c) != 1 ||
-        analysis.specialization_pack(c, 0))
-        return false;
-    qualified_type a = analysis.specialization_argument(c, 0);
-    const struct type &ar = record(a);
-    return !a.cv() && ar.kind == type_kind::fundamental &&
-           ar.fundamental == fundamental_type::char_;
+    vbuffer_string_append(out, terminal_codes[static_cast<size_t>(t)]);
 }
 
-/* [abi:mangling-compression]'s abbreviation of class c, a specialization
-   of ::std (no inline namespace) as a whole: Ss, Si, So or Sd; nullptr for
-   another */
-const char *itanium_mangler::std_substitution(entity_index c) const
+void itanium_encoder::write(itanium_operator o)
 {
-    const entity &x = analysis.entity_table[c];
-    if (x.kind != entity_kind::class_type || !x.instantiation || !x.name ||
-        !is_std(x.enclosing) || in_inline_namespace(c))
-        return nullptr;
-    size_t length = 0;
-    const char *identifier = spelling(x.name, &length);
-    static const struct {
-        const char *name;
-        uint32_t arguments;
-        const char *code;
-    } whole[] = {
-        {"basic_string", 3, "Ss"},
-        {"basic_istream", 2, "Si"},
-        {"basic_ostream", 2, "So"},
-        {"basic_iostream", 2, "Sd"},
-    };
-    for (const auto &w : whole) {
-        if (length != strlen(w.name) || memcmp(identifier, w.name, length) ||
-            analysis.specialization_argument_count(c) != w.arguments)
-            continue;
-        for (uint32_t i = 0; i < w.arguments; i++)
-            if (analysis.specialization_pack(c, i))
-                return nullptr;
-        qualified_type first = analysis.specialization_argument(c, 0);
-        const struct type &fr = record(first);
-        if (first.cv() || fr.kind != type_kind::fundamental ||
-            fr.fundamental != fundamental_type::char_ ||
-            !is_std_class_of_char(analysis.specialization_argument(c, 1),
-                                  "char_traits", 11) ||
-            (w.arguments == 3 &&
-             !is_std_class_of_char(analysis.specialization_argument(c, 2),
-                                   "allocator", 9)))
-            return nullptr;
-        return w.code;
-    }
-    return nullptr;
+    vbuffer_string_append(out, operator_code(o));
+}
+
+bool itanium_encoder::builtin_type(fundamental_type t)
+{
+    const char *code = builtin_type_code(t);
+    if (!code)
+        return false;
+    vbuffer_string_append(out, code);
+    return true;
 }
 
 /*
@@ -80,22 +40,78 @@ const char *itanium_mangler::std_substitution(entity_index c) const
  *
  *     <number> ::= [n] <non-negative decimal integer>
  *
- * In decimal, without leading zeros (0 is "0"); the n of a negative
- * number is never needed here.
+ * In decimal, without leading zeros (0 is "0").
  */
-void itanium_mangler::number(uint64_t n)
+void itanium_encoder::number(uint64_t n)
 {
     vbuffer_format_append(out, "%llu", static_cast<unsigned long long>(n));
 }
 
-void itanium_mangler::signed_number(int64_t n)
+void itanium_encoder::signed_number(int64_t n)
 {
     uint64_t magnitude = static_cast<uint64_t>(n);
-    if (n < 0) {
-        text("n");
+    if (n < 0)
         magnitude = 0 - magnitude;
-    }
+    value_number(n < 0, magnitude);
+}
+
+void itanium_encoder::value_number(bool negative, uint64_t magnitude)
+{
+    if (negative)
+        write(terminal::negative);
     number(magnitude);
+}
+
+/*
+ * [abi:mangle.name]:
+ *
+ *     <source-name> ::= <positive length number> <identifier>
+ *     <identifier> ::= <unqualified source code identifier>
+ *
+ * The length is of the identifier's bytes (UTF-8 for one with a universal
+ * character name, as clang and GCC write it).
+ */
+void itanium_encoder::source_name(const char *bytes, size_t length)
+{
+    number(length);
+    vbuffer_append(out, bytes, length);
+}
+
+void itanium_encoder::source_name(const char *identifier)
+{
+    source_name(identifier, strlen(identifier));
+}
+
+void itanium_encoder::ordinal_underscore(uint64_t n)
+{
+    if (n)
+        number(n - 1);
+    write(terminal::underscore);
+}
+
+/*
+ * [abi:mangling-scope]:
+ *
+ *     <discriminator> ::= _ <non-negative number>
+ *
+ * The section's second form, for a number of 10 or more, puts it between
+ * "__" and "_".
+ */
+void itanium_encoder::discriminator(uint64_t n)
+{
+    if (n < 10) {
+        write(terminal::underscore);
+        number(n);
+        return;
+    }
+    write(terminal::long_discriminator);
+    number(n);
+    write(terminal::underscore);
+}
+
+void itanium_encoder::unmangled(const char *bytes, size_t length)
+{
+    vbuffer_append(out, bytes, length);
 }
 
 /*
@@ -105,77 +121,13 @@ void itanium_mangler::signed_number(int64_t n)
  *                    ::= S_
  *
  * The first candidate is S_, the (n+2)-th S <n in base 36> _.
- * A member function type is a distinct candidate for each owning class,
- * even when its <function-type> text matches another function type.
  */
-bool itanium_mangler::substitution(qualified_type t, entity_index member_class)
+void itanium_encoder::substitution(size_t i)
 {
-    for (size_t i = 0; i < candidates.size(); i++)
-        if (!candidates[i].scope &&
-            candidates[i].member_class == member_class &&
-            ((!candidates[i].expansion &&
-              same_candidate(candidates[i].type, t)) ||
-             (candidates[i].expansion && !t.cv() &&
-              record(t).kind == type_kind::pack_expansion &&
-              same_candidate(candidates[i].type, record(t).operand)))) {
-            substitution_at(i);
-            return true;
-        }
-    return false;
-}
-
-/* [impl.clang] whether a and b are one candidate: the same type, or made
-   the same way of template parameters at the same positions (clang keys a
-   template parameter by its position: a function template's T_ in a
-   <local-name>'s encoding and the T_ of the function encoded after it are
-   one candidate) */
-bool itanium_mangler::same_candidate(qualified_type a, qualified_type b) const
-{
-    for (;;) {
-        if (a == b)
-            return true;
-        const struct type &x = record(a);
-        const struct type &y = record(b);
-        if (a.cv() != b.cv() || x.kind != y.kind)
-            return false;
-        switch (x.kind) {
-        case type_kind::template_parameter:
-            /* (the stand-in for a substituted pack is at no position) */
-            if (a.unqualified() == analysis.substituted_pack_type ||
-                b.unqualified() == analysis.substituted_pack_type)
-                return false;
-            return analysis.entity_table[x.entity].value ==
-                   analysis.entity_table[y.entity].value;
-        case type_kind::pointer:
-        case type_kind::lvalue_reference:
-        case type_kind::rvalue_reference:
-        case type_kind::pack_expansion:
-            a = x.operand;
-            b = y.operand;
-            continue;
-        default:
-            return false;
-        }
-    }
-}
-
-/* a namespace seen as a prefix before */
-bool itanium_mangler::substitution(entity_index scope)
-{
-    for (size_t i = 0; i < candidates.size(); i++)
-        if (candidates[i].scope == scope) {
-            substitution_at(i);
-            return true;
-        }
-    return false;
-}
-
-void itanium_mangler::substitution_at(size_t i)
-{
-    text("S");
+    write(terminal::substitution);
     if (i)
         seq_id(i - 1);
-    text("_");
+    write(terminal::underscore);
 }
 
 /*
@@ -185,7 +137,7 @@ void itanium_mangler::substitution_at(size_t i)
  *
  * Base 36 with upper case letters, no leading zero.
  */
-void itanium_mangler::seq_id(size_t n)
+void itanium_encoder::seq_id(size_t n)
 {
     char digits[16];
     size_t count = 0;
@@ -199,6 +151,46 @@ void itanium_mangler::seq_id(size_t n)
     } while (n);
     while (count)
         vbuffer_append(out, &digits[--count], 1);
+}
+
+void itanium_encoder::take_candidates(owned_array<mangling_candidate> &into)
+{
+    into.clear();
+    for (const mangling_candidate &c : candidates)
+        into.append(c);
+    candidates.clear();
+}
+
+void itanium_encoder::give_back_candidates(
+    const owned_array<mangling_candidate> &from)
+{
+    candidates.clear();
+    for (const mangling_candidate &c : from)
+        candidates.append(c);
+}
+
+itanium_encoder::mark itanium_encoder::position() const
+{
+    return {out->n, candidates.size()};
+}
+
+void itanium_encoder::rewind(mark m)
+{
+    out->n = m.bytes;
+    candidates.resize(m.candidates);
+}
+
+bool itanium_encoder::last_was(terminal t) const
+{
+    size_t length = strlen(terminal_codes[static_cast<size_t>(t)]);
+    return out->n >= length &&
+           !memcmp(out->p + out->n - length,
+                   terminal_codes[static_cast<size_t>(t)], length);
+}
+
+void itanium_encoder::take_back(terminal t)
+{
+    out->n -= strlen(terminal_codes[static_cast<size_t>(t)]);
 }
 
 } // namespace cplusplus

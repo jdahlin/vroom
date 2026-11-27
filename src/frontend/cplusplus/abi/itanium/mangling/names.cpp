@@ -39,10 +39,10 @@ bool itanium_mangler::name(entity_index e)
            d [<number>] _ */
         if (uint32_t parameter =
                 table[local_class].default_argument_parameter) {
-            text("d");
+            enc.write(terminal::default_argument);
             if (parameter > 1)
-                number(parameter - 2);
-            text("_");
+                enc.number(parameter - 2);
+            enc.write(terminal::underscore);
         }
         if (!nested_name(e))
             return false;
@@ -96,14 +96,14 @@ void itanium_mangler::member_cv_ref_qualifiers(const entity &x)
 bool itanium_mangler::nested_name(entity_index e)
 {
     const entity &x = analysis.entity_table[e];
-    text("N");
+    enc.write(terminal::nested_name);
     if (x.kind == entity_kind::function && x.nonstatic_member)
         member_cv_ref_qualifiers(x);
     if (!prefix(x.enclosing))
         return false;
     if (!unqualified_name(e))
         return false;
-    text("E");
+    enc.write(terminal::end);
     return true;
 }
 
@@ -130,7 +130,7 @@ bool itanium_mangler::prefix(entity_index scope)
     if (!is_class && c.kind != entity_kind::namespace_entity)
         return false;
     if (!is_class && is_std(scope)) {
-        text("St");
+        enc.write(terminal::std_prefix);
         return true;
     }
     if (is_class && substitution(c.type))
@@ -140,20 +140,21 @@ bool itanium_mangler::prefix(entity_index scope)
        ::std::basic_string Sa or Sb and the arguments, a candidate as a
        whole */
     if (is_class && c.name && c.instantiation) {
-        if (const char *whole = std_substitution(scope)) {
-            text(whole);
+        terminal whole = std_substitution(scope);
+        if (whole != terminal::end) {
+            enc.write(whole);
             return true;
         }
         size_t length = 0;
         const char *identifier = spelling(c.name, &length);
-        const char *code = nullptr;
+        terminal code = terminal::end;
         if (length == 9 && !memcmp(identifier, "allocator", 9))
-            code = "Sa";
+            code = terminal::std_allocator;
         if (length == 12 && !memcmp(identifier, "basic_string", 12))
-            code = "Sb";
+            code = terminal::std_basic_string;
         if (c.instantiation && is_std(c.enclosing) &&
-            !in_inline_namespace(scope) && code) {
-            text(code);
+            !in_inline_namespace(scope) && code != terminal::end) {
+            enc.write(code);
             if (!template_args(scope))
                 return false;
             add_candidate(c.type);
@@ -185,7 +186,7 @@ bool itanium_mangler::prefix(entity_index scope)
     } else {
         candidate x;
         x.scope = scope;
-        candidates.append(x);
+        enc.add_candidate(x);
     }
     return true;
 }
@@ -226,7 +227,7 @@ bool itanium_mangler::in_unnamed_namespace(entity_index e) const
 bool itanium_mangler::unscoped_name(entity_index e)
 {
     if (analysis.entity_table[e].enclosing)
-        text("St");
+        enc.write(terminal::std_prefix);
     return unqualified_name(e);
 }
 
@@ -249,8 +250,16 @@ bool itanium_mangler::unqualified_name(entity_index e, bool as_type)
     abi_tags(e);
     /* [impl.clang] enable_if(true, ...): the vendor qualifier
        "U <source-name> <template-args>" of its condition */
-    if (analysis.entity_table[e].gnu_flags & gnu_enable_if)
-        text("Ua9enable_ifILb1EE");
+    if (analysis.entity_table[e].gnu_flags & gnu_enable_if) {
+        enc.write(terminal::vendor_qualifier);
+        enc.write(terminal::enable_if_attribute);
+        enc.write(terminal::template_args);
+        enc.write(terminal::expr_primary);
+        enc.builtin_type(fundamental_type::bool_);
+        enc.number(1);
+        enc.write(terminal::end);
+        enc.write(terminal::end);
+    }
     return true;
 }
 
@@ -268,9 +277,8 @@ void itanium_mangler::abi_tags(entity_index e)
         return;
     owned_buffer written;
     analysis.token_spelling(tag, written.get());
-    text("B");
-    number(written.size() - 2);
-    vbuffer_append(out, written.data() + 1, written.size() - 2);
+    enc.write(terminal::abi_tag);
+    enc.source_name(written.data() + 1, written.size() - 2);
 }
 
 bool itanium_mangler::unqualified_name_without_tags(entity_index e,
@@ -279,7 +287,7 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
     const entities &table = analysis.entity_table;
     const entity &x = table[e];
     if (x.kind == entity_kind::namespace_entity && !x.name) {
-        text("12_GLOBAL__N_1");
+        enc.source_name("_GLOBAL__N_1");
         return true;
     }
     if (x.kind == entity_kind::variable && x.binding_count) {
@@ -287,11 +295,11 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
            a structured binding declaration's variable e ([dcl.struct.bind]/1),
            by its structured bindings' names; [impl.clang] without L for
            internal linkage */
-        text("DC");
+        enc.write(terminal::structured_binding);
         for (uint32_t k = 0; k < x.binding_count; k++)
             if (!source_name(table[x.first_binding + k].name))
                 return false;
-        text("E");
+        enc.write(terminal::end);
         return true;
     }
     bool namespace_scope =
@@ -306,7 +314,7 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
         (x.kind == entity_kind::function || x.kind == entity_kind::variable) &&
         !in_unnamed_namespace(e) && !x.unnamed_type_linkage &&
         !x.operator_function)
-        text("L");
+        enc.write(terminal::internal_linkage);
     if (x.special != special_member::none) {
         /* [impl.clang] an inherited default constructor is named as
            the class's own */
@@ -319,7 +327,7 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
         return operator_name(x);
     if (x.conversion_function) {
         /* [abi:mangling-operator]: "<operator-name> ::= cv <type> # (cast)" */
-        text("cv");
+        enc.write(terminal::cast);
         if (x.instantiation) {
             entity_index tmpl = analysis.specialized_template(e);
             entity_index saved = encoding_template;
@@ -339,9 +347,8 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
         size_t length = 0;
         const char *bytes = spelling(x.name, &length);
         if (length > 10 && !memcmp(bytes, "operator\"\"", 10)) {
-            text("li");
-            number(length - 10);
-            vbuffer_append(out, bytes + 10, length - 10);
+            enc.write(terminal::literal_operator);
+            enc.source_name(bytes + 10, length - 10);
             return true;
         }
     }
@@ -358,10 +365,10 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
             if (!closure_numbered(e))
                 return translation_unit_number(e);
             /* [abi:mangling.named]: <unnamed-type-name> ::= Ut [ <nonnegative number> ] _ */
-            text("Ut");
+            enc.write(terminal::unnamed_type);
             if (uint64_t ordinal = local_class_ordinal(e, function))
-                number(ordinal - 1);
-            text("_");
+                enc.number(ordinal - 1);
+            enc.write(terminal::underscore);
             return true;
         }
     }
@@ -379,10 +386,10 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
                  k.kind == entity_kind::enumeration))
                 before++;
         }
-        text("Ut");
+        enc.write(terminal::unnamed_type);
         if (before)
-            number(before - 1);
-        text("_");
+            enc.number(before - 1);
+        enc.write(terminal::underscore);
         return true;
     }
     /* [impl.clang]: one of namespace scope with no name for linkage
@@ -418,21 +425,26 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
 bool itanium_mangler::ctor_dtor_name(special_member which,
                                      entity_index inherited)
 {
-    if (which == special_member::constructor)
-        text("C");
-    else
-        text("D");
     /* [abi:mangling-special-ctor-dtor]: "<ctor-dtor-name> ::= CI1 <type>
        ::= CI2 <type>": an inheriting constructor, by the base class whose
        constructor it was inherited from */
-    if (inherited)
-        text("I");
-    if (ctor_dtor_variant == 1)
-        text("1");
-    else if (ctor_dtor_variant == 0 && which == special_member::destructor)
-        text("0");
-    else
-        text("2");
+    bool complete = ctor_dtor_variant == 1;
+    if (which != special_member::constructor) {
+        if (complete)
+            enc.write(terminal::complete_destructor);
+        else if (ctor_dtor_variant == 0)
+            enc.write(terminal::deleting_destructor);
+        else
+            enc.write(terminal::base_destructor);
+    } else if (inherited && complete) {
+        enc.write(terminal::complete_inheriting_constructor);
+    } else if (inherited) {
+        enc.write(terminal::base_inheriting_constructor);
+    } else if (complete) {
+        enc.write(terminal::complete_constructor);
+    } else {
+        enc.write(terminal::base_constructor);
+    }
     if (inherited) {
         /* [impl.clang] one inherited through another class's inheriting
            constructors is named by the class that declares the original;
@@ -461,16 +473,8 @@ bool itanium_mangler::source_name(uint32_t identifier)
         return false;
     size_t length = 0;
     const char *bytes = spelling(identifier, &length);
-    number(length);
-    vbuffer_append(out, bytes, length);
+    enc.source_name(bytes, length);
     return true;
-}
-
-void itanium_mangler::source_name_text(const char *identifier)
-{
-    size_t length = strlen(identifier);
-    number(length);
-    vbuffer_append(out, identifier, length);
 }
 
 /*
@@ -527,16 +531,16 @@ bool itanium_mangler::operator_name(const entity &x)
 {
     switch (x.allocation) {
     case allocation_function::new_:
-        text(itanium_operator::new_);
+        enc.write(itanium_operator::new_);
         return true;
     case allocation_function::new_array:
-        text(itanium_operator::new_array);
+        enc.write(itanium_operator::new_array);
         return true;
     case allocation_function::delete_:
-        text(itanium_operator::delete_);
+        enc.write(itanium_operator::delete_);
         return true;
     case allocation_function::delete_array:
-        text(itanium_operator::delete_array);
+        enc.write(itanium_operator::delete_array);
         return true;
     default:
         break;
@@ -553,7 +557,7 @@ bool itanium_mangler::operator_name(const entity &x)
         o = operator_written(x.implemented, other);
     if (o == itanium_operator::none)
         return false;
-    text(o);
+    enc.write(o);
     return true;
 }
 

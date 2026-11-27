@@ -110,7 +110,9 @@ named by its label in `docs/itanium-abi-index.tsv`:
 | `expressions-constraint.cpp` | | source 1, requires-clauses |
 | `expressions-dependent-value.cpp` | | source 3 |
 | `expressions-structure.cpp` | | source 4 |
-| `encoder.cpp` | `mangling-compression`, `mangle.number`, `mangle.seq-id` | the encoder: bytes, `<substitution>`, `<seq-id>`, `<number>`, the `St`/`Sa`/`Ss`... abbreviations |
+| `encoder.cpp` | `mangling-compression`, `mangle.number`, `mangle.seq-id` | the encoder: bytes, `<substitution>`, `<seq-id>`, `<number>`, `<discriminator>` |
+| `compression.cpp` | `mangling-compression` | the builder's side: which component is the same candidate, the `St`/`Sa`/`Ss`... abbreviations |
+| `productions.inc` | every section | the other terminals, by production |
 
 The helpers `enclosing_function`, `next_enclosing_function`,
 `visible_local_class` (used by sema too) go to `scopes.cpp`.
@@ -298,7 +300,20 @@ owns `out`, the candidates, `<seq-id>`, `<number>` and the abbreviations.
 The rewinds still exist at first, as `encoder.mark()`/`rewind(mark)`, which
 rewind the candidates too (fixing the three sites that do not).  The literal
 check of 3.3 turns on here.
-Status: not started.
+Status: done (2026-11-27).  `productions.inc` has the 104 other terminals
+(`terminal::nested_name`, `terminal::end`, `terminal::unresolved_scope`,
+...), each group quoting its section's productions; the vendor names
+clang writes whole (`St9__va_list`, `U7_Atomic`, `u11__alignof__`) are a
+terminal and a `<source-name>` now.  `itanium_encoder` (encoder.cpp) owns
+the buffer, the candidate table, numbers, `<source-name>`, `<seq-id>`,
+`<discriminator>` and `mark`/`rewind`; the builder's side of compression
+(which component is the same candidate, ::std's abbreviations) moved to
+`compression.cpp`.  `template_argument_declaration` (sema) no longer writes
+`Tt...E` itself: it names the parameter whose decl is needed and the
+mangler writes it.  `bench/cxx-spec-refs.py` fails on a terminal spelled in
+a builder file or a builder write to the buffer.  Identity gate: no
+difference (the rewinds that now also restore the candidates change no
+input's symbol).  Speed: +0.03% instructions.
 
 ### M5: resolve before emit
 Each rewind of 3.2's table replaced by resolving first; the alias-value

@@ -36,16 +36,18 @@ bool itanium_mangler::expression_of_structure(uint32_t s)
     if (tag == sa::tag_literal + (uint32_t)literal_kind::integer_literal ||
         tag == sa::tag_literal + (uint32_t)literal_kind::character_literal ||
         tag == sa::tag_literal + (uint32_t)literal_kind::boolean_literal) {
-        text("L");
+        enc.write(terminal::expr_primary);
         if (!builtin_type(static_cast<fundamental_type>(a)))
             return false;
-        number(word);
-        text("E");
+        enc.number(word);
+        enc.write(terminal::end);
         return true;
     }
     if (tag == sa::tag_literal + (uint32_t)literal_kind::pointer_literal) {
         /* [abi:mangling.literal]: nullptr is its type alone */
-        text("LDnE");
+        enc.write(terminal::expr_primary);
+        enc.builtin_type(fundamental_type::std_nullptr_t);
+        enc.write(terminal::end);
         return true;
     }
     if (tag != sa::tag_node)
@@ -79,7 +81,7 @@ bool itanium_mangler::expression_of_structure(uint32_t s)
     if (kind == syntax_kind::conditional_expression && count == 5 &&
         ops[1] == preprocessing_op_or_punc::QUESTION &&
         ops[3] == preprocessing_op_or_punc::COLON) {
-        text(itanium_operator::conditional);
+        enc.write(itanium_operator::conditional);
         return expression_of_structure(children[0]) &&
                expression_of_structure(children[2]) &&
                expression_of_structure(children[4]);
@@ -87,7 +89,7 @@ bool itanium_mangler::expression_of_structure(uint32_t s)
     if (kind == syntax_kind::unary_expression && count == 2) {
         itanium_operator o = prefix_operator(operator_written(ops[0], 1));
         if (o != itanium_operator::none) {
-            text(o);
+            enc.write(o);
             return expression_of_structure(children[1]);
         }
     }
@@ -104,7 +106,7 @@ bool itanium_mangler::expression_of_structure(uint32_t s)
     if (binary_kind && count == 3) {
         itanium_operator o = operator_written(ops[1], 2);
         if (o != itanium_operator::none) {
-            text(o);
+            enc.write(o);
             return expression_of_structure(children[0]) &&
                    expression_of_structure(children[2]);
         }

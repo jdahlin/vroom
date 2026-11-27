@@ -46,10 +46,10 @@ bool itanium_mangler::expr_primary_of_variable(entity_index t,
     }
     if (!target || analysis.entity_table[target].kind != entity_kind::variable)
         return false;
-    text("L_Z");
+    enc.write(terminal::external_name);
     if (!encoding(target))
         return false;
-    text("E");
+    enc.write(terminal::end);
     return true;
 }
 
@@ -109,13 +109,13 @@ bool itanium_mangler::expr_primary_of_enumerator(entity_index e)
     qualified_type of = analysis.entity_table[e].type;
     uint64_t magnitude = 0;
     bool negative = analysis.enumerator_value(e, magnitude);
-    text("L");
+    enc.write(terminal::expr_primary);
     if (!type(of))
         return false;
     if (negative)
-        text("n");
-    number(magnitude);
-    text("E");
+        enc.write(terminal::negative);
+    enc.number(magnitude);
+    enc.write(terminal::end);
     return true;
 }
 
@@ -189,10 +189,10 @@ bool itanium_mangler::expr_primary_of_integer_literal(token_index token)
             unsigned bits = widths[rank] - 1 + u;
             if (bits < 64 && value >> bits)
                 continue;
-            text("L");
+            enc.write(terminal::expr_primary);
             builtin_type(ranks[rank * 2 + u]);
-            number(value);
-            text("E");
+            enc.number(value);
+            enc.write(terminal::end);
             return true;
         }
     }

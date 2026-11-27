@@ -128,12 +128,100 @@ inline fundamental_type simple_type_keyword_alone(standard_keyword k)
     return fundamental_type::none;
 }
 
+/* the terminals of productions.inc */
+enum class terminal : uint8_t {
+#define ITANIUM_TERMINAL(name, code) name,
+#include "productions.inc"
+#undef ITANIUM_TERMINAL
+};
+
+/* [abi:mangling-compression]: a substitution candidate, as the builder
+   tells them apart: a type is one candidate however it is spelled, since
+   the type table has one record per type.  A namespace or template as a
+   <prefix> is a candidate too: its entity (scope), with no type.  A member
+   function type also carries the class that owns the member. */
+struct mangling_candidate {
+    qualified_type type;
+    entity_index scope = 0;
+    entity_index member_class = 0;
+    /* Dp <type>, the expansion of the pattern type */
+    bool expansion = false;
+};
+
+/*
+ * The encoder: the bytes of a symbol.  It writes the terminals of the
+ * tables (productions.inc, operators.inc, builtin-types.inc), numbers,
+ * <source-name>s and <seq-id>s, and keeps the substitution candidates in
+ * the order they were seen ([abi:mangling-compression]); what is the same
+ * candidate is the builder's to say.  It reads nothing of the analysis.
+ * The builder (itanium_mangler) decides which production to write; it
+ * writes nothing itself.
+ */
+class itanium_encoder
+{
+  public:
+    explicit itanium_encoder(vbuffer *out) : out(out)
+    {
+    }
+    void write(terminal t);
+    void write(itanium_operator o);
+    /* [abi:mangling-builtin]: false for a type with no code */
+    bool builtin_type(fundamental_type t);
+    void number(uint64_t n);
+    /* [abi:mangle.number]'s n before a negative one's magnitude */
+    void signed_number(int64_t n);
+    void value_number(bool negative, uint64_t magnitude);
+    /* [abi:mangle.name] <source-name> ::= <positive length number> <identifier> */
+    void source_name(const char *bytes, size_t length);
+    void source_name(const char *identifier);
+    /* the [<number>] _ of several productions: nothing before the _ for
+       the first (n 0), n - 1 for another (T_, T0_, Ut_, Ut0_, ...) */
+    void ordinal_underscore(uint64_t n);
+    void discriminator(uint64_t n);
+    void seq_id(size_t n);
+    /* a symbol that is not mangled: its identifier as it is */
+    void unmangled(const char *bytes, size_t length);
+
+    size_t candidate_count() const
+    {
+        return candidates.size();
+    }
+    const mangling_candidate &candidate_at(size_t i) const
+    {
+        return candidates[i];
+    }
+    void add_candidate(const mangling_candidate &c)
+    {
+        candidates.append(c);
+    }
+    /* <substitution> of candidate i: S_, then S <seq-id> _ */
+    void substitution(size_t i);
+    /* the candidates set aside (and none left), and given back */
+    void take_candidates(owned_array<mangling_candidate> &into);
+    void give_back_candidates(const owned_array<mangling_candidate> &from);
+
+    /* what was written and seen so far, to take back to (rewind) */
+    struct mark {
+        size_t bytes;
+        size_t candidates;
+    };
+    mark position() const;
+    void rewind(mark m);
+    /* whether the last terminal written was t, and taking it back */
+    bool last_was(terminal t) const;
+    void take_back(terminal t);
+
+  private:
+    vbuffer *out;
+    owned_array<mangling_candidate> candidates;
+};
+
 class itanium_mangler
 {
   public:
     itanium_mangler(const semantic_analysis &analysis, const preprocessor &pp,
                     vbuffer *out, int variant)
-        : analysis(analysis), pp(pp), out(out), ctor_dtor_variant(variant)
+        : analysis(analysis), pp(pp), enc(out), ctor_dtor_variant(variant)
     {
     }
 
@@ -150,10 +238,13 @@ class itanium_mangler
         /* [abi:mangling-special-vtables]: TS <type>, the name string
            the object points to; what 2: the <type> alone, the
            string's characters */
-        if (what == 0)
-            text("_ZTI");
-        else if (what == 1)
-            text("_ZTS");
+        if (what == 0) {
+            enc.write(terminal::mangled_name);
+            enc.write(terminal::typeinfo);
+        } else if (what == 1) {
+            enc.write(terminal::mangled_name);
+            enc.write(terminal::typeinfo_name);
+        }
         return type(qualified_type::make(t, cv_none));
     }
     /* [abi:mangling-special-temporaries]:
@@ -165,25 +256,28 @@ class itanium_mangler
     {
         if (analysis.entity_table[e].kind != entity_kind::variable)
             return false;
-        text("_ZGR");
+        enc.write(terminal::mangled_name);
+        enc.write(terminal::reference_temporary);
         if (!encoding(e))
             return false;
         if (index)
-            seq_id(index - 1);
-        text("_");
+            enc.seq_id(index - 1);
+        enc.write(terminal::underscore);
         return true;
     }
     /* [abi:mangling-special-vtables]: <special-name> ::= TV <type> */
     bool vtable_name(entity_index c)
     {
-        text("_ZTV");
+        enc.write(terminal::mangled_name);
+        enc.write(terminal::virtual_table);
         return type(analysis.entity_table[c].type);
     }
     /* [abi:mangling-special-vtables]: <special-name> ::= TT <type>, the VTT
        ([abi:vtable-ctor-vtt]) */
     bool vtt_name(entity_index c)
     {
-        text("_ZTT");
+        enc.write(terminal::mangled_name);
+        enc.write(terminal::vtt);
         return type(analysis.entity_table[c].type);
     }
     /* [[impl.clang]] a construction virtual table ([abi:vtable-ctor]):
@@ -191,11 +285,12 @@ class itanium_mangler
     bool construction_vtable_name(entity_index c, uint64_t offset,
                                   entity_index base)
     {
-        text("_ZTC");
+        enc.write(terminal::mangled_name);
+        enc.write(terminal::construction_virtual_table);
         if (!type(analysis.entity_table[c].type))
             return false;
-        vbuffer_format_append(out, "%llu_",
-                              static_cast<unsigned long long>(offset));
+        enc.number(offset);
+        enc.write(terminal::underscore);
         return type(analysis.entity_table[base].type);
     }
 
@@ -207,7 +302,8 @@ class itanium_mangler
         const entity &x = analysis.entity_table[e];
         if (x.kind != entity_kind::variable)
             return refuse("a guard variable of an entity that is no variable");
-        text("_ZGV");
+        enc.write(terminal::mangled_name);
+        enc.write(terminal::guard_variable);
         return encoding(e);
     }
     /* [abi:mangling-special-thunks]:
@@ -221,17 +317,18 @@ class itanium_mangler
        the virtual table */
     bool thunk_name(entity_index f, int64_t adjustment, int64_t vcall)
     {
-        text("_ZT");
+        enc.write(terminal::mangled_name);
+        enc.write(terminal::thunk);
         if (vcall) {
-            text("v");
-            signed_number(adjustment);
-            text("_");
-            signed_number(vcall);
+            enc.write(terminal::virtual_offset);
+            enc.signed_number(adjustment);
+            enc.write(terminal::underscore);
+            enc.signed_number(vcall);
         } else {
-            text("h");
-            signed_number(adjustment);
+            enc.write(terminal::non_virtual_offset);
+            enc.signed_number(adjustment);
         }
-        text("_");
+        enc.write(terminal::underscore);
         return encoding(f);
     }
     /* [abi:rtti-layout]: the virtual table of the run-time library's
@@ -239,31 +336,21 @@ class itanium_mangler
        <nested-name> */
     void runtime_vtable_name(const char *name)
     {
-        text("_ZTVN");
-        source_name_text("__cxxabiv1");
-        source_name_text(name);
-        text("E");
+        enc.write(terminal::mangled_name);
+        enc.write(terminal::virtual_table);
+        enc.write(terminal::nested_name);
+        enc.source_name("__cxxabiv1");
+        enc.source_name(name);
+        enc.write(terminal::end);
     }
 
   private:
     const semantic_analysis &analysis;
     const preprocessor &pp;
-    vbuffer *out;
+    itanium_encoder enc;
     /* a constructor's or destructor's: 1 complete, 2 base object */
     int ctor_dtor_variant;
-    /* [abi:mangling-compression]: the substitution candidates seen so far,
-       in order; a type is one candidate however it is spelled, since the
-       type table has one record per type.  A namespace as a <prefix> is a
-       candidate too: its entity, with no type. A member function type
-       also carries the class that owns the member. */
-    struct candidate {
-        qualified_type type;
-        entity_index scope = 0;
-        entity_index member_class = 0;
-        /* Dp <type>, the expansion of the pattern type */
-        bool expansion = false;
-    };
-    owned_array<candidate> candidates;
+    using candidate = mangling_candidate;
     bool own_pack_expansion(qualified_type pattern);
     /* the function template whose specialization's encoding is being
        mangled: what its function parameters' names are */
@@ -273,20 +360,18 @@ class itanium_mangler
         candidate c;
         c.type = t;
         c.member_class = member_class;
-        candidates.append(c);
+        enc.add_candidate(c);
+    }
+    void add_candidate(entity_index scope)
+    {
+        candidate c;
+        c.scope = scope;
+        enc.add_candidate(c);
     }
 
     const struct type &record(qualified_type t) const
     {
         return analysis.type_table[t.unqualified()];
-    }
-    void text(const char *s)
-    {
-        vbuffer_string_append(out, s);
-    }
-    void text(itanium_operator o)
-    {
-        text(operator_code(o));
     }
     /* an entity's name: token_stream::identifier's number, the
        preprocessor's plus one (0 is no identifier) */
@@ -373,6 +458,7 @@ class itanium_mangler
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
     bool template_arg_of(entity_index c, uint32_t i, uint32_t element);
     bool template_template_arg(entity_index t, uint32_t parameter);
+    void template_template_param_decl(entity_index parameter);
     /* (the <template-param>s written so far; an alias template's
        specialization in a value-dependent argument was refused, and is to
        be written as its type: non_type_parameter_type) */
@@ -383,10 +469,8 @@ class itanium_mangler
     void template_param(uint64_t position)
     {
         template_params_written++;
-        text("T");
-        if (position)
-            number(position - 1);
-        text("_");
+        enc.write(terminal::template_param);
+        enc.ordinal_underscore(position);
     }
     bool name(entity_index e);
     bool unscoped_name(entity_index e);
@@ -395,11 +479,6 @@ class itanium_mangler
     bool source_name(uint32_t identifier);
     bool operator_name(const entity &x);
     bool ctor_dtor_name(special_member which, entity_index inherited = 0);
-    void number(uint64_t n);
-    /* [abi:mangle.number]'s n before a negative one's magnitude */
-    void signed_number(int64_t n);
-    /* a <source-name> of an identifier the mangler knows by its spelling */
-    void source_name_text(const char *identifier);
     bool local_name(entity_index e, entity_index function);
     bool closure_type_name(entity_index c);
     bool translation_unit_number(entity_index c);
@@ -415,10 +494,9 @@ class itanium_mangler
     bool class_enum_type(qualified_type t);
     bool is_std_class_of_char(qualified_type t, const char *name,
                               size_t n) const;
-    const char *std_substitution(entity_index c) const;
+    terminal std_substitution(entity_index c) const;
     bool nested_name_of_dependent_member(entity_index e);
     bool prefix_of_dependent_member(type_index q);
-    void discriminator(uint64_t n);
     bool bare_function_type(qualified_type t);
     bool type(qualified_type t, entity_index member_class = 0);
     bool type_alternative(qualified_type t, entity_index member_class);
@@ -442,8 +520,6 @@ class itanium_mangler
     bool substitution(qualified_type t, entity_index member_class = 0);
     bool same_candidate(qualified_type a, qualified_type b) const;
     bool substitution(entity_index scope);
-    void substitution_at(size_t i);
-    void seq_id(size_t n);
     bool is_std(entity_index scope) const;
     bool in_inline_namespace(entity_index e) const;
     bool in_unnamed_namespace(entity_index e) const;
