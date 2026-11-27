@@ -613,6 +613,8 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             return false;
         text("nt");
         return constraint_expression(t, c[1]);
+    case syntax_kind::multiplicative_expression:
+    case syntax_kind::additive_expression:
     case syntax_kind::relational_expression:
     case syntax_kind::equality_expression: {
         if (c.size() != 3)
@@ -895,6 +897,29 @@ uint64_t itanium_mangler::constraint_level(entity_index t) const
    ([abi:mangling-compression]'s template-prefix) */
 bool itanium_mangler::type_constraint_concept(entity_index t, SyntaxElement q)
 {
+    /* N::C, N a chain of namespaces: the concept's name */
+    if (q.size() == 2 && q[0].is(syntax_kind::nested_name_specifier)) {
+        SyntaxElement qualifier = q[0];
+        entity_index scope = 0;
+        for (uint32_t i = 0; i + 1 < qualifier.size(); i += 2) {
+            if (!qualifier[i].is_identifier())
+                return false;
+            uint32_t part = analysis.token_identifier(qualifier[i].token());
+            entity_index next = 0;
+            if (i == 0)
+                next = analysis.constraint_name(
+                    analysis.entity_table[t].enclosing, qualifier[i].token());
+            else
+                next = analysis.entity_table.find(scope, part);
+            if (!next || analysis.entity_table[next].kind !=
+                             entity_kind::namespace_entity)
+                return false;
+            scope = next;
+        }
+        entity_index member = analysis.entity_table.find(
+            scope, analysis.token_identifier(q[1].token()));
+        return member && name(member);
+    }
     entity_index found = analysis.constraint_name(
         analysis.entity_table[t].enclosing, q[0].token());
     if (!found)
@@ -2827,7 +2852,10 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
         if (q) {
             /* (the type-constraint's concept-name, then its <,
                arguments and > when there are any) */
-            if (pack || !q.size() || !q[0].is_identifier())
+            bool qualified = q.size() == 2 &&
+                             q[0].is(syntax_kind::nested_name_specifier) &&
+                             q[1].is_identifier();
+            if (pack || !q.size() || (!qualified && !q[0].is_identifier()))
                 return false;
             text("Tk");
             if (!type_constraint_concept(function, q))
