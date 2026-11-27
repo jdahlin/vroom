@@ -155,11 +155,19 @@ bool semantic_analysis::unit_local(entity_index e) const
 {
     for (entity_index k = e; k; k = entity_table[k].enclosing) {
         const entity &x = entity_table[k];
-        if (x.kind == entity_kind::class_type && x.lambda &&
-            !x.closure_variable &&
-            (!x.enclosing ||
-             entity_table[x.enclosing].kind == entity_kind::namespace_entity))
-            return true;
+        if (x.kind == entity_kind::class_type && !x.closure_variable) {
+            bool namespace_scope =
+                !x.enclosing ||
+                entity_table[x.enclosing].kind == entity_kind::namespace_entity;
+            if (x.lambda && namespace_scope)
+                return true;
+            /* a local class or closure type of a function that no other
+               translation unit defines too */
+            if (x.enclosing &&
+                entity_table[x.enclosing].kind == entity_kind::function &&
+                !visible_local_class(entity_table, k))
+                return true;
+        }
         if (x.kind == entity_kind::function && k != e && !x.instantiation &&
             x.linkage_of_name == linkage::internal)
             return true;

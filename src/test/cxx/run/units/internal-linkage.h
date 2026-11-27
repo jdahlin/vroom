@@ -19,3 +19,5 @@ template <class F> struct Erased {
     struct Impl : Base { F f; Impl(F g) : f(g) {} int run() override { static int calls; return f() + calls++; } };
 };
 template <class F> int erased(F f) { static typename Erased<F>::Impl impl(f); typename Erased<F>::Base *b = &impl; return b->run(); }
+/* closure types of a member function that is not inline: no other unit's */
+struct Worker { int work(int n); };

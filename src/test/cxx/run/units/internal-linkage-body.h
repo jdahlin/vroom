@@ -10,8 +10,18 @@ static Node reg2([]() { return apply([] { return UNIT * 23; }); });
 static int local_user() { struct L { enum { value = UNIT * 29 }; int operator()() const { return value; } }; L l; return apply(l) + Counter<L>::next() + Holder<L>::call() + vt<Holder<L>>()->v(); }
 static Node reg3([]() { return erased([] { static int n; return UNIT * 37 + n++; }); });
 static auto glambda = [] { return UNIT * 31; };
+#if UNIT == 1
+int Worker::work(int n)
+{
+    struct L { enum { value = 5 }; };
+    return erased([n] { return n + 1; }) + Counter<L>::next();
+}
+#endif
 int NAME()
 {
+#if UNIT == 1
+    printf("%d\n", Worker().work(3));
+#endif
     int r = 0;
     for (Node *n = Node::head; n; n = n->next) { int v = n->fn(); r = r * 3 + v; }
     printf("%d\n", apply(Anon()));
