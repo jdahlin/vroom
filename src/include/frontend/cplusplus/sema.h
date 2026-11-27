@@ -2966,6 +2966,7 @@ class semantic_analysis
     analysis_result using_enum_declaration(UsingEnumDeclaration n);
     analysis_result using_declarator(UsingDeclarator n, bool if_exists = false);
     analysis_result using_typename(UsingDeclarator n);
+    analysis_result using_conversion(UsingDeclarator n, SyntaxRef id);
     /* [temp.variadic]/5: in a using-declaration the pattern is a
        using-declarator: one followed by an ellipsis, once for each element
        of the packs it names */

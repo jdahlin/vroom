@@ -707,7 +707,21 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
             entity_table[owner].type.unqualified(), m.type.cv());
         qualified_type to_pointer =
             qualified_type::make(type_table.pointer_to(base_type), cv_none);
-        VTRY_SET(r, pointer_to_base(t, c, owner, to_pointer, address));
+        /* [over.match.funcs]/4: one a using-declaration made a member of a
+           derived class ([namespace.udecl]/19) takes the object whatever
+           the base's access */
+        bool introduced = false;
+        for (const using_access &u : using_accesses) {
+            bool twice = false;
+            if (u.member == f && (u.c == c || base_step(c, u.c, twice) != 0))
+                introduced = true;
+        }
+        if (introduced && nonvirtual_subobjects(c, owner)) {
+            VTRY_SET(r, pointer_along_path(t, c, owner, to_pointer, false,
+                                           false, address));
+        } else {
+            VTRY_SET(r, pointer_to_base(t, c, owner, to_pointer, address));
+        }
     }
     expression_meaning callee;
     callee.type = x.type;
