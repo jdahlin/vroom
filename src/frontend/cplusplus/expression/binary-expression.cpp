@@ -772,8 +772,8 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
         VTRY_SET(r, operand_value(n, right));
     /* [ext:gnu_vector_size] an operand that is a vector: lane by lane */
     if (r == analysis_result::well_formed &&
-        (type_table[left.type.unqualified()].kind == type_kind::vector ||
-         type_table[right.type.unqualified()].kind == type_kind::vector))
+        (is_vector_kind(type_table[left.type.unqualified()].kind) ||
+         is_vector_kind(type_table[right.type.unqualified()].kind)))
         return vector_binary(n, at, op, left, right, m);
     /* [expr.arith.conv]/1, [expr.add]/1, [expr.shift]/1: unscoped
        enumeration operands are promoted; two of one scoped enumeration
@@ -914,6 +914,15 @@ analysis_result semantic_analysis::conditional(SyntaxRef n,
     VTRY_SET(r, contextual_bool(n, c));
     VTRY_SET(r, expression(n[2], e2));
     VTRY_SET(r, expression(n[4], e3));
+    const expression_meaning *operands[] = {&c, &e2, &e3};
+    for (const expression_meaning *x : operands)
+        if (is_vector_kind(type_table[x->type.unqualified()].kind) &&
+            (is_vector_kind(type_table[c.type.unqualified()].kind) ||
+             e2.type.unqualified() != e3.type.unqualified()))
+            return not_supported_because(
+                n, "ext.gnu",
+                "a conditional expression with a vector condition or operands "
+                "of different vector types");
     return conditional_operands(n, c, e2, e3, m);
 }
 

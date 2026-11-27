@@ -823,7 +823,7 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
         return not_supported_because(at, "ext.gnu",
                                      "a conversion involving __float128");
     if (m.type.unqualified() == to.unqualified() &&
-        (binary128_or_complex(to) || target.kind == type_kind::vector)) {
+        (binary128_or_complex(to) || is_vector_kind(target.kind))) {
         /* the identity: the value is passed on as it is */
         m.type = to;
         return analysis_result::well_formed;

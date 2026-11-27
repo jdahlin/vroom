@@ -980,19 +980,15 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
 {
     auto form = body.function_body();
     if (form.deleted()) {
-        if (explicit_specified)
-            return not_supported_because(n, "dcl.fct.def.delete",
-                                         "an explicit deleted special member");
-        VTRY(r,
-             special_member_declarator(c, n, d, access, false,
-                                       constexpr_specified, virtual_specified));
-        const entity &f = entity_table[last_declared];
+        /* [dcl.fct.spec]: explicit on a deleted constructor, which stays
+           a candidate of direct-initialization only ([over.match.ctor]) */
+        VTRY(r, special_member_declarator(
+                    c, n, d, access, false, constexpr_specified,
+                    virtual_specified, explicit_specified));
         /* a deleted destructor (libc++'s __nat): the class's destructor,
            deleted, which a delete-expression checks (deleted_use); an
            object of the class is never destroyed in a well-formed
            program */
-        if (f.special == special_member::destructor)
-            return deleted_definition(n, last_declared);
         return deleted_definition(n, last_declared);
     }
     if (!form.defaulted())
@@ -1469,6 +1465,40 @@ analysis_result semantic_analysis::construct(
     entity_index list_class = 0;
     if (nested_list)
         list_class = c;
+    /* [over.match.ref]/1.1 through [over.match.ctor]: in direct-initialization
+       an explicit conversion function binds the copy constructor's reference
+       parameter (T(x) of a class with explicit operator const T&).  Tried
+       where no constructor takes the argument otherwise */
+    bool none_viable = false;
+    bool may_convert = !copy && arguments.size() == 1 &&
+                       type_table[arguments[0].type.unqualified()].kind ==
+                           type_kind::class_type &&
+                       arguments[0].type.unqualified() != type.unqualified() &&
+                       !same_or_derived_class(arguments[0], c);
+    if (may_convert) {
+        owned_array<expression_meaning> trial;
+        for (const expression_meaning &e : arguments)
+            trial.append(e);
+        VTRY(tried, best_viable_function(at, candidates, nullptr, trial, best,
+                                         &none_viable, true, written_arguments,
+                                         list_class));
+        if (none_viable) {
+            qualified_type unqualified =
+                qualified_type::make(type.unqualified(), cv_none);
+            bool ambiguous = false, unknown = false;
+            entity_index conv = conversion_function_for(
+                arguments[0], unqualified, true, ambiguous, unknown);
+            if (conv && entity_table[conv].explicit_ && !ambiguous &&
+                !unknown) {
+                bool converted = false;
+                VTRY(r, conversion_function_call(at, arguments[0], unqualified,
+                                                 true, converted));
+                if (converted &&
+                    arguments[0].type.unqualified() == type.unqualified())
+                    return construct(at, type, arguments, object, result, copy);
+            }
+        }
+    }
     VTRY(resolved,
          best_viable_function(at, candidates, nullptr, arguments, best, nullptr,
                               !copy, written_arguments, list_class));
@@ -1655,19 +1685,25 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         token_index id = item[0].token();
         owned_array<expression_meaning> arguments;
         owned_array<SyntaxElement> listed_arguments;
-        if (item.size() == 4) {
-            VTRY(r, expression_list_meanings(item[2], arguments,
-                                             &listed_arguments));
-        } else if (item.size() != 3) {
-            return not_supported_because(
-                item, "class.base.init",
-                "a delegating mem-initializer of an unhandled form");
-        }
         initialized_value value;
-        VTRY(r, construct(item, entity_table[c].type, arguments, 0, value,
-                          false, &listed_arguments));
+        SyntaxElement braced = InitializerParts::after(item, 1).braced_list();
+        if (braced) {
+            VTRY(r, list_initialization(braced, entity_table[c].type, true,
+                                        value));
+        } else {
+            if (item.size() == 4) {
+                VTRY(r, expression_list_meanings(item[2], arguments,
+                                                 &listed_arguments));
+            } else if (item.size() != 3) {
+                return not_supported_because(
+                    item, "class.base.init",
+                    "a delegating mem-initializer of an unhandled form");
+            }
+            VTRY(r, construct(item, entity_table[c].type, arguments, 0, value,
+                              false, &listed_arguments));
+        }
         expression_meaning ptr;
-        VTRY_SET(r, this_pointer(id, ptr));
+        VTRY(pointed, this_pointer(id, ptr));
         expression_meaning self;
         self.type = entity_table[c].type;
         self.category = value_category::lvalue;
@@ -2394,7 +2430,8 @@ uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
     uint32_t assigned = expression_node(
         semantic_kind::assignment, stored, at, object.node, value,
         static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
-    if (initializes)
+    /* a zero (a(), [dcl.init]/11) is stored only to initialize */
+    if (initializes || semantics[value].kind == semantic_kind::zero)
         semantics[assigned].c = 1;
     /* a member's store of its initialization (the constant evaluator's
        places under initialization) */
@@ -3759,6 +3796,13 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
             entity_index dtor = entity_table[sub].destructor;
             if (!dtor || entity_table[dtor].constexpr_)
                 continue;
+            /* [dcl.constexpr]/6: a member of an instantiated class
+               template that would not satisfy the requirements is not
+               constexpr, and no error */
+            if (instantiating || class_instantiating || instantiation_depth) {
+                entity_table[last_declared].constexpr_ = false;
+                break;
+            }
             if (entity_table[dtor].implicit)
                 return not_supported_because(
                     definition, "dcl.constexpr",
@@ -3842,6 +3886,11 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
+    /* [class.access]/6, as init_declarators */
+    entity_index context = declarator_access_class(n);
+    if (!context)
+        context = access_class;
+    scoped_value<entity_index> member_context(access_class, context);
     analysis_result r = declarator(n, n[at], type, m);
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
@@ -4013,37 +4062,35 @@ analysis_result semantic_analysis::class_direct_initialization(
         type_table[arguments[0].type.unqualified()].entity != c) {
         conversion_sequence found;
         bool cannot_tell = false;
+        bool convert = false;
         if (conversion_function_to_class(arguments[0], type, found,
                                          cannot_tell)) {
             conversion_sequence s = class_sequence(arguments[0], type, true);
-            if (s.kind == conversion_sequence::form::user_defined &&
-                !s.ambiguous && s.function == found.function) {
-                expression_meaning conv = arguments[0];
-                bool converted = false;
-                VTRY(cr,
-                     conversion_function_call(n, conv, type, true, converted));
-                if (converted &&
-                    conv.type.unqualified() == type.unqualified() &&
-                    conv.category == value_category::prvalue) {
-                    m = conv;
-                    return analysis_result::well_formed;
-                }
-            }
+            convert = s.kind == conversion_sequence::form::user_defined &&
+                      !s.ambiguous && s.function == found.function;
         } else {
             bool ambiguous = false, unknown = false;
             entity_index fn = conversion_function_for(arguments[0], type, true,
                                                       ambiguous, unknown);
-            if (fn && entity_table[fn].explicit_ && !ambiguous && !unknown) {
-                expression_meaning conv = arguments[0];
-                bool converted = false;
-                VTRY(cr,
-                     conversion_function_call(n, conv, type, true, converted));
-                if (converted &&
-                    conv.type.unqualified() == type.unqualified() &&
-                    conv.category == value_category::prvalue) {
+            convert =
+                fn && entity_table[fn].explicit_ && !ambiguous && !unknown;
+        }
+        if (convert) {
+            expression_meaning conv = arguments[0];
+            bool converted = false;
+            VTRY(cr, conversion_function_call(n, conv, type, true, converted));
+            if (converted && conv.type.unqualified() == type.unqualified()) {
+                if (conv.category == value_category::prvalue) {
                     m = conv;
                     return analysis_result::well_formed;
                 }
+                /* [over.match.copy]/(1.2): the explicit conversion
+                   function binds the copy or move constructor's reference
+                   parameter, so the glvalue it yields is what is copied;
+                   [dcl.init]/17.6.2.2: a viable constructor leaves no
+                   parenthesized aggregate initialization */
+                if (is_aggregate(c) || !entity_table[c].first_constructor)
+                    arguments[0] = conv;
             }
         }
     }

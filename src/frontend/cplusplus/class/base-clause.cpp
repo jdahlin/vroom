@@ -74,14 +74,51 @@ node_index parser::base_specifier(scope_index derived)
     }
     uint64_t before = names.dependent_found;
     scope_index base = 0;
+    token_index name_first = position;
     class_or_decltype(&base);
     if (failed())
         return 0;
+    bool concrete = names.dependent_found == before;
+    /* [class.derived]/2, [class.mem]/6: the class's own name, in a template
+       definition too (a simple-template-id may name another
+       specialization, so only a name alone) */
+    if (base && base == derived && position == name_first + 1 &&
+        names.within_template())
+        return violates("a class-name in a base-specifier shall not denote "
+                        "the incompletely defined class it belongs to",
+                        "class.derived", name_first);
     if (base)
-        names.add_base(derived, base, names.dependent_found == before);
+        names.add_base(derived, base, concrete);
+    if (!base && !concrete)
+        names.set_dependent_base(derived);
+    /* [class.member.lookup]: the specialization M<C> of such a template has
+       C's members; the parser does not instantiate, so the classes its
+       arguments name are searched */
+    if (base && names.has_dependent_base(base))
+        add_argument_bases(derived, name_first, concrete);
     if (pending.size() == mark + 1)
         return 0;
     return finish_node(syntax_kind::base_specifier, mark, first);
+}
+
+void parser::add_argument_bases(scope_index derived, token_index first,
+                                bool concrete)
+{
+    token_index end = position;
+    bool arguments = false;
+    for (position = first; position < end; position++) {
+        if (at(preprocessing_op_or_punc::LESS))
+            arguments = true;
+        if (!arguments || !at_identifier() ||
+            at(preprocessing_op_or_punc::COLON_COLON, 1))
+            continue;
+        scope_index found = 0;
+        if (names.lookup_unqualified(tokens.identifier(position), &found) ==
+                name_kind::type_name &&
+            found && names.kind_of(found) == scope_kind::class_)
+            names.add_base(derived, found, concrete);
+    }
+    position = end;
 }
 
 /*

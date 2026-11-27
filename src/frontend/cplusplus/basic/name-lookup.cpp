@@ -1155,9 +1155,14 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                          "a nested-name-specifier naming no "
                                          "class, namespace or enumeration");
         }
-        if (x.kind != entity_kind::namespace_entity && x.enclosing &&
-            entity_table[x.enclosing].kind == entity_kind::class_type &&
-            !accessible(e))
+        /* [class.access]/4: access applies to the name used, so a
+           typedef-name's (a template parameter's too), not that of the
+           class it denotes */
+        const entity &used_name = entity_table[r.entity];
+        if (used_name.kind != entity_kind::namespace_entity &&
+            used_name.enclosing &&
+            entity_table[used_name.enclosing].kind == entity_kind::class_type &&
+            !accessible(r.entity))
             return ill_formed_at_token(t,
                                        "a private or protected member's name "
                                        "can be used only by members and "

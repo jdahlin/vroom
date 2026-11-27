@@ -118,6 +118,12 @@ enum class type_kind : uint8_t {
     vector,
 };
 
+/* a GNU or an extended vector, whose operators work lane by lane */
+inline bool is_vector_kind(type_kind kind)
+{
+    return kind == type_kind::vector || kind == type_kind::ext_vector;
+}
+
 struct type {
     type_kind kind = type_kind::none;
     /* kind fundamental: which */
@@ -203,6 +209,14 @@ class types
     type_index block_pointer_to(qualified_type function);
     type_index bit_int(uint64_t width, uint32_t parameter, bool is_unsigned);
     type_index vector_of(qualified_type element, uint64_t count);
+    /* a vector of the kind of vector, with element and count */
+    type_index vector_like(type_kind vector, qualified_type element,
+                           uint64_t count)
+    {
+        if (vector == type_kind::ext_vector)
+            return ext_vector_of(element, count, 0);
+        return vector_of(element, count);
+    }
     type_index vector_mask_of(const type &vector, uint64_t element,
                               bool long_is_64);
     type_index ext_vector_of(qualified_type element, uint64_t count,
@@ -2074,6 +2088,7 @@ class semantic_analysis
        defined as deleted (class/deleted-special-members.cpp) */
     bool default_constructed(entity_index c, entity_index k) const;
     bool default_constructor_deleted(entity_index c) const;
+    bool may_be_default_constructible(entity_index c);
     bool destructor_deleted(entity_index c) const;
     bool copy_constructor_deleted_by_move(entity_index c) const;
     bool declares_move_assignment(entity_index c);
@@ -2272,6 +2287,7 @@ class semantic_analysis
     analysis_result function_template_definition(SyntaxRef n,
                                                  SyntaxRef definition);
     analysis_result explicit_specialization(ExplicitSpecialization n);
+    bool extraneous_template_headers(SyntaxElement n) const;
     analysis_result explicit_instantiation(ExplicitInstantiation n);
     analysis_result explicitly_instantiate_class(SyntaxRef n, entity_index c,
                                                  bool extern_, uint32_t prior);
@@ -2983,7 +2999,9 @@ class semantic_analysis
            template's parameter it is (sizeof...(P) mangles it); 0 else */
         uint32_t pack_position = 0;
         /* a callee template-id with no arguments of its own call, f<A>():
-           the specialization it names (cast: the template-id's node) */
+           the specialization it names (cast: the template-id's node); of a
+           name bound to a pointer or reference parameter (identifier), the
+           object or function its argument names */
         entity_index specialization = 0;
     };
     owned_array<written_binding> written_bindings;
@@ -3231,6 +3249,9 @@ class semantic_analysis
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
+    /* in a member-declaration, where clang::reinitializes is without
+       effect; elsewhere clang rejects it, and vcc refuses it */
+    bool in_member_declaration = false;
     bool reanalysing_member_declarator = false;
     /* in a member function template's declarator: 1 the template's own
        (member-template.cpp), 2 a specialization's (instantiation.cpp) */
@@ -3463,6 +3484,8 @@ class semantic_analysis
                                        entity_index e, expression_meaning &m);
     /* [expr.prim.id]: the expression that names the entity e, found by
        lookup of the identifier t */
+    analysis_result address_parameter(token_index t, entity_index parameter,
+                                      expression_meaning &m);
     analysis_result named_entity(token_index t, entity_index e,
                                  expression_meaning &m, bool record_use = true);
     /* [expr.prim.this] */
@@ -4213,6 +4236,8 @@ class semantic_analysis
     /* the noexcept-specifier of the member function declarator analysed last
        that waits for its class's closing } ([class.mem]/6), or 0 */
     SyntaxRef deferred_noexcept = 0;
+    /* implicit_guide_type's declarator: no exception specification */
+    bool forming_guide_type = false;
     struct pending_noexcept {
         entity_index function = 0;
         SyntaxRef specifier = 0;
@@ -4907,7 +4932,8 @@ class semantic_analysis
                                                FunctionDefinition definition);
     /* [expr.ref]: the member e of the object m (a glvalue of class type) */
     analysis_result member_access(token_index at, entity_index e,
-                                  expression_meaning &m);
+                                  expression_meaning &m,
+                                  entity_index written_class = 0);
     /* [class.mfct.non-static]/2: a name of a non-static member used in a
        member function: (*this).name */
     analysis_result implicit_member_access(token_index at, entity_index e,
@@ -5224,9 +5250,16 @@ class semantic_analysis
         uint32_t name = 0;
     };
     class_head_context friend_head;
+    /* [class.access]/6: the name an unqualified function declarator at
+       namespace scope declares, while its declaration is analysed: a friend
+       function of that name may be named by its return and parameter
+       types */
+    class_head_context friend_function_head;
+    class_head_context declarator_function_name(SyntaxRef declaration);
     bool friend_names_class(const friend_record &f, entity_index scope,
                             uint32_t name) const;
     entity_index declarator_access_class(SyntaxRef declaration) const;
+    entity_index qualifier_class(NestedNameSpecifier nested) const;
     /* the tokens of the member-specification of the class being defined
        (class_specifier), 0 outside one */
     token_index defining_members_first = 0, defining_members_end = 0;
@@ -6454,7 +6487,8 @@ class semantic_analysis
        a non-deduced context, -1 deduction failed */
     int deduce_from_braced_list(qualified_type p, const expression_meaning &m,
                                 owned_array<template_argument> &deduced,
-                                owned_array<bool> &set, bool &unknown);
+                                owned_array<bool> &set,
+                                uint32_t first_deducible, bool &unknown);
     analysis_result deduce_from_call(SyntaxRef at, uint32_t function_template,
                                      const expression_meaning *arguments,
                                      uint32_t count,

@@ -238,13 +238,23 @@ semantic_analysis::function_template_definition(SyntaxRef n,
            expansions inside the parameters' types (tuple<A...>,
            seq<N...>), no function parameter pack */
         if (packs > 1) {
-            for (uint32_t i = 0; i < ft.parameter_count; i++)
-                if (type_table[list[i].unqualified()].kind ==
-                    type_kind::pack_expansion)
+            for (uint32_t i = 0; i < ft.parameter_count; i++) {
+                const struct type pt = type_table[list[i].unqualified()];
+                if (pt.kind != type_kind::pack_expansion)
+                    continue;
+                /* a function parameter pack among them (index_sequence<I...>,
+                   const Args &...): its pattern made of one of the packs */
+                bool of_a_pack = false;
+                for (uint32_t k = 0; k < parameters.size(); k++)
+                    if (template_parameter_is_pack(first + k) &&
+                        made_of_template_parameter(type_table, pt.operand,
+                                                   &entity_table, k))
+                        of_a_pack = true;
+                if (ft.variadic || !of_a_pack)
                     return not_supported_because(
                         n, "temp.variadic",
-                        "a function parameter pack with several template "
-                        "parameter packs");
+                        "a function parameter pack of an unhandled form");
+            }
             for (uint32_t i = 0; i < parameters.size(); i++)
                 if (template_parameter_is_pack(first + i) &&
                     !pack_only_expanded(
@@ -256,7 +266,6 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                         n, "temp.variadic",
                         "several template parameter packs not only used in "
                         "pack expansions");
-            packs = 0;
         }
         bool pack = packs == 1;
         uint32_t pack_name = 0;
@@ -288,6 +297,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                         "expansions");
                 continue;
             }
+            if (packs > 1)
+                continue;
             if (!pack || ft.variadic ||
                 !made_of_template_parameter(type_table, pt.operand,
                                             &entity_table, last))

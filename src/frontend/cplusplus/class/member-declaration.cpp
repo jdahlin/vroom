@@ -98,7 +98,11 @@ bool parser::at_virt_specifier(unsigned ahead)
  *         virt-specifier
  *         virt-specifier-seq virt-specifier
  *
- * One virt-specifier passes through as its token.  N3272 (C++11); before
+ * [ext:gnu_attributes] GCC takes attributes after the virt-specifier-seq
+ * too (Clang's thread-safety annotations are written there); they are
+ * kept in the virt-specifier-seq node.
+ *
+ * One virt-specifier alone passes through as its token.  N3272 (C++11); before
  * it they are [ext.clang] clang's extension, P9's.
  */
 node_index parser::virt_specifier_seq()
@@ -122,7 +126,13 @@ node_index parser::virt_specifier_seq()
         *seen = true;
         add_token();
     }
-    if (position == first + 1)
+    bool attributes = at_gnu_attribute();
+    while (at_gnu_attribute()) {
+        gnu_attribute_specifier();
+        if (failed())
+            return 0;
+    }
+    if (!attributes && position == first + 1)
         return 0;
     return finish_node(syntax_kind::virt_specifier_seq, mark, first);
 }

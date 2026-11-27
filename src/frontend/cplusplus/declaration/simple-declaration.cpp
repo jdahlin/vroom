@@ -797,7 +797,12 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
        trailing-return-type in an alias-declaration (using f = auto (*)() -> R) */
     if (id.size() == 2 && id[1].is(syntax_kind::abstract_declarator))
         placeholder_allowed = true;
+    /* [ext:clang_ext_vector_type] also after the type-specifier */
+    s.ext_vector.allowed =
+        tokens.files.behavior.has(extension::clang_ext_vector_type);
     VTRY(r, decl_specifier_seq(id[0], s, false));
+    if (s.ext_vector.given())
+        g.ext_vector = s.ext_vector;
     if (!s.has_type || s.declares_enumeration || s.typedef_ || s.static_ ||
         s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags || s.aligned)
         return not_supported_because(n, "dcl.typedef",
@@ -1078,6 +1083,14 @@ semantic_analysis::declarator_access_class(SyntaxRef declaration) const
     auto nested = first.id.qualified_id().nested_name_specifier();
     if (!nested)
         return 0;
+    return qualifier_class(nested);
+}
+
+/* the class a nested-name-specifier of plain names nominates, as
+   declarator_access_class (a qualified class-head-name's too), or 0 */
+entity_index
+semantic_analysis::qualifier_class(NestedNameSpecifier nested) const
+{
     entity_index scope = 0;
     bool qualified = false;
     if (nested.global())
@@ -1110,6 +1123,32 @@ semantic_analysis::declarator_access_class(SyntaxRef declaration) const
     if (!scope || entity_table[scope].kind != entity_kind::class_type)
         return 0;
     return scope;
+}
+
+/* The scope and name of an unqualified declarator-id at namespace scope
+   (friend_function_head), empty elsewhere. */
+semantic_analysis::class_head_context
+semantic_analysis::declarator_function_name(SyntaxRef declaration)
+{
+    class_head_context named;
+    if (function_state.active || defining_class || !is_namespace(current_scope))
+        return named;
+    SyntaxElement id = DeclaratorParts::of_declaration(declaration).id;
+    if (!id)
+        return named;
+    token_index at = 0;
+    if (id.is_identifier()) {
+        at = id.token();
+    } else if (id.is(syntax_kind::operator_function_id) &&
+               id.operator_function_id().operator_keyword().is_token()) {
+        name_operator_declarator(id);
+        at = id.operator_function_id().operator_keyword().token();
+    } else {
+        return named;
+    }
+    named.scope = current_scope;
+    named.name = tokens.identifier(at);
+    return named;
 }
 
 /*
@@ -1151,6 +1190,8 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     if (!declarator_context)
         declarator_context = access_class;
     scoped_value<entity_index> member_context(access_class, declarator_context);
+    scoped_value<class_head_context> function_context(
+        friend_function_head, declarator_function_name(declaration));
     /* [dcl.type.class.deduct]/1: a placeholder for a deduced class type
        (C b(args); or O::C b(args);) */
     analysis_result r = analysis_result::well_formed;
@@ -1526,7 +1567,7 @@ analysis_result semantic_analysis::declare_with_initializer(
            through a packed struct of clang's headers name it, whose
            members are packed whatever it says: taken as the type's own */
         if (aligned && aligned < natural &&
-            type_table[type.unqualified()].kind != type_kind::vector)
+            !is_vector_kind(type_table[type.unqualified()].kind))
             return not_supported_because(
                 declaration, "ext.gnu",
                 "an alignment below the vector type's own");

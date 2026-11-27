@@ -548,9 +548,25 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     if (object.kind == type_kind::class_type)
         no_storage = unevaluated > default_argument_unevaluated &&
                      !entity_table[object.entity].destructor;
+    /* an array's or scalar's list temporary is a literal object (static at
+       namespace scope), unless elements need destroying */
+    bool destroyed_elements = false;
+    if (object.kind == type_kind::array) {
+        qualified_type element = m.type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        const struct type &last = type_table[element.unqualified()];
+        if (last.kind == type_kind::class_type) {
+            const entity &c = entity_table[last.entity];
+            /* (or an element class that is not complete) */
+            destroyed_elements = c.destructor || (!c.defined && !c.size);
+        }
+    }
+    bool no_room =
+        destroyed_elements || (object.kind == type_kind::class_type &&
+                               !at_block_scope() && !binding_extends);
     if (aggregate_prvalue(m) && !closure_prvalue_binding(m) && !no_storage &&
-        (object.kind != type_kind::class_type ||
-         (!at_block_scope() && !binding_extends)))
+        no_room)
         return not_supported_because(
             at, "class.temporary",
             "an array's or scalar's list temporary, or a temporary of a call's "
@@ -691,11 +707,6 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
                               "initializer expression shall not be an lvalue",
                               "dcl.init.ref");
     }
-    /* (a temporary of or from an enumeration: not yet) */
-    if (x.kind == type_kind::enumeration || y.kind == type_kind::enumeration)
-        return not_supported_because(
-            at, "dcl.init.ref",
-            "a reference temporary of or from an enumeration");
     VTRY(result, operand_value(at, m));
     return implicit_conversion(at, m, t1, false);
 }
@@ -920,6 +931,7 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
         return reference_initialization(at, m, type, result);
     case type_kind::class_type:
         return class_initialization(at, m, type, direct, result);
+    case type_kind::ext_vector:
     case type_kind::vector:
         /* [ext:gnu_vector_size] a vector is initialized from a vector of
            its type, a copy of its bytes (other conversions not analysed) */
@@ -1365,6 +1377,7 @@ analysis_result semantic_analysis::list_initialization_of(
     switch (type_table[type.unqualified()].kind) {
     case type_kind::array:
         return array_list_initialization(list, clauses, type, direct, result);
+    case type_kind::ext_vector:
     case type_kind::vector:
         /* [ext:gnu_vector_size] the elements in order, the rest zero */
         return element_list_initialization(list, clauses, type, result);
@@ -1607,13 +1620,29 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
             return not_supported_because(
                 init, "dcl.init",
                 "a parenthesized initializer with no expressions");
-        /* a braced-init-list argument of a constructor ([over.best.ics]/1:
-           its sequence is [over.ics.list]'s), kept as written.  (Not an
-           empty one: the ambiguity of B b({}) with the copy constructor,
-           CWG1902, is not told) */
+        /* [dcl.init]/17.1: only a non-parenthesized braced-init-list
+           list-initializes; a reference binds no list in parentheses */
         if (!parts.list_of_several() &&
             parts.list.is(syntax_kind::braced_init_list) &&
-            parts.list.end_token() > parts.list.first_token() + 2 &&
+            (type_table[type.unqualified()].kind ==
+                 type_kind::lvalue_reference ||
+             type_table[type.unqualified()].kind ==
+                 type_kind::rvalue_reference))
+            return ill_formed(init,
+                              "a reference cannot be initialized by a "
+                              "parenthesized braced-init-list",
+                              "dcl.init");
+        /* a braced-init-list argument of a constructor ([over.best.ics]/1:
+           its sequence is [over.ics.list]'s), kept as written.  An empty
+           one only for a class with no constructor callable without
+           arguments, whose copy constructor {} then cannot reach: the
+           ambiguity with it otherwise (CWG1902) is not told */
+        if (!parts.list_of_several() &&
+            parts.list.is(syntax_kind::braced_init_list) &&
+            (parts.list.end_token() > parts.list.first_token() + 2 ||
+             (type_table[type.unqualified()].kind == type_kind::class_type &&
+              !may_be_default_constructible(
+                  type_table[type.unqualified()].entity))) &&
             type_table[type.unqualified()].kind == type_kind::class_type) {
             entity_index c = type_table[type.unqualified()].entity;
             require_complete(c);
@@ -2157,6 +2186,28 @@ analysis_result semantic_analysis::too_many_clauses(
     return analysis_result::well_formed;
 }
 
+/* whether a constructor of class c may be callable with no arguments: an
+   implicit or defaulted default one, one with no parameters or default
+   arguments, or a constructor template */
+bool semantic_analysis::may_be_default_constructible(entity_index c)
+{
+    require_complete(c);
+    const entity &x = entity_table[c];
+    if (x.defaulted_default_constructor || x.constructor_templates ||
+        !x.first_constructor)
+        return true;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        const entity &f = entity_table[k];
+        if (f.implicit)
+            continue;
+        uint32_t count = type_table[f.type.unqualified()].parameter_count;
+        if (count == 0 || f.default_arguments >= count)
+            return true;
+    }
+    return false;
+}
+
 /* whether the initializer init has only literals (true, false, nullptr; not string or
    user-defined: [lex.string], [over.literal]) and operators or
    punctuators among its tokens: it looks up no name and has no this */
@@ -2236,7 +2287,7 @@ analysis_result semantic_analysis::aggregate_elements(
     const struct type target = type_table[type.unqualified()];
     /* [ext:gnu_vector_size] a vector's elements are listed as an array's */
     bool arraylike =
-        target.kind == type_kind::array || target.kind == type_kind::vector;
+        target.kind == type_kind::array || is_vector_kind(target.kind);
     owned_array<aggregate_class_element> members;
     uint64_t count = 0;
     size_t union_default = 0, first_element = 0;
@@ -2621,7 +2672,7 @@ void semantic_analysis::aggregate_value(SyntaxRef list, qualified_type type,
     expression_meaning list_meaning;
     list_meaning.type = qualified_type::make(type.unqualified(), cv_none);
     if (type_table[type.unqualified()].kind == type_kind::array ||
-        type_table[type.unqualified()].kind == type_kind::vector)
+        is_vector_kind(type_table[type.unqualified()].kind))
         list_meaning.type = type;
     list_meaning.evaluation = all;
     result.node = expression_node(semantic_kind::initializer_list, list_meaning,
@@ -2672,7 +2723,7 @@ analysis_result semantic_analysis::aggregate_element_clause(
     const struct type record = type_table[element.unqualified()];
     bool braced = clause.is(syntax_kind::braced_init_list);
     bool subaggregate =
-        record.kind == type_kind::array || record.kind == type_kind::vector ||
+        record.kind == type_kind::array || is_vector_kind(record.kind) ||
         (record.kind == type_kind::class_type &&
          entity_table[record.entity].kind == entity_kind::class_type &&
          is_aggregate(record.entity));
@@ -2700,12 +2751,12 @@ analysis_result semantic_analysis::aggregate_element_clause(
                 list, "dcl.init.aggr",
                 "a subaggregate converted from another class");
     }
-    if (record.kind == type_kind::vector) {
+    if (is_vector_kind(record.kind)) {
         /* /16: a clause that is a vector initializes the whole vector;
            scalars go to its elements, braces elided */
         expression_meaning e;
         VTRY(r, expression(clause, e));
-        if (type_table[e.type.unqualified()].kind == type_kind::vector) {
+        if (is_vector_kind(type_table[e.type.unqualified()].kind)) {
             next++;
             return initialize_with(at, e, element, false, true, one);
         }

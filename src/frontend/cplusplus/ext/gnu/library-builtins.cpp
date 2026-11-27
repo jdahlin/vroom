@@ -1854,7 +1854,7 @@ semantic_analysis::x86_generic_call(SyntaxRef n,
     const struct type t = type_table[first.unqualified()];
     m = expression_meaning();
     m.type = first;
-    if (kind == 15 + 8 && t.kind == type_kind::vector)
+    if (kind == 15 + 8 && is_vector_kind(t.kind))
         m.type = qualified_type::make(t.operand.unqualified(), cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::not_constant;
@@ -1984,12 +1984,18 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
 {
     owned_array<SyntaxElement> clauses;
     analysis_result r = analysis_result::well_formed;
+    int kind = vector_builtin_kind(tokens.identifier(n[0].token()));
+    /* [temp.variadic]/7: __builtin_shufflevector's indices may be a pack
+       expansion (a, b, I...) */
+    owned_array<uint32_t> index_packs;
+    owned_array<uint32_t> *index_expansions = nullptr;
+    if (kind == 1)
+        index_expansions = &index_packs;
     if (n[2].is(syntax_kind::initializer_list)) {
-        VTRY_SET(r, list_clauses(n[2].index(), clauses));
+        VTRY_SET(r, list_clauses(n[2].index(), clauses, index_expansions));
     } else {
         clauses.append(n[2]);
     }
-    int kind = vector_builtin_kind(tokens.identifier(n[0].token()));
     if (kind == 26) {
         /* any value of the operand's type: its own */
         if (clauses.size() != 1)
@@ -2008,7 +2014,7 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
         VTRY_SET(r, expression(clauses[0], a));
         VTRY_SET(r, operand_value(n, a));
         const struct type t = type_table[a.type.unqualified()];
-        if (t.kind != type_kind::vector || !is_integral(t.operand))
+        if (!is_vector_kind(t.kind) || !is_integral(t.operand))
             return ill_formed(n, "argument must be an integer vector",
                               "ext.clang");
         m = expression_meaning();
@@ -2030,7 +2036,7 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
         VTRY_SET(r, operand_value(n, a));
         const struct type t = type_table[a.type.unqualified()];
         qualified_type et = a.type;
-        if (t.kind == type_kind::vector)
+        if (is_vector_kind(t.kind))
             et = t.operand;
         fundamental_type f = fundamental_of(et);
         if (!is_floating(et) &&
@@ -2068,7 +2074,7 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
     const struct type vector = type_table[a.type.unqualified()];
     if ((kind == 2 || kind == 3) && is_floating(a.type))
         return x86_generic_call(n, clauses, static_cast<uint8_t>(kind + 22), m);
-    if (vector.kind != type_kind::vector ||
+    if (!is_vector_kind(vector.kind) ||
         a.type.unqualified() != b.type.unqualified())
         return ill_formed(n,
                           "the first two arguments to __builtin_shufflevector "
@@ -2098,7 +2104,11 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
     }
     for (size_t i = 2; i < clauses.size(); i++) {
         expression_meaning e;
-        VTRY_SET(r, expression(clauses[i], e));
+        const owned_array<uint32_t> *saved = clause_packs;
+        clause_packs = &index_packs;
+        r = clause_expression(clauses, i, e);
+        clause_packs = saved;
+        VTRY(checked, r);
         bool constant = false;
         if (!is_integral(e.type))
             return not_supported_because(
@@ -2124,8 +2134,8 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
                                      "__builtin_shufflevector result of "
                                      "non-power-of-two lanes or over 64 bytes");
     m = expression_meaning();
-    m.type = qualified_type::make(type_table.vector_of(vector.operand, lanes),
-                                  cv_none);
+    m.type = qualified_type::make(
+        type_table.vector_like(vector.kind, vector.operand, lanes), cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::not_constant;
     m.beyond_integral_constant = true;

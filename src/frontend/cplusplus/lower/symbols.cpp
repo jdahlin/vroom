@@ -175,7 +175,8 @@ ast_qualified_type c_lowering::writable_type(qualified_type t, token_index at)
    is automatic */
 uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
 {
-    const entity &x = analysis.entity_table[e];
+    /* (a copy: mangling the symbol makes entities, which moves the table) */
+    const entity x = analysis.entity_table[e];
     if (x.unsupported_body && !declaring_symbols) {
         /* [temp.inst]/4: the definition of a member function used: its body
            has a construct the analysis has no rules for */

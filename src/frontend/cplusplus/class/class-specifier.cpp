@@ -368,6 +368,14 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             "qualified name (an attribute that is not one "
             "without effect, or another form)");
     }
+    /* [class.access]/6: the names of a qualified class-head and its
+       base-clause are used by the class nominated's member */
+    entity_index head_context = access_class;
+    if (head_qualifier)
+        if (auto q = name_syntax.qualified_class_head_name())
+            if (entity_index in = qualifier_class(q.nested_name_specifier()))
+                head_context = in;
+    scoped_value<entity_index> head_access(access_class, head_context);
     bool is_final = false;
     uint32_t next = 2;
     if (unnamed)
@@ -440,9 +448,15 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             bool declared = y &&
                             entity_table[y].kind == entity_kind::class_type &&
                             entity_table[y].enclosing == q.entity;
+            /* (X itself may be a nested class: X::Y::Z) */
+            entity_index around = entity_table[q.entity].enclosing;
+            while (!is_namespace(around) &&
+                   entity_table[around].kind == entity_kind::class_type &&
+                   !entity_table[around].instantiation)
+                around = entity_table[around].enclosing;
             if (!declared ||
                 entity_table[q.entity].kind != entity_kind::class_type ||
-                !is_namespace(entity_table[q.entity].enclosing)) {
+                !is_namespace(around)) {
                 /* the class this would define is not known to be
                    incomplete from here on */
                 if (declared) {
@@ -1504,6 +1518,19 @@ bool semantic_analysis::accessible_here(entity_index member,
             if (friend_names_class(f, friend_head.scope, friend_head.name) &&
                 as_member_of(f.granting))
                 return true;
+    /* [class.access]/6: so do the types of a friend function's declaration
+       outside the class */
+    if (friend_function_head.name && !function_state.active)
+        for (const friend_record &f : friends) {
+            if (!f.befriended)
+                continue;
+            const entity &function = entity_table[f.befriended];
+            if (function.kind == entity_kind::function &&
+                function.name == friend_function_head.name &&
+                function.enclosing == friend_function_head.scope &&
+                as_member_of(f.granting))
+                return true;
+        }
     /* (a default argument is checked in its function's declaration:
        [class.access]/8, a friend function's has the friend's access) */
     entity_index starts[5] = {0, defining_class, 0, access_class,
@@ -1609,10 +1636,29 @@ semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
             return static_assert_declaration(s);
         },
         [&](FunctionDefinition f) {
-            return member_declaration_with_specifiers(c, f, access, bodies);
+            bool outer = in_member_declaration;
+            in_member_declaration = true;
+            analysis_result r =
+                member_declaration_with_specifiers(c, f, access, bodies);
+            in_member_declaration = outer;
+            return r;
         },
         [&](MemberSimpleDeclaration d) {
-            return member_declaration_with_specifiers(c, d, access, bodies);
+            bool outer = in_member_declaration;
+            in_member_declaration = true;
+            analysis_result r =
+                member_declaration_with_specifiers(c, d, access, bodies);
+            in_member_declaration = outer;
+            return r;
+        },
+        [&](OpaqueEnumDeclaration e) {
+            /* [class.mem]/1: an opaque-enum-declaration is a
+               member-declaration */
+            declaration_access = access;
+            type_index type = 0;
+            analysis_result r = enum_specifier(e, type);
+            declaration_access = 0;
+            return r;
         },
         [&](MemberDeclaration other) {
             analysis_result refused = not_supported(other);
@@ -3100,11 +3146,26 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
             "volatile or unhandled type");
     analysis_result r = analysis_result::well_formed;
     bool wide = false;
-    if (!deduced)
+    if (!deduced) {
+        qualified_type before = type;
         VTRY_SET(r, initializer(init, type, value));
+        if (!(before == type)) {
+            /* [dcl.array]/7: an array of unknown bound completed by its
+               initializer */
+            entity_table[e].type = type;
+            if (!declared_names.empty() && declared_names.back().entity == e)
+                declared_names.back().type = type;
+        }
+    }
     /* [expr.const]/5: an initializer that calls a function (a constexpr
        function, or a builtin clang evaluates) is the evaluator's */
-    if (constexpr_class && value.node) {
+    /* (an array initialized by a string literal is constant as written,
+       [dcl.init.string]; the evaluator does not model the literal) */
+    bool literal_array =
+        record.kind == type_kind::array && value.node &&
+        value.evaluation == constness::constant &&
+        semantics[value.node].kind != semantic_kind::initializer_list;
+    if (constexpr_class && value.node && !literal_array) {
         uint32_t data = 0;
         constness c =
             evaluate_variable(type, value.node, semantics[value.node].at, data);
@@ -3288,7 +3349,8 @@ analysis_result semantic_analysis::static_member_definition(
  *         override
  *         final
  *
- * One virt-specifier is its token; more are a virt-specifier-seq node.
+ * One virt-specifier is its token; more, or [ext:gnu_attributes] after
+ * them (not applied), are a virt-specifier-seq node.
  */
 bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
                                        bool &final_) const
@@ -3313,7 +3375,7 @@ bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
     if (!d.is(syntax_kind::virt_specifier_seq))
         return false;
     for (auto t : d.elements())
-        if (!one(t))
+        if (!t.is(syntax_kind::gnu_attribute_specifier) && !one(t))
             return false;
     return true;
 }

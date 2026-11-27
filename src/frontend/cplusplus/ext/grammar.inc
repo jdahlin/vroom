@@ -72,6 +72,8 @@ PRODUCTION(gnu_attributes, "gnu-attribute-arguments", "expression-list")
    declarator-id), after a namespace's name */
 PRODUCTION(gnu_attributes, "attribute-specifier", "gnu-attribute-specifier")
 PRODUCTION(gnu_attributes, "decl-specifier", "gnu-attribute-specifier")
+/* after a member's virt-specifiers */
+PRODUCTION(gnu_attributes, "virt-specifier-seq", "virt-specifier-seq gnu-attribute-specifier")
 /* MSVC's (clang's ParseMicrosoftDeclSpecs), where GCC's attributes go; the
    parser's node is gnu-attribute-specifier's */
 PRODUCTION(microsoft_declspec, "microsoft-declspec", "__declspec ( gnu-attribute-list )")

@@ -184,12 +184,15 @@ class itanium_mangler
     bool integer_literal(token_index token);
     bool constraint_parameter(entity_index t, entity_index parameter);
     bool constraint_template_args(entity_index t, SyntaxElement c);
+    bool compound_requirement(entity_index t, SyntaxElement req);
     bool constraint_namespace_member(entity_index t, SyntaxElement qualifier,
                                      SyntaxElement id);
     bool dependent_expression(SyntaxElement c);
     bool dependent_fold(SyntaxElement fold);
     bool structure_expression(uint32_t s);
     bool named_variable(entity_index t, SyntaxElement name);
+    const semantic_analysis::written_binding *
+    written_object(SyntaxElement name) const;
     /* the dependent_written type being mangled: its bindings
        (sema.h: written_bindings), and the element of the packs among them
        a fold's pattern is mangled for */
@@ -599,7 +602,9 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
     }
     case syntax_kind::requires_expression: {
         /* [abi:expressions]: requires-expression without parameter list
-           ("rq" <requirement>+ "E"), simple-requirement ("X" <expression>) */
+           ("rq" <requirement>+ "E"), simple-requirement ("X" <expression>),
+           compound-requirement ("X" <expression> ["N"]
+           ["R" <type-constraint>]) */
         if (c.size() != 2)
             return false;
         SyntaxElement body = c[1];
@@ -620,6 +625,9 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             if (req.is(syntax_kind::simple_requirement) && req.size() >= 1) {
                 text("X");
                 if (!dependent_expression(req[0]))
+                    return false;
+            } else if (req.is(syntax_kind::compound_requirement)) {
+                if (!compound_requirement(t, req))
                     return false;
             } else {
                 return false;
@@ -665,6 +673,43 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
     default:
         return false;
     }
+}
+
+/* { e } noexcept -> C<args>; in t's requires-clause, C a concept named
+   unqualified */
+bool itanium_mangler::compound_requirement(entity_index t, SyntaxElement req)
+{
+    if (req.size() < 3)
+        return false;
+    text("X");
+    if (!dependent_expression(req[1]))
+        return false;
+    for (uint32_t i = 3; i < req.size(); i++) {
+        if (req[i].is(standard_keyword::noexcept_)) {
+            text("N");
+            continue;
+        }
+        if (!req[i].is(syntax_kind::return_type_requirement))
+            continue;
+        if (req[i].size() != 2)
+            return false;
+        SyntaxElement q = req[i][1];
+        if (!q.is(syntax_kind::type_constraint) || !q.size() ||
+            !q[0].is_identifier())
+            return false;
+        entity_index found = analysis.constraint_name(
+            analysis.entity_table[t].enclosing, q[0].token());
+        if (!found)
+            return false;
+        text("R");
+        if (!name(found))
+            return false;
+        if (q.size() > 1 &&
+            (q.size() < 3 || !q[1].is(preprocessing_op_or_punc::LESS) ||
+             !constraint_template_args(t, q)))
+            return false;
+    }
+    return true;
 }
 
 /* ns::v<args> in t's requires-clause, v a concept or variable template of
@@ -932,6 +977,22 @@ bool itanium_mangler::named_variable(entity_index t, SyntaxElement name)
     return true;
 }
 
+/* the binding of name to an instantiation's pointer or reference
+   parameter, whose argument's object or function is mangled for it */
+const semantic_analysis::written_binding *
+itanium_mangler::written_object(SyntaxElement name) const
+{
+    if (!name.is_token() || !name.is_identifier())
+        return nullptr;
+    uint32_t id = analysis.token_identifier(name.token());
+    for (uint32_t i = 0; i < written_count; i++) {
+        const auto &b = analysis.written_bindings[written_first + i];
+        if (b.identifier == id && b.specialization)
+            return &b;
+    }
+    return nullptr;
+}
+
 /* the type an alias template's instantiation bound the identifier name to,
    for the dependent_written type being mangled (the pack's element being
    mangled for a name bound to a pack) */
@@ -943,7 +1004,8 @@ itanium_mangler::bound(SyntaxElement name) const
     uint32_t id = analysis.token_identifier(name.token());
     for (uint32_t i = 0; i < written_count; i++) {
         const auto &b = analysis.written_bindings[written_first + i];
-        if (b.identifier == id &&
+        /* (a specialization: a value, no type) */
+        if (b.identifier == id && !b.specialization &&
             (b.element == UINT32_MAX || b.element == pack_element))
             return &b;
     }
@@ -1859,8 +1921,9 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                 preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
             text("cl");
             uint32_t unresolved_name = 0;
-            if (base.is_token() && !analysis.function_parameter_position(
-                                       encoding_template, base.token()))
+            if (base.is_token() && !written_object(base) &&
+                !analysis.function_parameter_position(encoding_template,
+                                                      base.token()))
                 unresolved_name = analysis.token_identifier(base.token());
             if (unresolved_name) {
                 if (!source_name(unresolved_name))
@@ -1914,6 +1977,17 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         text("_");
         return true;
     }
+    /* an instantiation's pointer or reference parameter: the argument,
+       [abi:expressions] [ad] L _Z <encoding> E */
+    if (const auto *b = written_object(expression)) {
+        if (record(b->type).kind != type_kind::lvalue_reference)
+            text("ad");
+        text("L_Z");
+        if (!encoding(b->specialization))
+            return false;
+        text("E");
+        return true;
+    }
     /* a non-type template parameter: its <template-param>
        ([abi:mangle.template-param]) */
     if (expression.is_identifier())
@@ -1928,6 +2002,11 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
     }
     if (expression.is(standard_keyword::false_)) {
         text("Lb0E");
+        return true;
+    }
+    /* [abi:mangling.literal]: nullptr is its type alone */
+    if (expression.is(standard_keyword::nullptr_)) {
+        text("LDnE");
         return true;
     }
     return integer_literal(expression.token());
@@ -4036,13 +4115,15 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
             number(r.bound);
         text("_");
         done = true;
-    } else if ((r.kind == type_kind::ext_vector ||
-                r.kind == type_kind::vector) &&
-               !r.entity) {
+    } else if (is_vector_kind(r.kind)) {
         /* an ext_vector_type ([ext:clang_ext_vector_type]) as clang
-           mangles it: Dv, the element count, _ and the element type */
+           mangles it: Dv, the element count (a dependent one: its
+           template parameter), _ and the element type */
         text("Dv");
-        number(r.bound);
+        if (r.entity)
+            template_param(analysis.entity_table[r.entity].value);
+        else
+            number(r.bound);
         text("_");
         done = type(r.operand);
     } else if (r.kind == type_kind::pack_expansion) {
@@ -4439,6 +4520,11 @@ bool itanium_mangler::structure_expression(uint32_t s)
             return false;
         number(word);
         text("E");
+        return true;
+    }
+    if (tag == sa::tag_literal + (uint32_t)literal_kind::pointer_literal) {
+        /* [abi:mangling.literal]: nullptr is its type alone */
+        text("LDnE");
         return true;
     }
     if (tag != sa::tag_node)

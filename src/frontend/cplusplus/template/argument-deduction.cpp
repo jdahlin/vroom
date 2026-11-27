@@ -327,7 +327,13 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         return true;
     }
     const struct type &ar = type_table[a.unqualified()];
-    if (pr.kind != ar.kind || p.cv() != a.cv())
+    /* [temp.deduct.call]/4.1: a deduced A more cv-qualified than a vector
+       argument, as a template parameter's above */
+    bool more_qualified_vector =
+        !exact &&
+        (pr.kind == type_kind::ext_vector || pr.kind == type_kind::vector) &&
+        !(a.cv() & ~p.cv());
+    if (pr.kind != ar.kind || (p.cv() != a.cv() && !more_qualified_vector))
         return false;
     switch (pr.kind) {
     case type_kind::pointer:
@@ -397,6 +403,27 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                    ar.entity) {
             return false;
         }
+        return deduce_type(pr.operand, ar.operand, deduced, set, exact);
+    case type_kind::ext_vector:
+        /* [ext:clang_ext_vector_type] T ext_vector_type(N): N deduced from
+           A's element count, as T[N]'s bound ([temp.deduct.type]/8) */
+        if (pr.entity && ar.entity) {
+            /* [temp.deduct.partial]: N against the other template's own,
+               not compared here */
+            deduction_unknowns++;
+            return false;
+        }
+        if (pr.entity) {
+            if (!deduce_bound(pr.entity, ar.bound, deduced, set))
+                return false;
+        } else if (pr.bound != ar.bound || ar.entity) {
+            return false;
+        }
+        return deduce_type(pr.operand, ar.operand, deduced, set, exact);
+    case type_kind::vector:
+        /* [ext:gnu_vector_size] the element deduced, the count the same */
+        if (pr.bound != ar.bound)
+            return false;
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     case type_kind::function: {
         /* [temp.deduct.decl]/1: the declaration's noexcept-specifier is not
@@ -782,7 +809,7 @@ void semantic_analysis::adjust_call_deduction(qualified_type &p,
 int semantic_analysis::deduce_from_braced_list(
     qualified_type p, const expression_meaning &m,
     owned_array<template_argument> &deduced, owned_array<bool> &set,
-    bool &unknown)
+    uint32_t first_deducible, bool &unknown)
 {
     unknown = false;
     const struct type *pt = &type_table[p.unqualified()];
@@ -814,11 +841,40 @@ int semantic_analysis::deduce_from_braced_list(
        it, T not deduced elsewhere is an error of the call */
     if (m.braced_count == 0)
         return 0;
-    for (uint32_t k = 0; k < m.braced_count; k++) {
+    /* /1: an element type of explicitly specified parameters alone
+       ([temp.arg.explicit]/7) deduces nothing from the elements: each
+       needs only an implicit conversion to it ([over.ics.list]/6) */
+    bool converted = !depends_on_parameter_from(element, first_deducible);
+    /* (a specified element type is not substituted here: the call's
+       initialization checks those) */
+    bool concrete =
+        pr.kind == type_kind::array && !depends_on_parameter_from(element, 0);
+    uint32_t elements = m.braced_count;
+    for (uint32_t k = 0; k < elements; k++) {
         const expression_meaning &e = braced_elements[m.braced_first + k];
+        if (converted) {
+            if (concrete && e.node &&
+                implicit_conversion_sequence(e, element, true).kind ==
+                    conversion_sequence::form::bad)
+                return -1;
+            continue;
+        }
         qualified_type pp = element;
         qualified_type a = e.type;
         const struct type ar = type_table[a.unqualified()];
+        if (!e.node && ar.kind == type_kind::none) {
+            /* [temp.deduct.type]/5.6: a nested list is non-deduced unless
+               P' is itself std::initializer_list or an array, which is
+               not analysed */
+            const struct type er = type_table[element.unqualified()];
+            if (er.kind == type_kind::array ||
+                (er.kind == type_kind::dependent &&
+                 entity_table[er.entity].instantiation)) {
+                unknown = true;
+                return 0;
+            }
+            continue;
+        }
         if (ar.kind == type_kind::none || ar.kind == type_kind::placeholder ||
             ar.kind == type_kind::dependent) {
             unknown = true;
@@ -834,7 +890,9 @@ int semantic_analysis::deduce_from_braced_list(
             return -1;
         }
     }
-    if (bound_parameter &&
+    /* a specified N is not deduced from the length: the list may be
+       shorter */
+    if (bound_parameter && entity_table[pr.entity].value >= first_deducible &&
         !deduce_bound(pr.entity, m.braced_count, deduced, set))
         return -1;
     return 1;
@@ -963,8 +1021,8 @@ analysis_result semantic_analysis::deduce_from_call(
         }
         if (arguments[i].braced_known) {
             bool unknown = false;
-            int found =
-                deduce_from_braced_list(p, arguments[i], values, set, unknown);
+            int found = deduce_from_braced_list(p, arguments[i], values, set,
+                                                first_deducible, unknown);
             if (unknown || (found && i >= fixed))
                 return not_supported_because(
                     at, "temp.deduct.call",
@@ -991,7 +1049,18 @@ analysis_result semantic_analysis::deduce_from_call(
             return not_supported_because(at, "temp.deduct.call",
                                          "an argument of no, placeholder or "
                                          "dependent type in deduction");
+        bool reference =
+            type_table[p.unqualified()].kind == type_kind::lvalue_reference ||
+            type_table[p.unqualified()].kind == type_kind::rvalue_reference;
         adjust_call_deduction(p, a, arguments[i].category);
+        /* [temp.deduct.call]/4.1: "the transformed A can be more
+           cv-qualified than the deduced A": an array's cv-qualifiers are its
+           elements' ([basic.type.qualifier]/3), which the match below
+           compares as types */
+        if (reference && type_table[p.unqualified()].kind == type_kind::array &&
+            type_table[a.unqualified()].kind == type_kind::array &&
+            !(cv_of(type_table, a) & ~cv_of(type_table, p)))
+            a = add_cv(a, cv_of(type_table, p));
         /* a parameter that does not match: deduction fails, which
            overload resolution of the function templates of the name and
            its other functions decides; neither is analysed yet */

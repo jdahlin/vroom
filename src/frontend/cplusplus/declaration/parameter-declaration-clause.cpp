@@ -400,6 +400,10 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                           "array or function",
                           "dcl.fct");
     }
+    /* the outermost declarator's alone: a parameter's own function type
+       keeps its specification */
+    const bool guide = forming_guide_type;
+    forming_guide_type = false;
     using punct = preprocessing_op_or_punc;
     /* the parameter-declarations and the ellipsis, from the clause and its
        list: ( clause ) is the first and last child */
@@ -754,7 +758,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     /* [temp.inst]/15's specification, which is not instantiated yet: one
        that needs itself without end is not accepted for that */
     if (exceptions && may_qualify && defining_class &&
-        entity_table[defining_class].instantiation &&
+        entity_table[defining_class].instantiation && !guide &&
         noexcept_needs_itself(exceptions.first_token() - 1,
                               exceptions.end_token(),
                               entity_table[defining_class].name))
@@ -762,7 +766,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
             exceptions, "temp.inst",
             "an exception specification that needs itself through its own "
             "template");
-    if (exceptions) {
+    if (exceptions && !guide) {
         size_t dependent_before = dependent_exception_specifications.size();
         VTRY(r,
              parameter_scope_noexcept(exceptions, may_qualify, non_throwing));

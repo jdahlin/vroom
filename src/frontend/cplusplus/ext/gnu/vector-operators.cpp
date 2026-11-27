@@ -52,8 +52,9 @@ type_index types::vector_mask_of(const struct type &vector, uint64_t element,
     default:
         break;
     }
-    return vector_of(qualified_type::make(fundamental(t), cv_none),
-                     vector.bound);
+    return vector_like(vector.kind,
+                       qualified_type::make(fundamental(t), cv_none),
+                       vector.bound);
 }
 
 /*
@@ -142,10 +143,9 @@ analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
         return not_supported_because(
             n, "ext.gnu",
             "a vector operand of an operator that does not work lane by lane");
-    bool left_vector =
-             type_table[left.type.unqualified()].kind == type_kind::vector,
+    bool left_vector = is_vector_kind(type_table[left.type.unqualified()].kind),
          right_vector =
-             type_table[right.type.unqualified()].kind == type_kind::vector;
+             is_vector_kind(type_table[right.type.unqualified()].kind);
     qualified_type vector = left.type;
     if (!left_vector)
         vector = right.type;

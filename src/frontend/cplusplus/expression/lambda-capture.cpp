@@ -88,9 +88,12 @@ analysis_result semantic_analysis::capture_type(SyntaxRef at, qualified_type t,
         r.kind == type_kind::rvalue_reference)
         object = r.operand;
     const struct type o = type_table[object.unqualified()];
-    if (o.kind == type_kind::function)
-        return not_supported_because(at, "expr.prim.lambda.capture",
-                                     "a capture of a function");
+    if (o.kind == type_kind::function) {
+        /* /10: by copy or by reference, an lvalue reference to the
+           function */
+        type = reference_to(object, false);
+        return analysis_result::well_formed;
+    }
     /* an array captured by copy is copied element by element (/15) */
     if (o.kind == type_kind::array && !by_reference &&
         (!o.bound_known || !size_of_type(object)))

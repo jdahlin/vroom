@@ -1277,15 +1277,25 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
                           "or be the address of the result of a typeid "
                           "expression",
                           "temp.arg.nontype");
+    /* (a static member of a class is such an object or function too:
+       [class.static]; a non-static one has no address without an object) */
+    bool static_member = false;
+    if (x.enclosing &&
+        entity_table[x.enclosing].kind == entity_kind::class_type)
+        /* (not one of a class template specialization whose definition
+           is not instantiated yet: [temp.inst]/4 the argument would need
+           it) */
+        static_member = !x.nonstatic_member && !x.member_body_deferred;
     if ((x.kind != entity_kind::variable && x.kind != entity_kind::function) ||
-        x.instantiation || x.next_overload || !is_namespace(x.enclosing) ||
-        x.c11_thread_local)
+        x.instantiation || x.next_overload ||
+        (!is_namespace(x.enclosing) && !static_member) || x.c11_thread_local)
         /* (an object of thread storage duration has no address that is
            the same in each thread: [temp.arg.nontype]/2's constant
            expression is clang's error) */
         return not_supported_because(at, "temp.arg.nontype",
                                      "an address argument not a plain "
-                                     "namespace-scope object or function");
+                                     "namespace-scope or static member "
+                                     "object or function");
     const struct type &xr = type_table[x.type.unqualified()];
     bool same = false;
     if (reference || address_of)

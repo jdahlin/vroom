@@ -387,6 +387,13 @@ class declared_names
        variable", whose name is in the scope that encloses the
        template-head's */
     scope_index declaring_scope() const;
+    /* whether the declaring scope itself (not an enclosing one) has a
+       declaration of the name */
+    bool declares_here(uint32_t name) const
+    {
+        bool concrete = false;
+        return find(declaring_scope(), name, 0, &concrete);
+    }
     /* [basic.lookup.classref]/1, [temp.names]/4: whether some class
        declares a member template of the name (a function template, a
        class or alias template, a variable template) as the parser has
@@ -425,6 +432,17 @@ class declared_names
     /* [class.derived]/2, [class.member.lookup]: the members of a base class
        are found by lookup in the derived class's region, after its own */
     void add_base(scope_index derived, scope_index base, bool concrete = false);
+    /* a class template that derives from a dependent base the parser does
+       not know (its parameter, template <class B> struct M : B): a
+       specialization's members may be its arguments' */
+    void set_dependent_base(scope_index region)
+    {
+        scopes[region].dependent_base = true;
+    }
+    bool has_dependent_base(scope_index region) const
+    {
+        return scopes[region].dependent_base;
+    }
     /* [class.mem]/6: "A complete-class context of a class is a function
        body, default argument, noexcept-specifier, or default member
        initializer within the member-specification of the class", where
@@ -528,6 +546,7 @@ class declared_names
         /* a class's region with all its members ([class.mem]/6), 0 when
            there is none yet */
         scope_index complete = 0;
+        bool dependent_base = false;
     };
     owned_objects<scope> scopes;
     scope_index current_scope = 0;
@@ -1161,6 +1180,8 @@ class parser
        class's region is made by the caller */
     node_index base_clause(scope_index derived);
     node_index base_specifier(scope_index derived);
+    void add_argument_bases(scope_index derived, token_index first,
+                            bool concrete);
     /* class-or-decltype; *region: the class it names, if the parser knows
        it (0 if not) */
     node_index class_or_decltype(scope_index *region);

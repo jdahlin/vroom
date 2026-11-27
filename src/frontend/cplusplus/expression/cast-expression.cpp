@@ -146,8 +146,8 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
         target.kind == type_kind::rvalue_reference)
         return reference_cast(at, to, m, kinds);
     if ((kinds & (cast_static | cast_reinterpret)) &&
-        (target.kind == type_kind::vector ||
-         type_table[m.type.unqualified()].kind == type_kind::vector)) {
+        (is_vector_kind(target.kind) ||
+         is_vector_kind(type_table[m.type.unqualified()].kind))) {
         /* [ext:gnu_vector_size] a vector to a vector or to a scalar of the
            same size, or a scalar to a vector: the same bits (clang: "invalid
            conversion between vector type and ... of different size") */
@@ -155,16 +155,20 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
         const struct type &from_type = type_table[m.type.unqualified()];
         bool scalar_from = is_arithmetic(m.type);
         bool scalar_to = is_arithmetic(to);
-        if (target.kind == type_kind::vector &&
-            from_type.kind != type_kind::vector && !scalar_from)
+        if (is_vector_kind(target.kind) && !is_vector_kind(from_type.kind) &&
+            !scalar_from)
             return not_supported_because(at, "ext.gnu",
                                          "a cast to a vector from an operand "
                                          "that is not vector or scalar");
-        if (from_type.kind == type_kind::vector &&
-            target.kind != type_kind::vector && !scalar_to)
+        if (is_vector_kind(from_type.kind) && !is_vector_kind(target.kind) &&
+            !scalar_to)
             return not_supported_because(
                 at, "ext.gnu",
                 "a cast from a vector to a type that is not vector or scalar");
+        if (target.kind == type_kind::ext_vector && scalar_from)
+            /* clang: the scalar in every element, not its bits */
+            return not_supported_because(
+                at, "ext.clang", "a cast of a scalar to an ext_vector_type");
         if (size_of_type(m.type) != size_of_type(to))
             return ill_formed(at,
                               "invalid conversion between vector type and a "
@@ -844,6 +848,12 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
         return not_supported_because(
             at, "expr.cast",
             "a cast of a function or bit-field to a reference");
+    if (m.node && semantics[m.node].kind == semantic_kind::subscript &&
+        is_vector_kind(
+            type_table[semantics[semantics[m.node].a].type.unqualified()].kind))
+        /* [ext:gnu_vector_size] clang: a lane is no object to refer to */
+        return ill_formed(at, "a reference cast of a vector element",
+                          "ext.gnu");
     bool same = referenced.unqualified() == m.type.unqualified();
     bool scalars =
         type_table[referenced.unqualified()].kind != type_kind::class_type &&
@@ -890,9 +900,13 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
                       base_step(into.entity, from.entity, ambiguous);
         }
         if (!related && !same && (kinds & cast_static) &&
-            (kinds == cast_static || may_bind_temporary))
+            (kinds == cast_static ||
+             (may_bind_temporary &&
+              implicit_conversion_sequence(m, to, true).kind !=
+                  conversion_sequence::form::bad)))
             /* [expr.static.cast]/4: "T t(E);" may bind the reference to a
-               temporary of the converted value */
+               temporary of the converted value; a C-style cast with no such
+               conversion is a reinterpret_cast ([expr.cast]/4) */
             return not_supported_because(
                 at, "expr.static.cast",
                 "a static_cast to a reference of an unrelated type");

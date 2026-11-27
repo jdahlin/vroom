@@ -804,6 +804,16 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             m.evaluation = result.evaluation;
             m.value = result.value;
             m.node = result.node;
+            /* [dcl.init.list]/3.11: T{} of a scalar is value-initialized,
+               a constant like T()'s (a zero node initializes an object, and
+               is no operand) */
+            if (m.node && semantics[m.node].kind == semantic_kind::zero &&
+                m.evaluation == constness::constant &&
+                (record.kind == type_kind::fundamental ||
+                 record.kind == type_kind::enumeration ||
+                 record.kind == type_kind::pointer))
+                m.node = expression_node(semantic_kind::constant, m,
+                                         n.first_token());
             return analysis_result::well_formed;
         }
         return not_supported_because(
@@ -838,7 +848,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             return r;
         expression_meaning *base = &a, *index = &i;
         auto is_vector = [&](const expression_meaning &x) {
-            return type_table[x.type.unqualified()].kind == type_kind::vector;
+            return is_vector_kind(type_table[x.type.unqualified()].kind);
         };
         if (is_vector(a) || is_vector(i)) {
             /* [ext:gnu_vector_size] v[i]: lane i of the vector, an lvalue
@@ -2292,9 +2302,12 @@ semantic_analysis::braced_deduction_elements(SyntaxElement list,
             return analysis_result::well_formed;
     owned_array<expression_meaning> found;
     for (SyntaxElement c : clauses) {
-        if (c.is(syntax_kind::braced_init_list))
-            return analysis_result::well_formed;
         expression_meaning e;
+        if (c.is(syntax_kind::braced_init_list)) {
+            /* an element of no node and no type: a nested list */
+            found.append(e);
+            continue;
+        }
         size_t uses_before = name_uses.size();
         VTRY(r, passed_expression(c, e));
         if (!e.node || e.overload_name) {

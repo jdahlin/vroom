@@ -111,14 +111,16 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
                                     !atomic_value_type(m.type))) ||
         (k == type_kind::bit_int &&
          type_table[m.type.unqualified()].bound > 64) ||
-        k == type_kind::ext_vector) {
+        (k == type_kind::ext_vector &&
+         (type_table[m.type.unqualified()].bound &
+          (type_table[m.type.unqualified()].bound - 1)))) {
         if (e.is_token())
             return not_supported_because(
                 current_declaration, "ext.clang",
-                "a value of atomic prvalue, _BitInt or ext_vector type");
+                "a value of atomic prvalue, _BitInt or ext_vector of 3 type");
         return not_supported_because(
             e.index(), "ext.clang",
-            "a value of atomic prvalue, _BitInt or ext_vector type");
+            "a value of atomic prvalue, _BitInt or ext_vector of 3 type");
     }
     /* [expr.type]/2: "If a prvalue initially has the type "cv T", where T
        is a cv-unqualified non-class, non-array type, the type of the

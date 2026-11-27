@@ -189,7 +189,8 @@ node_index parser::opaque_enum_declaration()
                         "dcl.enum", position);
     if (!accept(preprocessing_op_or_punc::SEMICOLON))
         return expected("';' after the opaque-enum-declaration", "dcl.enum");
-    if (name)
+    /* [dcl.enum]/3: a redeclaration; the definition's enumerators stay */
+    if (name && !names.declares_here(name))
         names.declare(name, name_kind::type_name);
     return finish_node(syntax_kind::opaque_enum_declaration, mark, first);
 }
@@ -484,6 +485,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     uint32_t name = 0;
     token_index name_at = n.first_token();
     SyntaxRef base = 0;
+    SyntaxRef qualifier = 0;
     for (SyntaxElement c : head) {
         if (c.is(syntax_kind::enum_key)) {
             scoped = true;
@@ -502,7 +504,22 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             name_at = c.token();
             continue;
         }
-        /* an attribute-specifier-seq, a nested-name-specifier */
+        /* enum-head-name with a nested-name-specifier */
+        if (!opaque && c.is(syntax_kind::enum_head_name)) {
+            SyntaxElement parts = n[0][0];
+            for (SyntaxElement h : head)
+                if (h.is(syntax_kind::enum_head_name))
+                    parts = h;
+            if (parts.size() == 2 &&
+                parts[0].is(syntax_kind::nested_name_specifier) &&
+                parts[1].is_identifier()) {
+                qualifier = parts[0].index();
+                name = tokens.identifier(parts[1].token());
+                name_at = parts[1].token();
+                continue;
+            }
+        }
+        /* an attribute-specifier-seq, another enum-head-name */
         return not_supported_because(n, "dcl.enum",
                                      "an unexpected part in an enum-head");
     }
@@ -563,6 +580,23 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     entity_index scope = current_scope;
     if (defining_class)
         scope = defining_class;
+    /* [dcl.enum]/1: a qualified enum-head-name defines an enumeration
+       declared before by an opaque-enum-declaration in the class or
+       namespace it nominates */
+    if (qualifier) {
+        nominated_scope q;
+        VTRY(qr, nested_name_specifier(NestedNameSpecifier(qualifier), q));
+        entity_index prior = 0;
+        if (q.entity && !defining_class && !function_state.active)
+            prior = entity_table.find(q.entity, name);
+        if (!prior || entity_table[prior].kind != entity_kind::enumeration ||
+            entity_table[prior].enclosing != q.entity)
+            return not_supported_because(
+                n, "dcl.enum",
+                "a qualified enum-head-name that finds no enumeration "
+                "declared in the nominated scope");
+        scope = q.entity;
+    }
     entity_index e = 0;
     bool is_fixed = fixed != fundamental_type::none;
     if (name) {
@@ -583,6 +617,14 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                                            "enumeration shall have the same "
                                            "enum-key and underlying type",
                                            "dcl.enum");
+            /* [class.mem]/5: a member is declared once, but an enumeration
+               introduced by an opaque-enum-declaration may be redeclared
+               with an enum-specifier */
+            if (opaque && defining_class)
+                return ill_formed_at_token(name_at,
+                                           "a member shall not be declared "
+                                           "twice in the member-specification",
+                                           "class.mem");
             entity_table.add_declaration(prior, current_declaration);
             type = x.type.unqualified();
             if (opaque)
@@ -616,7 +658,9 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     entity &x = entity_table[e];
     x.scoped = scoped;
     x.fixed_underlying = is_fixed;
-    x.access = declaration_access;
+    /* [class.access.spec]: a redeclaration keeps the member's access */
+    if (!redeclared)
+        x.access = declaration_access;
     if (is_namespace(scope)) {
         /* [basic.link]/4: a named enumeration of namespace scope has its
            namespace's linkage */
@@ -682,8 +726,14 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             current = saved;
         }
     } restore_scope = {current_scope, current_scope};
-    if (scoped)
+    /* [basic.lookup.unqual]: after a qualified enum-head-name the names
+       are looked up as in the nominated scope, with its access */
+    if (scoped || qualifier)
         current_scope = e;
+    entity_index context = access_class;
+    if (qualifier && !is_namespace(scope))
+        context = scope;
+    scoped_value<entity_index> enumerator_access(access_class, context);
     /* [temp.spec]/6: an enumerator-list is checked */
     flag_set checked(explicit_declaration_names, false);
     for (SyntaxElement c : enumerators) {
@@ -875,7 +925,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
         if (value_unknown)
             y.usable = constness::unknown;
         y.defined = true;
-        y.access = declaration_access;
+        y.access = entity_table[e].access;
         entity_table.add_declaration(en, current_declaration);
         /* [basic.scope.pdecl]/5: "The point of declaration for an
            enumerator is immediately after its enumerator-definition."

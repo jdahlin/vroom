@@ -79,7 +79,9 @@ struct tree_checker {
             return false;
         const struct type &record =
             analysis.type_table[node.type.unqualified()];
-        return record.kind == type_kind::class_type;
+        /* (an array's list temporary too) */
+        return record.kind == type_kind::class_type ||
+               record.kind == type_kind::array;
     }
 
     bool is_bool(qualified_type t) const
@@ -233,9 +235,10 @@ struct tree_checker {
             /* [ext:gnu_vector_size]: a lane of a vector object is an lvalue
                of that object, which the vector operand is */
             if (node.a >= analysis.semantics.size() ||
-                analysis.type_table[analysis.semantics[node.a]
-                                        .type.unqualified()]
-                        .kind != type_kind::vector)
+                !is_vector_kind(analysis
+                                    .type_table[analysis.semantics[node.a]
+                                                    .type.unqualified()]
+                                    .kind))
                 prvalue(n, node.a, "left operand");
             prvalue(n, node.b, "right operand");
             break;
@@ -248,7 +251,13 @@ struct tree_checker {
             break;
         case semantic_kind::assignment:
             child(n, node.a, tree_sort::expression, false, "left operand");
-            child(n, node.b, tree_sort::expression, false, "right operand");
+            {
+                /* a member's initialization (c) may be a zero: a() */
+                tree_sort stored = tree_sort::expression;
+                if (node.c)
+                    stored = tree_sort::initializer;
+                child(n, node.b, stored, false, "right operand");
+            }
             if (node.a &&
                 analysis.semantics[node.a].category != value_category::lvalue)
                 problem(n, "the left operand is not an lvalue");

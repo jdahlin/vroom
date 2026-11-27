@@ -643,7 +643,12 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
              syntax_kind::attribute);
     auto ignorable = [&](const char *ns, size_t ns_length, const char *name,
                          size_t length) {
-        return attribute_without_effect(ns, ns_length, name, length) ||
+        /* clang::reinitializes: for use-after-move checkers only */
+        bool reinitializes = in_member_declaration && ns &&
+                             name_is(ns, ns_length, "clang") &&
+                             name_is(name, length, "reinitializes");
+        return reinitializes ||
+               attribute_without_effect(ns, ns_length, name, length) ||
                (is_attribute_syntax &&
                 cpp_attribute_value(tokens.files.behavior, ns, ns_length, name,
                                     length) == 0);

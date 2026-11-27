@@ -920,7 +920,11 @@ analysis_result semantic_analysis::overloaded_operator(
                     declares_move = true;
             /* a copy assignment operator declared defaulted has no
                candidate here, and is no implicit one */
-            bool implicit_viable = true;
+            /* [class.copy.assign]/2, /4: the implicit operators are
+               non-const, non-volatile members, no candidates for a cv
+               left operand ([over.match.funcs]/4): std::ignore = x */
+            bool implicit_viable =
+                !(operands[0].type.cv() & (cv_const | cv_volatile));
             const struct type &right_record =
                 type_table[operands[1 % operands.size()].type.unqualified()];
             bool ambiguous_base = false;
@@ -935,11 +939,15 @@ analysis_result semantic_analysis::overloaded_operator(
                 entity_table[right_record.entity].size &&
                 !base_step(right_record.entity, c, ambiguous_base) &&
                 !ambiguous_base;
+            /* (an enumeration has an entity, and converts to a class by
+               a user-defined conversion only, as other non-class types) */
+            bool enumeration_right =
+                right_record.kind == type_kind::enumeration;
             if (!entity_table[c].defaulted_copy_assignment &&
                 !entity_table[c].defaulted_move_assignment &&
                 operands.size() == 2 &&
                 (type_table[operands[1].type.unqualified()].entity == 0 ||
-                 other_class)) {
+                 enumeration_right || other_class)) {
                 /* [over.match.viable]/4: the implicit X& operator=(const
                    X&) (and X&&) is no candidate when the right operand, of
                    no class type, has no implicit conversion sequence to
@@ -960,9 +968,7 @@ analysis_result semantic_analysis::overloaded_operator(
                ostreambuf_iterator, whose operator=(_CharT) takes no
                iterator): the built-in copy (class_assignment) */
             if (implicit_viable && !declares_move &&
-                !copy_assignment_deleted(c) &&
-                !entity_table[c].defaulted_copy_assignment &&
-                operands.size() == 2 &&
+                !copy_assignment_deleted(c) && operands.size() == 2 &&
                 operands[1].type.unqualified() ==
                     operands[0].type.unqualified() &&
                 !(operands[0].type.cv() & cv_const) && assigned_bitwise(c)) {
@@ -1008,7 +1014,7 @@ analysis_result semantic_analysis::overloaded_operator(
             }
             if (implicit_viable && operands.size() == 2 &&
                 (type_table[operands[1].type.unqualified()].entity == 0 ||
-                 other_class)) {
+                 enumeration_right || other_class)) {
                 /* [over.ics.rank]/2: the implicit C& operator=(const C&) (and
                    C&&) requires a user-defined conversion for a right operand
                    of an unrelated type; a non-const member operator= with a
@@ -1031,6 +1037,31 @@ analysis_result semantic_analysis::overloaded_operator(
                         break;
                     }
                 }
+            }
+            /* [over.match.viable]/2: where no declared operator= is viable
+               for a right operand of no class type (std::optional<E> = e,
+               whose operator=(U&&) is constrained away), the implicit ones
+               are the only candidates: class_assignment converts */
+            if (implicit_viable && !declares_move &&
+                !copy_assignment_deleted(c) && operands.size() == 2 &&
+                (type_table[operands[1].type.unqualified()].entity == 0 ||
+                 enumeration_right) &&
+                assigned_bitwise(c)) {
+                owned_array<expression_meaning> trial;
+                for (const expression_meaning &e : operands)
+                    trial.append(e);
+                size_t ignored = 0;
+                bool none = false;
+                size_t unsupported_before = unsupported.size();
+                analysis_result t = analysis_result::well_formed;
+                {
+                    diagnostics_suppressed_if hush(diagnostics, true);
+                    t = best_viable_function(n, candidates, nullptr, trial,
+                                             ignored, &none);
+                }
+                unsupported.resize(unsupported_before);
+                if (t == analysis_result::well_formed && none)
+                    return analysis_result::well_formed;
             }
             if (implicit_viable) {
                 /* (/7: one deleted for a const or reference member is a
