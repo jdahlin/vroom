@@ -123,7 +123,9 @@ static const char *const x64_condition_names[] = {
 VPRIV void x64_register_name_append(tbuf *b, int r, int sz)
 {
     if (X64_REGISTER_IS_XMM(r)) {
-        if (sz == 32)
+        if (sz == 64)
+            vtext_string_append(b, "%zmm");
+        else if (sz == 32)
             vtext_string_append(b, "%ymm");
         else
             vtext_string_append(b, "%xmm");
@@ -722,7 +724,9 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
         case X64_OP_MOV:
             if (X64_REGISTER_IS_XMM(i->registers[0]) &&
                 X64_REGISTER_IS_XMM(i->registers[1]))
-                vtext_string_append(b, sz == 32 ? "\tvmovaps\t" : "\tmovaps\t");
+                vtext_string_append(b, sz == 64   ? "\tvmovdqa64\t"
+                                       : sz == 32 ? "\tvmovaps\t"
+                                                  : "\tmovaps\t");
             else if (X64_REGISTER_IS_XMM(i->registers[0]) ||
                      X64_REGISTER_IS_XMM(i->registers[1]))
                 vtext_string_append(b, sz == 4 ? "\tmovd\t" : "\tmovq\t");
@@ -764,6 +768,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
                 vtext_string_append(b, sz == 4    ? "\tmovss\t"
                                        : sz == 8  ? "\tmovsd\t"
                                        : sz == 32 ? "\tvmovups\t"
+                                       : sz == 64 ? "\tvmovdqu64\t"
                                                   : "\tmovups\t");
                 x64_memory_operand_append(e, b, i);
                 vtext_string_append(b, ", ");
@@ -793,6 +798,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
                 vtext_string_append(b, sz == 4    ? "\tmovss\t"
                                        : sz == 8  ? "\tmovsd\t"
                                        : sz == 32 ? "\tvmovups\t"
+                                       : sz == 64 ? "\tvmovdqu64\t"
                                                   : "\tmovups\t");
             else
                 x64_mnemonic_append(b, "mov", sz);

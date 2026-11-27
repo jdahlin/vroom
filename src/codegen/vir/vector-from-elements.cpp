@@ -14,9 +14,9 @@
 
 typedef struct virbuild_elements {
     uint32_t slot;      /* + 1; 0: none */
-    uint32_t value[32]; /* at each byte where a store begins */
-    uint8_t width[32];  /* ... its bytes; 0: none begins here */
-    uint32_t covered;   /* a bit per byte stored */
+    uint32_t value[64]; /* at each byte where a store begins */
+    uint8_t width[64];  /* ... its bytes; 0: none begins here */
+    uint64_t covered;   /* a bit per byte stored */
 } virbuild_elements;
 
 /* a slot a memset has zeroed: the 8-byte half no store has touched holds 0 */
@@ -112,19 +112,24 @@ static uint32_t virbuild_elements_word(const virbuild_elements_at *W,
     return word;
 }
 
-/* the 256-bit vector of one value in every element: that value repeated to 64
+/* the 256- or 512-bit vector of one value in every element: that value repeated to 64
  * bits, then to every lane; 0 when E's stores are not that */
 static uint32_t virbuild_elements_wide(const virbuild_elements_at *W,
-                                       const virbuild_elements *E)
+                                       const virbuild_elements *E, uint32_t ty)
 {
     codegen_context *e = W->context;
     virbuild_context *V = e->vir_builder;
     uint32_t width = E->width[0];
 
-    if (E->covered != 0xffffffffu ||
+    uint32_t bytes = vir_type_size(ty);
+    uint64_t all = 0xffffffffu;
+
+    if (bytes == 64)
+        all = ~0ull;
+    if (E->covered != all ||
         (width != 1 && width != 2 && width != 4 && width != 8))
         return 0;
-    for (uint32_t i = 0; i < 32; i += width)
+    for (uint32_t i = 0; i < bytes; i += width)
         if (E->width[i] != width || E->value[i] != E->value[0])
             return 0;
     uint32_t type = V->insns[E->value[0]].insn.type;
@@ -150,7 +155,7 @@ static uint32_t virbuild_elements_wide(const virbuild_elements_at *W,
     } else if (type != VIR_TYPE_I64) {
         return 0;
     }
-    return virbuild_elements_insn(W, VIR_OP_VSPLAT, VIR_TYPE_I64X4, word, 0, 0);
+    return virbuild_elements_insn(W, VIR_OP_VSPLAT, ty, word, 0, 0);
 }
 
 /* the vector of type ty that E's stores make; 0 when they do not make one */
@@ -163,8 +168,8 @@ static uint32_t virbuild_elements_vector(const virbuild_elements_at *W,
     uint32_t built = 0;
     uint32_t made = 0;
 
-    if (ty == VIR_TYPE_I64X4)
-        return virbuild_elements_wide(W, E);
+    if (vir_type_size(ty) > 16)
+        return virbuild_elements_wide(W, E, ty);
     if (E->covered != 0xffff)
         return 0;
     if (E->width[0] == 8) {
@@ -251,13 +256,13 @@ VPRIV bool virbuild_vectors_from_elements(codegen_context *e)
                 uint32_t slot = virbuild_elements_slot(V, in.a, &offset);
                 uint32_t size = virbuild_access_bytes(V, &in);
 
-                if (!slot || size > 8 || offset + size > 32) {
+                if (!slot || size > 8 || offset + size > 64) {
                     /* a vector store, or one that may write any slot */
                     E.slot = 0;
                     zeroed = 0;
                     continue;
                 }
-                uint32_t bytes = (1u << size) - 1;
+                uint64_t bytes = (1u << size) - 1;
                 if (zeroed && zeroed != slot)
                     zeroed = 0;
                 /* a byte stored twice: what the slot holds is no longer tracked,

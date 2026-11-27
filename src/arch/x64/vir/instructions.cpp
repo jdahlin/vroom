@@ -516,8 +516,8 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             x64_vir_text_append(L, text);
             return;
         }
-        if (i->type == VIR_TYPE_I64X4)
-            x64_vir_x86_wide_emit(L, i->c, d, a, c);
+        if (vir_type_size(i->type) > 16)
+            x64_vir_x86_wide_emit(L, i->c, d, a, c, i->type);
         else
             x64_vir_x86_emit(L, i->c, d, a, c);
         return;
@@ -1080,11 +1080,15 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         int lane = x64_vir_type_size(vir_type_element(i->type));
         int64_t k;
 
-        if (i->type == VIR_TYPE_I64X4) { /* the 64 bits to all four lanes */
+        if (vir_type_size(i->type) > 16) { /* the 64 bits to all lanes */
+            char r = 'y';
+
+            if (i->type == VIR_TYPE_I64X8)
+                r = 'z';
             x64_record_emit_three_registers(e, X64_OP_MOV, 8, d, a,
                                             X64_REGISTER_NONE);
-            snprintf(s, sizeof s, "\tvpbroadcastq\t%%xmm%d, %%ymm%d\n",
-                     d - XMM0, d - XMM0);
+            snprintf(s, sizeof s, "\tvpbroadcastq\t%%xmm%d, %%%cmm%d\n",
+                     d - XMM0, r, d - XMM0);
             x64_vir_text_append(L, s);
             return;
         }

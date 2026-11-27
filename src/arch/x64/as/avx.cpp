@@ -352,7 +352,9 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         K_BINARY,
         VECTOR_STORE, /* vmovdqu64 zmm, m512 */
         BROADCAST,    /* the low element of an xmm register to every lane */
-        MOVE_SHIFT    /* shift by an immediate: the digit in `digit` */
+        MOVE_SHIFT,   /* shift by an immediate: the digit in `digit` */
+        COUNT_SHIFT,  /* shift by the count in an xmm register */
+        FROM_MASK     /* a mask register's bits to a vector's lanes */
     };
     static const struct {
         const char *name;
@@ -402,6 +404,14 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         {"vpsrad", MOVE_SHIFT, 1, 0x72, 1, 0, 64, 4},
         {"vpsllq", MOVE_SHIFT, 1, 0x73, 1, 1, 64, 6},
         {"vpsrlq", MOVE_SHIFT, 1, 0x73, 1, 1, 64, 2},
+        {"vpsllw", COUNT_SHIFT, 1, 0xf1, 1, 0, 16},
+        {"vpslld", COUNT_SHIFT, 1, 0xf2, 1, 0, 16},
+        {"vpsllq", COUNT_SHIFT, 1, 0xf3, 1, 1, 16},
+        {"vpsraw", COUNT_SHIFT, 1, 0xe1, 1, 0, 16},
+        {"vpsrad", COUNT_SHIFT, 1, 0xe2, 1, 0, 16},
+        {"vpsrlw", COUNT_SHIFT, 1, 0xd1, 1, 0, 16},
+        {"vpsrld", COUNT_SHIFT, 1, 0xd2, 1, 0, 16},
+        {"vpsrlq", COUNT_SHIFT, 1, 0xd3, 1, 1, 16},
         {"vmovdqu64", LOAD, 1, 0x6f, 2, 1, 64},
         {"vmovdqa64", LOAD, 1, 0x6f, 1, 1, 64},
         {"vbroadcasti32x4", LOAD, 2, 0x5a, 1, 0, 16},
@@ -416,6 +426,11 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         {"vpcmpeqb", TEST, 1, 0x74, 1, 0, 64},
         {"vpcmpub", COMPARE, 3, 0x3e, 1, 0, 64},
         {"vpmovb2m", TO_MASK, 2, 0x29, 2, 0, 64},
+        {"vpcmpeqw", TEST, 1, 0x75, 1, 0, 64},
+        {"vpcmpgtb", TEST, 1, 0x64, 1, 0, 64},
+        {"vpcmpgtw", TEST, 1, 0x65, 1, 0, 64},
+        {"vpmovm2b", FROM_MASK, 2, 0x28, 2, 0, 64},
+        {"vpmovm2w", FROM_MASK, 2, 0x28, 2, 1, 64},
         {"kmovq", K_STORE, 1, 0x91, 0, 1, 0},
         {"knotq", K_UNARY, 1, 0x44, 0, 1, 0},
         {"korq", K_BINARY, 1, 0x45, 0, 1, 0},
@@ -434,8 +449,10 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         if (form == LOAD && ops[i].map == 1 && n == 2 && o[0].kind == XK_REG &&
             o[1].kind != XK_REG)
             continue;
-        if (form == SHIFT && !strcmp(mn, "vpsrlw") &&
+        if ((form == SHIFT || form == MOVE_SHIFT) &&
             !(n == 3 && o[0].kind == XK_IMM))
+            continue;
+        if (form == COUNT_SHIFT && n == 3 && o[0].kind == XK_IMM)
             continue;
         if (form == VECTOR_STORE || form == BROADCAST) {
             XOp *reg = &o[1], *mem = &o[0];
@@ -463,6 +480,8 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         bool imm = form == SHIFT || form == COMPARE || form == MOVE_SHIFT;
         bool binary = form == BINARY || form == TEST || form == COMPARE ||
                       form == K_BINARY;
+        if (form == COUNT_SHIFT)
+            binary = true; /* (three operands) */
         if (n != 2 + binary + imm)
             break;
         XOp *dst = &o[n - 1], *rm = &o[imm];
@@ -473,6 +492,29 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
                     .tuple = ops[i].tuple, .vex = 1);
         if (ops[i].map == 1)
             bytes[1] = bytes[2], f.nop = 2;
+        if (form == COUNT_SHIFT) {
+            /* count (xmm or m128), source, destination */
+            XOp *count = &o[0], *source = &o[1], *to = &o[2];
+
+            if (to->kind != XK_REG || to->cls != XR_ZMM ||
+                source->kind != XK_REG || source->cls != XR_ZMM ||
+                (count->kind == XK_REG && count->cls != XR_XMM))
+                break;
+            f.mask = to->mask;
+            f.zero = to->zero;
+            f.reg = to->reg;
+            f.vvvv = source->reg;
+            f.rm = count;
+            return x64_emit(a, &f);
+        }
+        if (form == FROM_MASK) {
+            if (rm->kind != XK_REG || rm->cls != XR_MASK || rm->mask ||
+                dst->kind != XK_REG || dst->cls != XR_ZMM || dst->mask)
+                break;
+            f.reg = dst->reg;
+            f.rm = rm;
+            return x64_emit(a, &f);
+        }
         if (form == K_STORE) {
             if (rm->kind != XK_REG || rm->cls != XR_MASK || rm->mask ||
                 (dst->kind != XK_MEM && dst->kind != XK_EXPR))

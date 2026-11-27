@@ -209,3 +209,16 @@
 	vmovdqa64	%zmm9, %zmm10
 	vpbroadcastq	%xmm0, %zmm0
 	vpbroadcastq	%xmm9, %zmm13
+	vpcmpeqw	%zmm1, %zmm2, %k1
+	vpcmpgtb	%zmm9, %zmm10, %k1
+	vpcmpgtw	%zmm1, %zmm2, %k1
+	vpmovm2b	%k1, %zmm5
+	vpmovm2w	%k1, %zmm13
+	vpsllw	%xmm1, %zmm2, %zmm3
+	vpslld	%xmm9, %zmm10, %zmm11
+	vpsllq	%xmm1, %zmm2, %zmm3
+	vpsraw	%xmm1, %zmm2, %zmm3
+	vpsrad	%xmm1, %zmm2, %zmm3
+	vpsrlw	%xmm1, %zmm12, %zmm3
+	vpsrld	16(%rax), %zmm2, %zmm3
+	vpsrlq	%xmm1, %zmm2, %zmm3

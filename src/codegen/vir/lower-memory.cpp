@@ -576,15 +576,25 @@ VPRIV uint32_t virbuild_vector_type(codegen_context *e, ast_qualified_type vt,
     return VIR_TYPE_I64X2;
 }
 
-/* whether the function being built may hold 256-bit values (AVX2) */
-VPRIV bool virbuild_wide_vectors(codegen_context *e)
+/* the type of a 32- or 64-byte value the function being built may hold in one
+ * register (AVX2, AVX-512BW), else VIR_TYPE_VOID */
+VPRIV uint32_t virbuild_wide_type(codegen_context *e, uint64_t bytes)
 {
     cc *c = e->compile_context;
 
-    return CODEGEN_IS_X64(c) &&
-           x86_feature_has(
-               cc_x86_features_get(c, e->walk_state->function_symbol),
-               X86_FEATURE_AVX2);
+    if (!CODEGEN_IS_X64(c) || (bytes != 32 && bytes != 64))
+        return VIR_TYPE_VOID;
+    unsigned feature = X86_FEATURE_AVX2;
+    uint32_t type = VIR_TYPE_I64X4;
+
+    if (bytes == 64) {
+        feature = X86_FEATURE_AVX512BW;
+        type = VIR_TYPE_I64X8;
+    }
+    if (!x86_feature_has(cc_x86_features_get(c, e->walk_state->function_symbol),
+                         feature))
+        return VIR_TYPE_VOID;
+    return type;
 }
 
 VPRIV void virbuild_copy(codegen_context *e, int rdst, int rsrc, uint64_t n)
@@ -592,8 +602,9 @@ VPRIV void virbuild_copy(codegen_context *e, int rdst, int rsrc, uint64_t n)
     uint32_t d = virbuild_register_read(e, rdst, VIR_TYPE_PTR),
              s = virbuild_register_read(e, rsrc, VIR_TYPE_PTR);
 
-    if ((n == 16 || (n == 32 && virbuild_wide_vectors(e))) &&
-        e->copied_vector && !e->volatile_untag_depth &&
+    uint32_t wide = virbuild_wide_type(e, n);
+
+    if ((n == 16 || wide) && e->copied_vector && !e->volatile_untag_depth &&
         CODEGEN_IS_X64(e->compile_context) &&
         codegen_type_size(e->compile_context, e->copied_vector) == n &&
         !codegen_type_is_bool_vector(e->compile_context, e->copied_vector)) {
@@ -601,8 +612,8 @@ VPRIV void virbuild_copy(codegen_context *e, int rdst, int rsrc, uint64_t n)
         int lane = 0;
         uint32_t type = virbuild_vector_type(e, e->copied_vector, &lane);
 
-        if (n == 32) {
-            type = VIR_TYPE_I64X4;
+        if (wide) {
+            type = wide;
             lane = 8;
         }
         uint32_t fl = virbuild_memory_flags_make(lane, (uint32_t)lane, false);

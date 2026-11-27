@@ -31,7 +31,8 @@ typedef struct x64_vir_context {
     unsigned dup;
     bool may_fall_through, scratch_register10;
     bool has_returns_twice;
-    bool uses_ymm; /* 256-bit values: vzeroupper before calls and returns */
+    bool
+        uses_ymm; /* 256- or 512-bit values: vzeroupper before calls and returns */
     bool
         ms; /* the Microsoft x64 convention (Windows): arguments by position, rcx rdx r8 r9 / xmm0-3, shadow space */
     uint32_t memory_value, memory_skip, scaled_value, scaled_skip;
@@ -104,7 +105,7 @@ VPRIV void x64_vir_x86_emit(x64_vir_context *L, uint32_t code, int d, int a,
                             int b);
 /* the same on 256-bit values: the VEX form of the instruction */
 VPRIV void x64_vir_x86_wide_emit(x64_vir_context *L, uint32_t code, int d,
-                                 int a, int b);
+                                 int a, int b, uint32_t type);
 VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst,
                                         uint32_t v);
 VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg,
