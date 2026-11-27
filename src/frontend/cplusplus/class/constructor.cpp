@@ -1078,12 +1078,11 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     const qualified_type *parameters =
         type_table.parameters(type.unqualified());
     const struct type &first = type_table[parameters[0].unqualified()];
-    if (explicit_specified)
-        /* an explicit copy constructor: [class.copy.ctor]/7's implicit
-           one is not */
-        return not_supported_because(
-            n, "dcl.fct.def.default",
-            "an explicit defaulted copy or move constructor");
+    /* explicit on a defaulted copy or move constructor takes it out of
+       copy-initialization only ([over.match.ctor]/1), where a well-formed
+       program has no use for it: it is declared as the implicit one is
+       ([impl.defects] a copy-initialization that should be ill-formed is
+       accepted) */
     if (f.parameter_count == 1 && first.kind == type_kind::lvalue_reference &&
         first.operand.unqualified() == x.type.unqualified() &&
         first.operand.cv() == cv_const) {
