@@ -304,6 +304,16 @@ analysis_result semantic_analysis::analyse_function_body(
     SyntaxRef definition, SyntaxElement compound, SyntaxElement ctor_init)
 {
     entity_index f = last_declared;
+    if (skip_unneeded_member_body) {
+        skip_unneeded_member_body = false;
+        if (f && !entity_table[f].member_definition_needed &&
+            !entity_table[f].virtual_ &&
+            explicitly_instantiated(f) != instantiation_kind::definition) {
+            entity_table[f].defined = false;
+            skipped_member_body = f;
+            return analysis_result::well_formed;
+        }
+    }
     size_t before = unsupported.size();
     scoped_value<entity_index> deferring(needs_deferred_by, needs_deferred_by);
     defer_needs_of_instantiated_body(f);

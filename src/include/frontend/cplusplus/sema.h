@@ -3989,6 +3989,8 @@ class semantic_analysis
     /* the next function body analysed is one of an instantiation not known
        to be used: its needs wait for its function's (analyse_function_body) */
     bool defer_next_body_needs = false;
+    bool skip_unneeded_member_body = false;
+    entity_index skipped_member_body = 0;
     void defer_needs_of_instantiated_body(entity_index f);
     bool virtual_table_needed(entity_index c) const;
     owned_array<deferred_need> deferred_needs;
