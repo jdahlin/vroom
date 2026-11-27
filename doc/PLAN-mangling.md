@@ -353,6 +353,15 @@ declared in one group and set for a scope by the front end's
 the class's members are grouped by file.  Identity gate: no difference.
 Speed: +0.01% instructions.
 
+### M8: unit tests
+`src/test/cxx/mangle/`, a file per section (structure, names, scopes,
+types, templates, expressions, compression, special names): 93 symbols,
+each a `// MANGLE:` line; `bench/cxx-mangle-unit.py` checks vpp -c's
+object has each, and with `--clang` that clang's has each too (the
+expectations are clang's).  In `ci/premerge.sh` with `--clang`.  It fails on
+the build before M2 (the inline variable's guard).
+Status: done (2026-11-27).
+
 ### M7 (optional): the C mangler
 `frontend/c/mangle.cpp` uses the encoder for its types and substitutions.
 Status: not done, and not to do as written: the C front end builds as C11
