@@ -1793,6 +1793,13 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
         if (codegen_type_is_variably_modified(
                 c, c->syms[c->lists[N(y->body)->a + i]].ty))
             return false; /* (a parameter's VLA sizes) */
+    /* a copy takes its arguments as the parameters' own values: not where a
+	 * redeclaration made the call pass another kind of object (a transparent
+	 * union for a pointer) */
+    for (uint32_t i = 0; call && i < N(call)->c && i < N(y->body)->aux; i++)
+        if (codegen_type_is_record(c, N(c->lists[N(call)->b + i])->ty) !=
+            codegen_type_is_record(c, c->syms[c->lists[N(y->body)->a + i]].ty))
+            return false;
     /* VIR passes no 32-byte vector: a static function that does is inlined
        whatever its shape, as its call would take the caller out of VIR */
     bool wide = false;
@@ -1806,10 +1813,18 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
 
         if (!e->unit->options->opt)
             return false;
-        if ((y->flags & AST_SYMBOL_FLAG_NOINLINE) ||
-            (!(y->flags &
-               (AST_SYMBOL_FLAG_INLINE | AST_SYMBOL_FLAG_LINKONCE)) &&
-             y->sc != AST_STORAGE_STATIC))
+        if (y->flags & AST_SYMBOL_FLAG_NOINLINE)
+            return false;
+        /* VIR inlines an external function of this unit too, as clang, unless
+		 * it is weak; the direct emitter only static and inline ones */
+        bool external =
+            !(y->flags & (AST_SYMBOL_FLAG_INLINE | AST_SYMBOL_FLAG_LINKONCE)) &&
+            y->sc != AST_STORAGE_STATIC;
+        bool vir_walk = false;
+#ifdef WALK_PREFIX
+        vir_walk = e->vir_try;
+#endif
+        if (external && (!vir_walk || (y->flags & AST_SYMBOL_FLAG_WEAK)))
             return false;
 #ifdef WALK_PREFIX
         /* VIR: per call site by the callee's size with the callees it inlines itself
