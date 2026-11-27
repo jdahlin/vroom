@@ -3849,7 +3849,14 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         if (c != constness::constant)
             return c;
         v = constant_value();
-        return destroy_object(state, place, semantics[x.a].type);
+        c = destroy_object(state, place, semantics[x.a].type);
+        /* [basic.life]/1: the object's lifetime has ended: no value until
+           another is constructed there */
+        qualified_type element;
+        if (c == constness::constant &&
+            element_destructor(semantics[x.a].type, element))
+            place_value(state, place) = constant_value();
+        return c;
     }
     /* initialization: [dcl.init], [class.dtor] */
     case semantic_kind::bind_reference:
@@ -4119,6 +4126,11 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
                                       returned, result);
     if (c != constness::constant)
         return c;
+    /* [basic.life]/1: an explicit destructor call ends the lifetime, as
+       semantic_kind::destroy does */
+    if (entity_table[function].special == special_member::destructor &&
+        self.kind == constant_value_kind::pointer && self.count == 1)
+        place_value(state, self.first) = constant_value();
     if (fundamental_of(x.type) == fundamental_type::void_) {
         v = result;
         return constness::constant;
