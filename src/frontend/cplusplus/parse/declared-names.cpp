@@ -453,7 +453,10 @@ name_kind declared_names::lookup_qualified(scope_index in, uint32_t name,
         d = find(in, name, 0, &concrete);
     if (d) {
         found = d->kind;
-        bool is_dep = d->dependent && !concrete;
+        /* [temp.dep]/1: outside a template nothing depends on a template
+           parameter: a template's member named through a specialization
+           (A<int>::alias::Item) is that specialization's */
+        bool is_dep = d->dependent && !concrete && within_template();
         if (scope)
             *scope = d->scope;
         if (dependent)
