@@ -1043,10 +1043,14 @@ class entities
        looks only among those */
     void give_c_linkage(entity_index e);
     void bind(entity_index scope, uint32_t name, entity_index e,
-              bool by_using_declaration = false);
+              bool by_using_declaration = false, uint8_t using_access = 0);
     /* whether the name is bound in the scope by a using-declaration
        ([namespace.udecl]) and not declared there */
     bool bound_by_using(entity_index scope, uint32_t name) const;
+    /* if bound by a using-declaration in scope, sets access to the
+       using-declaration's member access and returns true */
+    bool bound_by_using_access(entity_index scope, uint32_t name,
+                               uint8_t &access) const;
     /* another declaration of the entity ([basic.link]/1: "A name ... can
        be introduced by declarations in more than one place) */
     void add_declaration(entity_index e, SyntaxRef node);
@@ -1078,6 +1082,7 @@ class entities
         uint32_t name = 0;
         entity_index entity = 0;
         bool by_using_declaration = false;
+        uint8_t using_access = 0;
     };
     owned_array<binding> slots;
     size_t used = 0;

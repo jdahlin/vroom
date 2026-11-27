@@ -1494,14 +1494,25 @@ bool semantic_analysis::accessible_here(entity_index member,
                                         entity_index object_class) const
 {
     const entity &x = entity_table[member];
-    if (!x.access)
+    uint8_t access = x.access;
+    entity_index naming_class = x.enclosing;
+    /* [namespace.udecl]/19: a synonym created by a member using-declaration
+       has the accessibility of the using-declaration in the naming class */
+    if (object_class && object_class != x.enclosing) {
+        uint8_t ua = 0;
+        if (entity_table.bound_by_using_access(object_class, x.name, ua)) {
+            access = ua;
+            naming_class = object_class;
+        }
+    }
+    if (!access)
         return true;
     /* [impl.clang] a class whose access clang does not check (access_unchecked) */
-    const entity &k = entity_table[x.enclosing];
+    const entity &k = entity_table[naming_class];
     if (k.kind == entity_kind::class_type &&
         (k.access_unchecked ||
          (k.instantiation &&
-          entity_table[specialized_template(x.enclosing)].access_unchecked)))
+          entity_table[specialized_template(naming_class)].access_unchecked)))
         return true;
     /* [temp.spec]/6: "The usual access checking rules do not apply
        to names in a declaration of an explicit instantiation or explicit
@@ -1522,12 +1533,12 @@ bool semantic_analysis::accessible_here(entity_index member,
        function" */
     /* the use is in a member of class k */
     auto as_member_of = [&](entity_index member_class) -> bool {
-        if (member_class == x.enclosing)
+        if (member_class == naming_class)
             return true;
-        if (x.access != 1)
+        if (access != 1)
             return false;
         bool ambiguous = false;
-        if (!base_step(member_class, x.enclosing, ambiguous))
+        if (!base_step(member_class, naming_class, ambiguous))
             return false;
         if (!object_class || !x.nonstatic_member ||
             object_class == member_class)
