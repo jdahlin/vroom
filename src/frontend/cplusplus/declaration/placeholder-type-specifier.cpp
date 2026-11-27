@@ -278,10 +278,10 @@ analysis_result semantic_analysis::deduce_placeholder(
     const struct type argument = type_table[e.type.unqualified()];
     if (argument.kind == type_kind::none ||
         argument.kind == type_kind::placeholder ||
-        argument.kind == type_kind::dependent || e.bit_field_width)
-        return not_supported_because(
-            at, "dcl.type.auto.deduct",
-            "an initializer with no type to deduce from, or a bit-field");
+        argument.kind == type_kind::dependent)
+        return not_supported_because(at, "dcl.type.auto.deduct",
+                                     "an initializer with no type to deduce "
+                                     "from");
     if (decltype_auto) {
         /* (T is the placeholder alone: placeholder_declaration) */
         if (!decltype_of(e, named, deduced))
