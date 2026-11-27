@@ -712,8 +712,13 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     } else {
         /* (within an unnamed namespace the function's linkage is internal
            whatever its type's) */
-        if ((type_without_external_linkage(type) &&
-             !within_unnamed_namespace(space)) ||
+        bool no_linkage = type_without_external_linkage(type) &&
+                          !within_unnamed_namespace(space);
+        /* (one a class template specialization defines is defined here
+           whatever its type's linkage) */
+        bool local_definition =
+            no_linkage && defines && entity_table[c].instantiation;
+        if ((no_linkage && !local_definition) ||
             tokens.files.behavior.microsoft_extensions)
             return not_supported_because(
                 n, "class.friend",

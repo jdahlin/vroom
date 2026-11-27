@@ -60,6 +60,13 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
        outermost function the class is in is inline or templated (then
        its copies link as one); so is a member of a closure type of
        namespace scope, unless an inline variable's initializer has it */
+    /* [impl.clang] a friend defined with a local type in its signature has
+       a local symbol (no other translation unit has the type) */
+    if (analysis.defined_by_friend(e) &&
+        analysis.type_without_external_linkage(x.type)) {
+        storage = AST_STORAGE_STATIC;
+        flags = AST_SYMBOL_FLAG_GLOBAL;
+    }
     if ((local_class_function(e) ||
          (x.enclosing &&
           (analysis.entity_table[x.enclosing].lambda ||
