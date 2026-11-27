@@ -1342,10 +1342,19 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
     if (expanded)
         clause_packs = &packs;
     analysis_result r;
-    if (designations.any &&
-        (target == type_kind::rvalue_reference ||
-         (target == type_kind::lvalue_reference &&
-          (type_table[type.unqualified()].operand.cv() & cv_const)))) {
+    /* (an rvalue reference to a union is not followed: the constant
+       evaluator misses a read of its inactive member) */
+    bool binds_temporary = false;
+    if (target == type_kind::lvalue_reference)
+        binds_temporary =
+            (type_table[type.unqualified()].operand.cv() & cv_const) != 0;
+    else if (target == type_kind::rvalue_reference) {
+        const struct type &referred =
+            type_table[type_table[type.unqualified()].operand.unqualified()];
+        binds_temporary = referred.kind == type_kind::class_type &&
+                          !entity_table[referred.entity].union_;
+    }
+    if (designations.any && binds_temporary) {
         /* [dcl.init.list]/3.10, [impl.clang] for a designated list: a
            prvalue of the referenced aggregate, which the reference binds */
         qualified_type prvalue = qualified_type::make(
