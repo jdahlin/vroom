@@ -1111,6 +1111,11 @@ bool semantic_analysis::depends_on_parameter_from(qualified_type t,
                 return true;
             /* a template-parameter named (its position value), else a
                constant (SkSpan<T>'s defaulted extent) */
+            /* (a dependent expression, of no position: a defaulted
+               argument's, TArray<T>'s bool, which the arguments it names
+               stand for) */
+            if (a.template_entity && a.value == UINT32_MAX)
+                return false;
             if (a.template_entity)
                 return a.value >= from;
             return a.kind != template_argument::kind_t::value ||
