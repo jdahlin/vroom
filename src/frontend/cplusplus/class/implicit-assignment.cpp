@@ -83,6 +83,36 @@ bool semantic_analysis::declared_deleted(entity_index f) const
 }
 
 /*
+ * [class.copy.assign]/7.1: union u (or a union's member class u) has "a
+ * variant member with a non-trivial corresponding assignment operator", or
+ * one that cannot be assigned: a member class with an assignment operator
+ * entity (a trivial one is none), a deleted implicit copy one, or such a
+ * member of its own.  False where analysis cannot tell.
+ */
+bool semantic_analysis::variant_member_prevents_assignment(entity_index u,
+                                                           bool move)
+{
+    owned_array<entity_index> classes;
+    subobject_classes(u, classes);
+    for (entity_index m : classes) {
+        if (entity_table[m].kind != entity_kind::class_type)
+            continue;
+        uint32_t name = operator_name(preprocessing_op_or_punc::EQUAL);
+        for (entity_index f = entity_table.find(m, name);
+             f && entity_table[f].enclosing == m;
+             f = entity_table[f].next_overload)
+            if (copy_assignment_operator(f, m) ||
+                (move && move_assignment_operator(f, m)))
+                return true;
+        if (!move && copy_assignment_deleted(m))
+            return true;
+        if (variant_member_prevents_assignment(m, move))
+            return true;
+    }
+    return false;
+}
+
+/*
  * [class.copy.assign]/7: whether the assignment of a subobject of class k,
  * from a const lvalue (the copy) or an xvalue (the move, /13's "x"), is
  * usable or makes the assignment operator of class c deleted: "a non-static
@@ -122,6 +152,18 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
             return assignment_use::deleted;
         return assignment_use::usable;
     }
+    /* /7.1: a union's defaulted or implicit operator, deleted for such a
+       variant member */
+    if (kx.union_) {
+        bool declared = false;
+        for (entity_index f = found.entity; f && entity_table[f].enclosing == k;
+             f = entity_table[f].next_overload)
+            if (!entity_table[f].implicit && (copy_assignment_operator(f, k) ||
+                                              move_assignment_operator(f, k)))
+                declared = true;
+        if (!declared && variant_member_prevents_assignment(k, move))
+            return assignment_use::deleted;
+    }
     if (found.unknown)
         return assignment_use::unknown;
     if (!found.entity) {
@@ -139,8 +181,17 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
     entity_index copy = 0, moving = 0, nonconst_copy = 0;
     uint32_t copies = 0, movings = 0;
     bool defaulted_usable = false;
+    bool from_base = false;
     for (entity_index f = found.entity; f; f = entity_table[f].next_overload) {
         const entity &x = entity_table[f];
+        if (x.enclosing != k && entity_table[found.entity].enclosing == k &&
+            x.kind == entity_kind::function) {
+            /* [namespace.udecl]/15: a base's, brought in beside the
+               class's own, takes a worse conversion than an own exact
+               match */
+            from_base = true;
+            continue;
+        }
         if (x.enclosing != k || x.kind != entity_kind::function ||
             !x.nonstatic_member || !x.operator_function ||
             x.implemented != preprocessing_op_or_punc::EQUAL)
@@ -190,8 +241,23 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
     /* X& operator=(const X&) = default and X& operator=(X&&) = default
        are no entities (defaulted_copy_assignment): usable as a trivial
        one is, when the class's bytes are assigned */
+    /* (a defaulted move operator with no entity beside an implicit copy
+       one, or with a subobject that cannot be moved, is deleted, and
+       ignored, /7) */
+    bool move_ignored = copy && entity_table[copy].implicit;
+    if (!move_ignored && move && !movings && copies &&
+        kx.defaulted_move_assignment) {
+        owned_array<entity_index> classes;
+        subobject_classes(k, classes);
+        bool ignored_throwing = true, ignored_nonconst = false;
+        for (entity_index m : classes)
+            if (subobject_assignment(m, k, true, ignored_throwing,
+                                     ignored_nonconst) ==
+                assignment_use::deleted)
+                move_ignored = true;
+    }
     if ((!move && !copies && kx.defaulted_copy_assignment) ||
-        (move && !movings &&
+        (move && !movings && !move_ignored &&
          (kx.defaulted_move_assignment ||
           (!copies && kx.defaulted_copy_assignment)))) {
         if (!assigned_bitwise(k) && !kx.defaulted_move_assignment)
@@ -232,7 +298,7 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
        copy/move operator= beats member templates and operators taking another
        class; otherwise their viability is not analysed */
     if ((has_templates && (!count || (move && !movings))) ||
-        (other_class_op && !count))
+        (other_class_op && !count) || (from_base && !count))
         return assignment_use::unknown;
     /* an xvalue does not bind to X&: no viable function */
     if (chosen && chosen == nonconst_copy && move)
@@ -310,7 +376,18 @@ void semantic_analysis::declare_implicit_assignment(entity_index c, bool move,
     f.deleted = deleted;
     f.linkage_of_name = entity_table[c].linkage_of_name;
     entity_index head = entity_table.find(c, name);
-    if (!head) {
+    if (head && entity_table[head].kind == entity_kind::none &&
+        entity_table[head].enclosing == c &&
+        member_function_template_of(head)) {
+        /* [temp.mem]/2: member function templates of the name are
+           overloaded with it: it heads the name's chain and keeps their
+           held name (as a declared one does, class-specifier.cpp) */
+        entity_table[e].member_templates = head;
+        entity_table.bind(c, name, e);
+        return;
+    }
+    if (!head || entity_table[head].enclosing != c) {
+        entity_table[e].next_overload = head;
         entity_table.bind(c, name, e);
         return;
     }
@@ -341,8 +418,11 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
         return analysis_result::well_formed;
     uint32_t name = operator_name(preprocessing_op_or_punc::EQUAL);
     entity_index head = entity_table.find(c, name);
-    /* a base's operator= brought in by a using-declaration */
-    if (head && entity_table[head].enclosing != c)
+    /* a base's operator= inherited, not brought in by a using-declaration
+       (those are hidden or overloaded by the implicit ones,
+       [namespace.udecl]/15) */
+    if (head && entity_table[head].enclosing != c &&
+        !entity_table.bound_by_using(c, name))
         return analysis_result::well_formed;
     bool user_copy = false, user_move = false;
     for (entity_index f = head; f && entity_table[f].enclosing == c;
@@ -377,6 +457,13 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
                            .unqualified()]
                     .kind == type_kind::rvalue_reference)
             user_move_constructor = true;
+    /* [class.copy.assign]/2, /3: beside a user-declared move assignment
+       operator and no copy one, the implicit copy one is deleted and no move
+       one is declared, whatever the subobjects are */
+    if (user_move && !user_copy && !defaulted_copy && !defaulted_move) {
+        declare_implicit_assignment(c, false, true, false);
+        return analysis_result::well_formed;
+    }
     /* the subobjects' assignments */
     owned_array<entity_index> order;
     construction_order(c, order);
@@ -426,6 +513,10 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
         if (moving == assignment_use::deleted)
             move_deleted = true;
     }
+    /* (beside names a using-declaration brought in, a copy operator not
+       followed would leave the class with none: nothing is declared) */
+    if (copy_unknown && entity_table.bound_by_using(c, name))
+        return analysis_result::well_formed;
     /* /2: a declared move constructor or move assignment operator makes the
        implicit copy assignment operator deleted, unless it is defaulted */
     if (!defaulted_copy &&

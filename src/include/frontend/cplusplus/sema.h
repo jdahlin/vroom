@@ -5177,6 +5177,7 @@ class semantic_analysis
                                         bool move, bool &non_throwing,
                                         bool &nonconst_form);
     bool assignment_not_trivial(entity_index c);
+    bool variant_member_prevents_assignment(entity_index u, bool move);
     void declare_implicit_assignment(entity_index c, bool move, bool deleted,
                                      bool non_throwing, bool nonconst = false);
     analysis_result implicit_assignments(entity_index c);
