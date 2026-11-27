@@ -6941,6 +6941,8 @@ class semantic_analysis
        magnitude, and whether it is negative; or, in a template's own
        declaration, the non-type template-parameter it names (its position
        plus one in parameter) */
+    /* an enumerator's value as magnitude; whether it is negative */
+    bool enumerator_value(entity_index e, uint64_t &magnitude) const;
     bool specialization_value(entity_index e, uint32_t i, uint64_t &magnitude,
                               bool &negative, uint32_t &parameter,
                               uint32_t element = 0) const;

@@ -1591,6 +1591,22 @@ analysis_result semantic_analysis::declare_variable_specialization(
     return analysis_result::well_formed;
 }
 
+bool semantic_analysis::enumerator_value(entity_index e,
+                                         uint64_t &magnitude) const
+{
+    const entity &x = entity_table[e];
+    magnitude = x.value;
+    fundamental_type underlying = fundamental_of(x.type);
+    const struct type &record = type_table[x.type.unqualified()];
+    if (record.kind == type_kind::enumeration)
+        underlying = entity_table[record.entity].underlying;
+    if (!fundamental_type_is_signed(tokens.files.behavior, underlying) ||
+        static_cast<int64_t>(x.value) >= 0)
+        return false;
+    magnitude = 0 - x.value;
+    return true;
+}
+
 bool semantic_analysis::specialization_value(entity_index e, uint32_t i,
                                              uint64_t &magnitude,
                                              bool &negative,
