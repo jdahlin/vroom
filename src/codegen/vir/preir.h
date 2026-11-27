@@ -390,6 +390,10 @@ VPRIV uint32_t virbuild_preir_insn_insert(codegen_context *e, uint32_t b,
                                           uint32_t *prev, vir_insn in);
 /* vector-from-elements.c */
 VPRIV bool virbuild_vectors_from_elements(codegen_context *e);
+/* unroll.c */
+VPRIV bool virbuild_loops_unroll(codegen_context *e);
+VPRIV bool virbuild_compare_constants(uint32_t cc, uint32_t ty, int64_t a,
+                                      int64_t b);
 /* load-of-slot-address.c */
 VPRIV bool virbuild_slot_address_loads_split(codegen_context *e);
 

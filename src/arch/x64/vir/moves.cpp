@@ -176,7 +176,23 @@ VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst,
             .reference = i->a,
             .offset = x64_vir_constant_bits(i) +
                       (i->op == VIR_OP_SLOTADDR ? L->slot[i->a] : 0)};
+        /* A local is below the frame base: the address past the end of the
+		 * topmost one has offset 0 there, which a Windows frame with saved
+		 * registers would not shift past them.  Take the local's address,
+		 * then add. */
+        int64_t past = 0;
+
+        if (i->op == VIR_OP_SLOTADDR && L->slot[i->a] < 0 && a.offset >= 0) {
+            past = x64_vir_constant_bits(i);
+            a.offset -= past;
+        }
         x64_record_emit_memory(L->context, X64_OP_LEA, 8, d, &a, false);
+        if (past) {
+            codegen_lvalue more = {.kind = CODEGEN_LVALUE_REGISTER,
+                                   .register_number = (uint8_t)d,
+                                   .offset = past};
+            x64_record_emit_memory(L->context, X64_OP_LEA, 8, d, &more, false);
+        }
     }
 }
 

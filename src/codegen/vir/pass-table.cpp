@@ -123,6 +123,7 @@ static const virbuild_pass virbuild_passes[] = {
      VIRBUILD_PASS_FLAG_FIXED_POINT, NULL}, /* block-parameters.c */
     {"dead-params", virbuild_pass_dead_params, O, 0, O | P | D, U,
      NULL}, /* block-parameters.c */
+    {"unroll", virbuild_loops_unroll, O | P, 0, O | P, 0, NULL}, /* unroll.c */
     {"simplify", virbuild_pass_simplify, O | P, 0, O | P | D, U,
      NULL}, /* simplify.c */
     /* simplifying can free a slot's address (an inlined call's pointer argument parked as an

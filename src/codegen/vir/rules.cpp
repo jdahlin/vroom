@@ -156,8 +156,8 @@ static bool virbuild_minmax_simplify(virbuild_context *V,
 }
 
 /* icmp's condition cc (eq ne slt sle sgt sge ult ule ugt uge) of two constants of type ty */
-static bool virbuild_compare_constants(uint32_t cc, uint32_t ty, int64_t a,
-                                       int64_t b)
+VPRIV bool virbuild_compare_constants(uint32_t cc, uint32_t ty, int64_t a,
+                                      int64_t b)
 {
     uint64_t x = (uint64_t)a, y = (uint64_t)b;
 
@@ -205,7 +205,8 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
     }
     /* what became constant only here (an inlined argument): the walker folded the rest */
     if ((in.op == VIR_OP_ADD || in.op == VIR_OP_SUB || in.op == VIR_OP_AND ||
-         in.op == VIR_OP_OR || in.op == VIR_OP_XOR || in.op == VIR_OP_SHL) &&
+         in.op == VIR_OP_OR || in.op == VIR_OP_XOR || in.op == VIR_OP_SHL ||
+         in.op == VIR_OP_MUL) &&
         (in.type == VIR_TYPE_I32 || in.type == VIR_TYPE_I64) &&
         virbuild_value_integer_constant(V, in.a, &k) &&
         virbuild_value_integer_constant(V, in.b, &k2)) {
@@ -219,6 +220,8 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
             v = x & y;
         else if (in.op == VIR_OP_OR)
             v = x | y;
+        else if (in.op == VIR_OP_MUL)
+            v = x * y;
         else if (in.op == VIR_OP_SHL)
             v = x << (y & (8 * vir_type_size(in.type) - 1));
         else
