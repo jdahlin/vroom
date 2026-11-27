@@ -940,6 +940,30 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
         x64_x86_halved_code(e, n, &code, &count))
         return virbuild_halved_builtin(e, n, code, count);
 
+    /* movmsk and pmovmskb: a 16-byte vector to a general register */
+    if (CODEGEN_IS_X64(c) && !codegen_type_is_vector(c, x->ty) &&
+        x64_x86_builtin_code(e, n, &code, &operands) && operands == 1) {
+        const uint32_t *arg = &c->lists[x->b];
+        ast_qualified_type at = N(arg[0])->ty;
+
+        if (codegen_type_is_vector(c, at) && codegen_type_size(c, at) == 16 &&
+            codegen_type_size(c, x->ty) == 4) {
+            codegen_value v = walk_value_emit(e, arg[0]);
+            int ra = walk_value_to_register(e, &v);
+            int lane = 0;
+            uint32_t type = virbuild_vector_type(e, at, &lane);
+            uint32_t value = virbuild_vector_load(e, type, lane, ra, 0);
+            int result = WALK_LOWER(treg)(e);
+
+            virbuild_register_write(e, result,
+                                    virbuild_insn_append(e, VIR_OP_X86,
+                                                         VIR_TYPE_I32, 0, value,
+                                                         value, code));
+            WALK_LOWER(tfree)(e, ra);
+            return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                               .register_number = (uint8_t)result);
+        }
+    }
     if (!CODEGEN_IS_X64(c) || !codegen_type_is_vector(c, x->ty) ||
         codegen_type_size(c, x->ty) != 16 ||
         !x64_x86_builtin_code(e, n, &code, &operands))
