@@ -589,7 +589,6 @@ verdict CXX/special/class.copy/p12-0x.cpp -std=c++11 -Wno-deprecated-builtins -W
 verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 105 (19 declarations)
 verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 105 (19 declarations)
 verdict CXX/special/class.copy/p25-0x.cpp -std=c++2b -DDEDUCING_THIS -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 105 (6 declarations)
-verdict CXX/temp/temp.fct.spec/temp.deduct/cwg1170.cpp -std=c++11: ill-formed for us, accepted by clang: line 39 (2 declarations)
 verdict CXX/temp/temp.fct.spec/temp.deduct/p7.cpp -std=c++11: ill-formed for us, accepted by clang: line 12 (1 declarations)
 verdict CXX/temp/temp.fct.spec/temp.deduct/p7.cpp -std=c++2a: ill-formed for us, accepted by clang: line 12 (1 declarations)
 verdict CXX/temp/temp.fct.spec/temp.deduct/temp.deduct.conv/p5.cpp -std=c++1z: ill-formed for us, accepted by clang: line 28 (1 declarations)
