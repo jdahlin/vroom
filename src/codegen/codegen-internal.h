@@ -1594,6 +1594,10 @@ VPRIV uint8_t *codegen_function_once_flags(cc *c);
 #define WALK_INLINE_VIR_MAX                                                    \
     150 /* under VIR: AST nodes of a callee with what it inlines (codegen_inline_size) */
 #endif
+#ifndef WALK_INLINE_VIR_OUTSIDE_LOOP_MAX
+#define WALK_INLINE_VIR_OUTSIDE_LOOP_MAX                                       \
+    40 /* ... where the call is in no loop and the callee is not `inline` */
+#endif
 #ifndef WALK_INLINE_CONSTANT_FACTOR
 #define WALK_INLINE_CONSTANT_FACTOR 4
 #endif

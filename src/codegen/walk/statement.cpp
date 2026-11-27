@@ -1854,11 +1854,24 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
                 (e->unit->once[s] & 1) && y->sc == AST_STORAGE_STATIC &&
                 !codegen_symbol_attributes(c, s)->used &&
                 e->unit->function_node_counts[caller] <= WALK_INLINE_ONCE_MAX;
-            lim = once ? WALK_INLINE_ONCE_MAX : WALK_INLINE_VIR_MAX;
+            /* a call in no loop is run seldom, so only a small callee earns
+			 * its copy there, as gcc and clang weigh a call by how often it
+			 * runs; `inline` and constant arguments keep the larger limits */
+            /* (a switch is on the loop stack too; the entries of the callers
+			 * stay on it inside an inlined copy) */
+            bool in_loop = false;
+
+            for (int i = 0; i < e->walk_state->loop_count; i++)
+                in_loop |= e->walk_state->loop[i].continue_label != 0;
+            lim = WALK_INLINE_VIR_MAX;
+            if (once)
+                lim = WALK_INLINE_ONCE_MAX;
+            else if (!(y->flags & AST_SYMBOL_FLAG_INLINE) && !in_loop)
+                lim = WALK_INLINE_VIR_OUTSIDE_LOOP_MAX;
             /* codegen_inline_size includes the same constant-argument sites bottom-up,
 			 * so selected nested copies are included in the caller's bound. */
             size = once ? 0 : codegen_inline_size(e->unit, c, s);
-            if (!once && size > WALK_INLINE_VIR_MAX &&
+            if (!once && size > lim &&
                 size <= WALK_INLINE_CONSTANT_FACTOR * WALK_INLINE_VIR_MAX &&
                 codegen_inline_has_constant_argument(e->unit, c, s, call))
                 lim = WALK_INLINE_CONSTANT_FACTOR * WALK_INLINE_VIR_MAX;
