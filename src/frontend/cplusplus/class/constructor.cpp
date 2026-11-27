@@ -4198,13 +4198,15 @@ analysis_result semantic_analysis::class_direct_initialization(
         /* [dcl.init]/17.6.2.1: T({...}) of an aggregate: its copy or move
            constructor is viable, the list initializing the parameter's
            temporary ([over.ics.list]/9), before any parenthesized aggregate
-           initialization; trivial, so the object is the list's */
-        bool known = false;
-        if (!class_trivially_copyable(c, known) || !known)
+           initialization; [impl.clang] the move elided, so the object is
+           the list's */
+        copy_selection move = select_copy_constructor(c, true, false);
+        if (!move.known ||
+            (move.constructor && entity_table[move.constructor].deleted))
             return not_supported_because(
                 n, "dcl.init",
-                "a braced list moved into a class that is not trivially "
-                "copyable");
+                "a braced list moved into a class whose move constructor is "
+                "deleted or not known");
         VTRY_SET(r, list_initialization((*written_arguments)[0], type, false,
                                         value));
         if (r == analysis_result::well_formed)

@@ -592,6 +592,29 @@ entity_index semantic_analysis::constraint_plain_typedef(entity_index t,
     return e;
 }
 
+/* the template parameter that the typedef-name token i spells there is
+   declared as alone (using element_type = T;): clang mangles the
+   parameter (0: another) */
+entity_index semantic_analysis::constraint_alias_parameter(entity_index t,
+                                                           token_index i) const
+{
+    entity_index e = constraint_name(entity_table[t].enclosing, i);
+    if (!e || entity_table[e].kind != entity_kind::typedef_name ||
+        !entity_table[e].first_declaration)
+        return 0;
+    SyntaxRef declaration =
+        entity_table.declaration(entity_table[e].first_declaration).node;
+    for (uint32_t k = 0; k + 1 < declaration.size(); k++) {
+        if (!declaration[k].is(preprocessing_op_or_punc::EQUAL))
+            continue;
+        SyntaxElement aliased = declaration[k + 1];
+        if (aliased.end_token() != aliased.first_token() + 1)
+            return 0;
+        return constraint_parameter(t, aliased.first_token());
+    }
+    return 0;
+}
+
 /* function template t's own type parameter at position (0: none) */
 entity_index
 semantic_analysis::constraint_own_type_parameter(entity_index t,

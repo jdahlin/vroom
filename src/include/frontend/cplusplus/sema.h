@@ -7079,6 +7079,8 @@ class semantic_analysis
     /* whether parameter p is one of t's own (not of an enclosing class
        template's) */
     entity_index constraint_plain_typedef(entity_index t, token_index i) const;
+    entity_index constraint_alias_parameter(entity_index t,
+                                            token_index i) const;
     entity_index constraint_own_type_parameter(entity_index t,
                                                uint64_t position) const;
     bool constraint_parameter_is_own(entity_index t, entity_index p) const;
