@@ -140,6 +140,40 @@ bool semantic_analysis::vectors_compatible(qualified_type a,
            x.operand.unqualified() == y.operand.unqualified();
 }
 
+/* [ext:gnu_vector_size] && and || of two vectors of one type, as clang
+   does them: both operands evaluated, each lane compared with zero, the
+   masks combined */
+analysis_result semantic_analysis::vector_logical(SyntaxRef n, token_index at,
+                                                  preprocessing_op_or_punc op,
+                                                  expression_meaning &left,
+                                                  expression_meaning &right,
+                                                  expression_meaning &m)
+{
+    using op_t = preprocessing_op_or_punc;
+    VTRY(r, operand_value(n, left));
+    VTRY_SET(r, operand_value(n, right));
+    if (left.type.unqualified() != right.type.unqualified())
+        return not_supported_because(
+            n, "ext.gnu",
+            "a logical operator on a vector and an operand of another type");
+    expression_meaning *operands[] = {&left, &right};
+    expression_meaning masks[2];
+    for (int i = 0; i < 2; i++) {
+        expression_meaning zero;
+        zero.type = qualified_type::make(
+            type_table.fundamental(fundamental_type::int_), cv_none);
+        zero.category = value_category::prvalue;
+        zero.evaluation = constness::constant;
+        zero.node = expression_node(semantic_kind::constant, zero, at);
+        VTRY_SET(r, vector_binary(n, at, op_t::EXCLAMATION_EQUAL, *operands[i],
+                                  zero, masks[i]));
+    }
+    op_t combined = op_t::BAR;
+    if (op == op_t::AMPERSAND_AMPERSAND)
+        combined = op_t::AMPERSAND;
+    return vector_binary(n, at, combined, masks[0], masks[1], m);
+}
+
 analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
                                                  preprocessing_op_or_punc op,
                                                  expression_meaning &left,

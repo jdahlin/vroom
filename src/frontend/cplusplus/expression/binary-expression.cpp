@@ -737,6 +737,11 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
            (pointer-to-member-operator.cpp) */
         return member_pointer_operator(
             n, at, op == preprocessing_op_or_punc::ARROW_STAR, left, right, m);
+    if ((op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
+         op == preprocessing_op_or_punc::BAR_BAR) &&
+        (is_vector_kind(type_table[left.type.unqualified()].kind) ||
+         is_vector_kind(type_table[right.type.unqualified()].kind)))
+        return vector_logical(n, at, op, left, right, m);
     if (op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
         op == preprocessing_op_or_punc::BAR_BAR) {
         /* [expr.log.and]/1: "The operands are both contextually converted
