@@ -78,6 +78,7 @@ struct ld_options {
     const char *output_path;
     const char *script;
     const char *soname;
+    const char *rpath; /* -rpath, ':'-separated: DT_RUNPATH */
     const char *entry;
     int orphan_handling;
     /* --orphan-handling: 0 place, 1 warn, 2 error */ /* -e/--entry: over the script's ENTRY() */
@@ -579,6 +580,7 @@ struct ld_dynamic {
     VVEC(uint32_t) string_offsets; /* offsets of added strings (lld dedups) */
     uint32_t *symbol_names;        /* .dynstr offset per symbols entry */
     uint32_t soname_offset, *version_name_offsets;
+    uint32_t rpath_offset;
     uint32_t entry_count;
 };
 

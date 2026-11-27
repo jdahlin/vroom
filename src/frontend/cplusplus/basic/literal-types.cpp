@@ -103,6 +103,15 @@ constness semantic_analysis::literal_class(entity_index c) const
             if (entity_table[k].implicit && !copy_or_move_constructor(c, k) &&
                 constructor == constness::not_constant)
                 constructor = constness::unknown;
+        /* "or constructor template", never a copy or move one: one not
+           declared constexpr here is not decided */
+        if (x.constructor_templates && constructor != constness::constant) {
+            constructor = constness::unknown;
+            for (const function_template &f : function_templates)
+                if (f.name == x.constructor_templates &&
+                    entity_table[f.entity].constexpr_)
+                    constructor = constness::constant;
+        }
         result = both(result, constructor);
     }
     /* the subobjects: each non-volatile and literal, or for a union one

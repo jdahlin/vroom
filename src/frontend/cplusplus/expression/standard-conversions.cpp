@@ -390,12 +390,10 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
         m.beyond_integral_constant = true;
     if (m.evaluation != constness::constant || from == to)
         return;
-    if (from == fundamental_type::long_double ||
-        to == fundamental_type::long_double ||
-        (fundamental_type_is_floating(from) &&
+    if ((fundamental_type_is_floating(from) &&
          fundamental_type_is_floating(to) &&
          tokens.files.floating_point_pragma)) {
-        /* binary128: not evaluated here; nor a conversion whose rounding a
+        /* not evaluated here: a conversion whose rounding a
            pragma may change (to an integer it truncates whatever the mode;
            from an integer: below) */
         m.evaluation = constness::unknown;
@@ -433,8 +431,10 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
         } else if (to == fundamental_type::float16) {
             d = half_rounded(d);
         }
-        /* an inexact value depends on the rounding mode */
-        if (tokens.files.floating_point_pragma &&
+        /* an inexact value depends on the rounding mode; a long double is
+           evaluated only when a double holds it */
+        if ((tokens.files.floating_point_pragma ||
+             to == fundamental_type::long_double) &&
             (!isfinite(d) || static_cast<__int128>(d) != v)) {
             m.evaluation = constness::unknown;
             return;

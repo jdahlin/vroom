@@ -114,6 +114,15 @@ void c_lowering::initialized_variable(const semantic_node &n,
             root = &node(root->a);
         extended_temporary = root;
     }
+    if (n.b && x.automatic) {
+        /* [dcl.init.list]/6: the backing array lives as long as the
+           initializer_list object */
+        uint32_t list = n.b;
+        if (node(list).kind == semantic_kind::bind_reference)
+            list = node(list).a;
+        if (const semantic_node *array = backing_array(list))
+            extended_temporary = array;
+    }
     if (!x.automatic && (destructor || (n.b && !constant_initializer(n.b)))) {
         /* [stmt.dcl]/4: initialized the first time control passes
            through, under a guard */

@@ -1005,6 +1005,14 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         return class_member_value(n, t, overload_target_choice, m);
     }
     lookup_result found = lookup_qualified(c, name, lookup_filter::any);
+    uint8_t introduced = 0;
+    if (!is_namespace(c) && entity_table[c].kind == entity_kind::class_type &&
+        entity_table.bound_by_using_access(c, name, introduced)) {
+        using_named x;
+        x.at = t;
+        x.naming = c;
+        using_named_members.append(x);
+    }
     if (found.ambiguous)
         /* [namespace.qual]/3: "if the use of m is not one that allows a
            unique declaration to be chosen from S(X, m), the program is
@@ -1228,6 +1236,14 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
     return class_member_value(n, t, e, m);
 }
 
+entity_index semantic_analysis::using_naming_class(token_index t) const
+{
+    for (size_t i = using_named_members.size(); i-- > 0;)
+        if (using_named_members[i].at == t)
+            return using_named_members[i].naming;
+    return 0;
+}
+
 /* the member e of a class a qualified-id names (at its token t): a pointer
    to member's operand, (*this)'s member, or the static member itself */
 analysis_result semantic_analysis::class_member_value(SyntaxRef n,
@@ -1262,7 +1278,7 @@ analysis_result semantic_analysis::class_member_value(SyntaxRef n,
             n, "expr.prim.id.qual",
             "a qualified-id naming neither a function nor a variable");
     /* [class.access]/4, as named_entity */
-    if (!overload_set_called(t, e) && !accessible(e))
+    if (!overload_set_called(t, e) && !accessible(e, using_naming_class(t)))
         return ill_formed_at_token(t,
                                    "a private or protected member's name can "
                                    "be used only by members and friends of "

@@ -677,6 +677,9 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         if (name == callee && member_templates_of(e)) {
             member_template_name = e;
             member_template_object = m;
+            member_template_through = 0;
+            if (qual_class)
+                member_template_through = c;
             member_template_written.clear();
             member_template_written_at = 0;
             SyntaxElement id = member_template_id(n);

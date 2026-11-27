@@ -1078,12 +1078,11 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     const qualified_type *parameters =
         type_table.parameters(type.unqualified());
     const struct type &first = type_table[parameters[0].unqualified()];
-    if (explicit_specified)
-        /* an explicit copy constructor: [class.copy.ctor]/7's implicit
-           one is not */
-        return not_supported_because(
-            n, "dcl.fct.def.default",
-            "an explicit defaulted copy or move constructor");
+    /* explicit on a defaulted copy or move constructor takes it out of
+       copy-initialization only ([over.match.ctor]/1), where a well-formed
+       program has no use for it: it is declared as the implicit one is
+       ([impl.defects] a copy-initialization that should be ill-formed is
+       accepted) */
     if (f.parameter_count == 1 && first.kind == type_kind::lvalue_reference &&
         first.operand.unqualified() == x.type.unqualified() &&
         first.operand.cv() == cv_const) {
@@ -1119,9 +1118,10 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
 /*
  * X& operator=(const X&) = default in class X: [dcl.fct.def.default]/5, not
  * user-provided; declared as [class.copy.assign]/2's implicit one would be
- * ("X& X::operator=(const X&)", public, inline), which analysis declares
+ * ("X& X::operator=(const X&)", inline), which analysis declares
  * no entity for (assigned_bitwise looks the operator up and finds none).
- * Not analysed: another form, access other than public, a cv- or
+ * Not analysed: another form, access other than public for a trivial one
+ * (defaulted_assignment_access), a cv- or
  * ref-qualifier, default arguments, the specifiers static, virtual,
  * constexpr, friend.  Unlike the implicit one it suppresses the implicit
  * move constructor and move assignment operator ([class.copy.ctor]/8,
@@ -1133,11 +1133,11 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
                                                              const specified &s,
                                                              uint8_t access)
 {
-    if (access || !s.has_type || s.typedef_ || s.static_ || s.extern_ ||
-        s.virtual_ || s.friend_ || s.explicit_ || s.declares_class || s.aligned)
+    if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.virtual_ ||
+        s.friend_ || s.explicit_ || s.declares_class || s.aligned)
         return not_supported_because(
             n, "dcl.fct.def.default",
-            "a defaulted assignment that is not public, has no type or has a "
+            "a defaulted assignment that has no type or has a "
             "specifier such as static or virtual");
     if (s.constexpr_ && entity_table[c].virtual_base_count)
         return not_supported_because(
@@ -1217,10 +1217,13 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
             n, "class.mem",
             "a defaulted assignment beside another declaration of that "
             "assignment, or with unknown lookup");
-    if (move)
+    if (move) {
         entity_table[c].defaulted_move_assignment = true;
-    else
+        entity_table[c].defaulted_move_access = access;
+    } else {
         entity_table[c].defaulted_copy_assignment = true;
+        entity_table[c].defaulted_copy_access = access;
+    }
     return analysis_result::well_formed;
 }
 
@@ -1323,7 +1326,8 @@ bool semantic_analysis::copy_argument_candidate(
         return false;
     const struct type &t = type_table[arguments[0].type.unqualified()];
     if (t.kind == type_kind::fundamental || t.kind == type_kind::pointer ||
-        t.kind == type_kind::enumeration || t.kind == type_kind::array)
+        t.kind == type_kind::enumeration || t.kind == type_kind::array ||
+        t.kind == type_kind::function || t.kind == type_kind::pointer_to_member)
         return false;
     /* anything else not analysed is taken as a candidate */
     if (t.kind != type_kind::class_type)
@@ -3033,6 +3037,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     if (destruction && !entity_table[c].destructor)
         declare_implicit(c, special_member::destructor, false);
     VTRY(assignments, implicit_assignments(c));
+    VTRY(accessible, defaulted_assignment_access(c, n));
     return inherit_constructors(c, n);
 }
 

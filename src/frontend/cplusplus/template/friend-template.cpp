@@ -769,6 +769,7 @@ analysis_result semantic_analysis::friend_function_template(
        other scope": each specialization of the enclosing template defines
        a template of its own */
     scoped_value<bool> distinct(distinct_friend_template, enclosing_constraint);
+    size_t records = function_templates.size();
     analysis_result r = function_template_definition(n, inner);
     current_scope = saved_scope;
     defining_class = saved_class;
@@ -778,7 +779,10 @@ analysis_result semantic_analysis::friend_function_template(
     /* (a declaration too: its specializations' declarations are analysed
        with its friend specifier, instantiate) */
     function_templates[last_function_template - 1].friend_class = c;
-    if (!inner.is(syntax_kind::function_definition))
+    /* (a record this declaration made: one redeclaring a template declared
+       before leaves that one as visible as it was) */
+    if (!inner.is(syntax_kind::function_definition) &&
+        function_templates.size() != records)
         function_templates[last_function_template - 1].friend_declaration =
             true;
     befriend_template(c, function_templates[last_function_template - 1].entity);

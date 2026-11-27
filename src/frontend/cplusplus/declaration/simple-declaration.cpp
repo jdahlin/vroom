@@ -1416,13 +1416,24 @@ analysis_result semantic_analysis::default_initialize_variable(
         token_index place = claim_place;
         entity_index claims = claim_scope;
         VTRY(r, construct(declaration, object, none, 0, value));
-        if (constexpr_variable && entity_table[e].automatic)
+        /* (an implicit constructor's default member initializers may use
+           a member before its lifetime, which the evaluator does not
+           see) */
+        bool written = false;
+        for (entity_index k = entity_table[record].first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (!entity_table[k].implicit &&
+                type_table[entity_table[k].type.unqualified()]
+                        .parameter_count == entity_table[k].default_arguments)
+                written = true;
+        if (constexpr_variable && entity_table[e].automatic && !written)
             return not_supported_because(
                 declaration, "dcl.init",
-                "a constexpr local default-initialized by a constructor");
+                "a constexpr local default-initialized by an implicit "
+                "constructor");
         /* [basic.start.static]/2: constant initialization for a static
            variable default-initialized by a constexpr constructor */
-        if (!entity_table[e].automatic && value.node) {
+        if ((!entity_table[e].automatic || constexpr_variable) && value.node) {
             uint32_t data = 0;
             constness c = constness::unknown;
             /* [class.default.ctor]/4: a constructor of a class with
@@ -1438,7 +1449,8 @@ analysis_result semantic_analysis::default_initialize_variable(
             /* an array of a class that is not dynamic, constructed at
                start-up or on first use: refused, its lowering not
                followed (clang's symbols differ where one is) */
-            else if (!(object == type) && !entity_table[record].dynamic &&
+            else if (!entity_table[e].automatic && !(object == type) &&
+                     !entity_table[record].dynamic &&
                      !is_class_entity(entity_table[e].enclosing))
                 return not_supported_because(declaration, "dcl.init",
                                              "default construction of this "
@@ -2456,9 +2468,10 @@ analysis_result semantic_analysis::declare_with_initializer(
        variable, or it is a constant-initialized variable of
        const-qualified integral or enumeration type." */
     uint32_t cv = cv_of(type_table, type);
-    bool integral_const = (cv & cv_const) && !(cv & cv_volatile) &&
-                          record.kind == type_kind::fundamental &&
-                          is_integral(type);
+    bool integral_const =
+        (cv & cv_const) && !(cv & cv_volatile) &&
+        ((record.kind == type_kind::fundamental && is_integral(type)) ||
+         record.kind == type_kind::enumeration);
     e.usable = constness::not_constant;
     /* [impl.clang] a weak variable's initializer "is not considered
        constant because it may be different at runtime" ([ext:gnu_attributes]

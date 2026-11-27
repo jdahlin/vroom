@@ -465,11 +465,20 @@ semantic_analysis::deduce_initializer_list(SyntaxElement braced, entity_index e,
         if (r != analysis_result::well_formed)
             return analysis_result::well_formed;
         const struct type of = type_table[m.type.unqualified()];
-        if (of.kind != type_kind::fundamental &&
-            of.kind != type_kind::enumeration && of.kind != type_kind::pointer)
-            return analysis_result::well_formed;
         qualified_type decayed =
             qualified_type::make(m.type.unqualified(), cv_none);
+        /* [temp.deduct.call]/2: an array or function argument's pointer */
+        if (of.kind == type_kind::array)
+            decayed = qualified_type::make(type_table.pointer_to(of.operand),
+                                           cv_none);
+        else if (of.kind == type_kind::function)
+            decayed =
+                qualified_type::make(type_table.pointer_to(decayed), cv_none);
+        else if (of.kind != type_kind::fundamental &&
+                 of.kind != type_kind::enumeration &&
+                 of.kind != type_kind::pointer &&
+                 of.kind != type_kind::class_type)
+            return analysis_result::well_formed;
         if (element.unqualified() && !(element == decayed))
             return analysis_result::well_formed;
         element = decayed;

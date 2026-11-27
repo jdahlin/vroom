@@ -203,6 +203,31 @@ const char *semantic_analysis::unknown_scope_subclause(entity_index s) const
     return "namespace.udir";
 }
 
+/* the functions of e's overload chain are declared after the template
+   being instantiated */
+bool semantic_analysis::all_past_horizon(entity_index e) const
+{
+    for (entity_index o = e; o; o = entity_table[o].next_overload) {
+        uint32_t d = entity_table[o].first_declaration;
+        if (entity_table[o].kind != entity_kind::function || !d ||
+            entity_table.declaration(d).node.first_token() <= lookup_horizon)
+            return false;
+    }
+    return true;
+}
+
+bool semantic_analysis::declared_around(entity_index space, uint32_t name) const
+{
+    while (space) {
+        space = entity_table[space].enclosing;
+        entity_index e = declared_in(space, name, lookup_filter::any);
+        /* (one the definition's lookup sees) */
+        if (e && !all_past_horizon(e))
+            return true;
+    }
+    return false;
+}
+
 void semantic_analysis::found_also(lookup_result &r, entity_index e,
                                    entity_index in) const
 {
@@ -347,6 +372,14 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
         }
         if (is_namespace(s)) {
             entity_index e = declared_in(s, name, filter);
+            /* [temp.dep.candidate]/1: functions all declared after the
+               template are not in its definition's lookup, which goes on
+               to the enclosing namespaces when one declares the name */
+            if (e && lookup_horizon && all_past_horizon(e) &&
+                declared_around(s, name)) {
+                horizon_hidden++;
+                e = 0;
+            }
             if (e)
                 found_also(r, e, s);
             if (e && collected_names)
@@ -440,11 +473,7 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
            lookup at the point of instantiation decides (when no enclosing
            namespace declares the name, which the definition's lookup
            would find instead) */
-        bool outer = false;
-        for (entity_index ns = entity_table[r.found_in].enclosing; ns;
-             ns = entity_table[ns].enclosing)
-            if (entity_table.find(ns, name))
-                outer = true;
+        bool outer = declared_around(r.found_in, name);
         if (late && !early && functions && !outer && !r.unknown &&
             !r.ambiguous) {
             r.entity = 0;
@@ -697,20 +726,28 @@ bool semantic_analysis::associated_with(qualified_type t,
                 }
         }
         /* the class and its direct and indirect base classes, each once */
-        owned_array<entity_index> work;
+        /* (walked apart from classes: an enumeration's class is there
+           without its bases) */
+        owned_array<entity_index> work, walked;
         work.append(c);
         while (!work.empty()) {
             entity_index x = work.back();
             work.resize(work.size() - 1);
+            bool again = false;
+            for (entity_index other : walked)
+                if (other == x)
+                    again = true;
+            if (again)
+                continue;
+            if (entity_table[x].kind != entity_kind::class_type)
+                return false;
+            walked.append(x);
             bool seen = false;
             for (entity_index other : classes)
                 if (other == x)
                     seen = true;
-            if (seen)
-                continue;
-            if (entity_table[x].kind != entity_kind::class_type)
-                return false;
-            classes.append(x);
+            if (!seen)
+                classes.append(x);
             add_namespace(entity_table[x].enclosing);
             const entity &cx = entity_table[x];
             for (uint32_t i = 0; i < cx.base_count; i++)
@@ -737,6 +774,17 @@ bool semantic_analysis::associated_with(qualified_type t,
         if (entity_table[e].kind != entity_kind::enumeration)
             return false;
         add_namespace(entity_table[e].enclosing);
+        /* "and, if it is a class member, the member's class": its hidden
+           friends are found (/4.3) */
+        entity_index outer = entity_table[e].enclosing;
+        if (outer && entity_table[outer].kind == entity_kind::class_type) {
+            bool seen = false;
+            for (entity_index other : classes)
+                if (other == outer)
+                    seen = true;
+            if (!seen)
+                classes.append(outer);
+        }
         return true;
     }
     case type_kind::pointer:

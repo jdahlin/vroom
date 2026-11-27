@@ -174,6 +174,56 @@ semantic_analysis::template_parameter_kind(entity_index t, uint32_t i,
     return template_parameter_form_kind::value;
 }
 
+bool semantic_analysis::template_argument_declaration(entity_index t,
+                                                      uint32_t i,
+                                                      entity_index named,
+                                                      vbuffer *decl) const
+{
+    entity_index parameter = template_parameter_entities
+        [function_templates[entity_table[t].instantiation - 1].first_parameter +
+         i];
+    const entity &p = entity_table[parameter];
+    const entity &a = entity_table[named];
+    if (p.kind != entity_kind::template_entity || !p.instantiation ||
+        a.kind != entity_kind::template_entity || !a.instantiation)
+        return false;
+    uint32_t count = template_parameter_count(parameter);
+    bool same = count == template_parameter_count(named);
+    bool types_only = true;
+    for (uint32_t k = 0; k < count; k++) {
+        bool pack = false;
+        qualified_type value_type;
+        template_parameter_form_kind kind =
+            template_parameter_kind(parameter, k, pack, value_type);
+        types_only = types_only && kind == template_parameter_form_kind::type;
+        if (!same || k >= template_parameter_count(named))
+            continue;
+        bool other_pack = false;
+        qualified_type other_type;
+        template_parameter_form_kind other =
+            template_parameter_kind(named, k, other_pack, other_type);
+        same = kind == other && pack == other_pack &&
+               (kind == template_parameter_form_kind::type ||
+                (kind == template_parameter_form_kind::value &&
+                 value_type == other_type));
+    }
+    if (same)
+        return true;
+    if (!types_only)
+        return false;
+    vbuffer_string_append(decl, "Tt");
+    for (uint32_t k = 0; k < count; k++) {
+        bool pack = false;
+        qualified_type value_type;
+        template_parameter_kind(parameter, k, pack, value_type);
+        if (pack)
+            vbuffer_string_append(decl, "Tp");
+        vbuffer_string_append(decl, "Ty");
+    }
+    vbuffer_string_append(decl, "E");
+    return true;
+}
+
 /* whether t is the name of a template parameter pack */
 bool semantic_analysis::names_template_parameter_pack(qualified_type t) const
 {
@@ -330,10 +380,36 @@ analysis_result semantic_analysis::parameter_pack_expansion(
     token_index from = first;
     if (d.size() && d[0].is(syntax_kind::decl_specifier_seq))
         from = d[0].end_token();
+    /* an ellipsis in a function type's parameter list (R f(Args...)) is
+       that type's, not the declarator's */
+    owned_array<token_index> nested;
+    owned_array<SyntaxElement> work;
+    for (auto child : d.elements())
+        work.append(child);
+    while (!work.empty()) {
+        SyntaxElement x = work.back();
+        work.resize(work.size() - 1);
+        if (x.is_token())
+            continue;
+        if (x.is(syntax_kind::parameters_and_qualifiers)) {
+            nested.append(x.first_token());
+            nested.append(x.end_token());
+            continue;
+        }
+        for (auto child : x.elements())
+            work.append(child);
+    }
+    auto in_nested = [&](token_index t) {
+        for (size_t i = 0; i < nested.size(); i += 2)
+            if (t >= nested[i] && t < nested[i + 1])
+                return true;
+        return false;
+    };
     token_index found = 0;
     uint32_t ellipses = 0;
     for (token_index t = from; t < end; t++)
-        if (token_is(tokens, t, preprocessing_op_or_punc::ELLIPSIS)) {
+        if (token_is(tokens, t, preprocessing_op_or_punc::ELLIPSIS) &&
+            !in_nested(t)) {
             found = t;
             ellipses++;
         }

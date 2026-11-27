@@ -693,8 +693,13 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
         template_template_parameter(specialized_template(pr.entity)))
         return -1;
     /* (a class declared and not defined is no derived class here; a
-       specialization not instantiated has bases not known yet) */
-    const entity &x = entity_table[ar.entity];
+       specialization's bases are known once it is complete,
+       [temp.deduct.call]/4.3 looking for one) */
+    entity_index argument_class = ar.entity;
+    if (!entity_table[argument_class].defined &&
+        entity_table[argument_class].instantiation)
+        require_complete(argument_class);
+    const entity &x = entity_table[argument_class];
     if (!x.defined) {
         if (!x.instantiation && !x.size)
             return 0;
@@ -979,7 +984,12 @@ analysis_result semantic_analysis::deduce_from_call(
     for (uint32_t i = pack + 1; i < ft.parameter_count; i++)
         later_pack =
             later_pack || template_parameter_is_pack(ft.first_parameter + i);
-    if (specified > pack && (fixed == f.parameter_count || later_pack))
+    /* ... or its elements number the call's arguments: the pack is
+       the specified ones, and none is left to extend it by */
+    bool pack_covered = fixed != f.parameter_count && !f.variadic &&
+                        count >= fixed && count - fixed == specified - pack;
+    if (specified > pack &&
+        (fixed == f.parameter_count || later_pack || pack_covered))
         given = pack;
     if (given > ft.parameter_count || given > pack)
         return not_supported_because(

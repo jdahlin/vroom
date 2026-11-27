@@ -79,7 +79,8 @@ bool semantic_analysis::non_deduced(qualified_type t) const
 
 /* a type partial ordering compares with deduce_type's rules alone */
 bool semantic_analysis::orderable(qualified_type t, bool packs,
-                                  bool *pack_argument) const
+                                  bool *pack_argument,
+                                  unsigned *value_kinds) const
 {
     const struct type &r = type_table[t.unqualified()];
     switch (r.kind) {
@@ -103,13 +104,29 @@ bool semantic_analysis::orderable(qualified_type t, bool packs,
                     return true;
                 if (y.kind != template_argument::kind_t::value)
                     return false;
-                /* (a parameter of placeholder type, auto or decltype(auto),
-                   is ordered by that type too: [temp.func.order]) */
-                return !y.template_entity ||
-                       (entity_table[y.template_entity].kind !=
-                            entity_kind::dependent_value &&
-                        !contains_placeholder(
-                            entity_table[y.template_entity].type));
+                if (!y.template_entity)
+                    return true;
+                const entity &parameter = entity_table[y.template_entity];
+                if (parameter.kind == entity_kind::dependent_value)
+                    return false;
+                /* (a parameter of placeholder type is ordered by that type
+                   too ([temp.deduct.partial]): nothing separates two plain
+                   auto ones, and the caller refuses auto against another
+                   type; decltype(auto) and a constraint are not ordered) */
+                bool decltype_auto = false;
+                entity_index named_concept = entity_index();
+                bool placeholder = contains_placeholder(
+                    parameter.type, &decltype_auto, &named_concept);
+                if (placeholder &&
+                    (!value_kinds || decltype_auto || named_concept))
+                    return false;
+                if (value_kinds) {
+                    if (placeholder)
+                        *value_kinds |= 1;
+                    else
+                        *value_kinds |= 2;
+                }
+                return true;
             };
             if (x.kind != template_argument::kind_t::pack) {
                 if (!comparable(x))
@@ -141,27 +158,27 @@ bool semantic_analysis::orderable(qualified_type t, bool packs,
     case type_kind::class_type:
         return true;
     case type_kind::pack_expansion:
-        return packs && orderable(r.operand, packs, pack_argument);
+        return packs && orderable(r.operand, packs, pack_argument, value_kinds);
     case type_kind::pointer_to_member:
         if (!r.entity &&
             !orderable(
                 qualified_type::make(static_cast<type_index>(r.bound), cv_none),
-                packs, pack_argument))
+                packs, pack_argument, value_kinds))
             return false;
-        return orderable(r.operand, packs, pack_argument);
+        return orderable(r.operand, packs, pack_argument, value_kinds);
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
-        return orderable(r.operand, packs, pack_argument);
+        return orderable(r.operand, packs, pack_argument, value_kinds);
     case type_kind::array:
         return (r.bound_known || r.entity) &&
-               orderable(r.operand, packs, pack_argument);
+               orderable(r.operand, packs, pack_argument, value_kinds);
     case type_kind::function: {
-        if (!orderable(r.operand, packs, pack_argument))
+        if (!orderable(r.operand, packs, pack_argument, value_kinds))
             return false;
         const qualified_type *list = type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < r.parameter_count; i++)
-            if (!orderable(list[i], packs, pack_argument))
+            if (!orderable(list[i], packs, pack_argument, value_kinds))
                 return false;
         return true;
     }
@@ -218,8 +235,14 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
     if (gfixed && type_table[gp[gfixed - 1].unqualified()].kind ==
                       type_kind::pack_expansion)
         gfixed--;
-    if (arguments < ffixed || arguments < gfixed ||
-        (ffixed == fr.parameter_count && arguments != ffixed) ||
+    /* [temp.deduct.partial]/3.1: only the parameter types "for which the
+       function call has arguments" are used: the parameters after them,
+       which have default arguments, take no part */
+    if (arguments < ffixed)
+        ffixed = static_cast<uint32_t>(arguments);
+    if (arguments < gfixed)
+        gfixed = static_cast<uint32_t>(arguments);
+    if ((ffixed == fr.parameter_count && arguments != ffixed) ||
         (gfixed == gr.parameter_count && arguments != gfixed)) {
         unknown = true;
         return false;
@@ -439,6 +462,8 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
     /* a non-type pack parameter or a specialization with a pack of
        arguments took part */
     bool packs_taken = false;
+    /* the kinds of non-type parameter in the types: plain auto 1, other 2 */
+    unsigned value_kinds = 0;
     const uint32_t both[2] = {f, g};
     for (uint32_t x : both) {
         const function_template t = function_templates[x - 1];
@@ -480,7 +505,7 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
                compares nothing with it as P) */
             if (!non_deduced(list[i]) &&
                 !member_of_unknown_specialization(list[i]) &&
-                !orderable(list[i], true, &packs_taken)) {
+                !orderable(list[i], true, &packs_taken, &value_kinds)) {
                 /* (a class template's specialization with an expression
                    among its arguments, Vec128<T, 8 / sizeof(T)>: where
                    the other's parameter is a template parameter alone, it
@@ -494,8 +519,10 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
                     unknown = true;
             }
     }
-    if (unknown)
+    if (unknown || value_kinds == 3) {
+        unknown = true;
         return 0;
+    }
     bool fg = at_least_as_specialized(f, g, arguments, unknown, f_reversed,
                                       g_reversed);
     bool gf = at_least_as_specialized(g, f, arguments, unknown, g_reversed,
@@ -671,10 +698,13 @@ bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
         return false;
     }
     const uint32_t firsts[2] = {ss.first_pattern, tt.first_pattern};
-    unsigned expansions = 0;
+    unsigned expansions[2] = {0, 0};
+    /* the place of each side's trailing expansion: the argument and the
+       number of elements before it */
+    uint64_t places[2] = {0, 0};
     for (uint32_t i = 0; i < ss.pattern_count; i++)
-        for (uint32_t first : firsts) {
-            const template_argument a = template_arguments[first + i];
+        for (uint32_t side = 0; side < 2; side++) {
+            const template_argument a = template_arguments[firsts[side] + i];
             if (a.kind == template_argument::kind_t::pack) {
                 if (a.count == UINT32_MAX) {
                     unknown = true;
@@ -685,7 +715,8 @@ bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
                     if (e.kind == template_argument::kind_t::pack &&
                         e.count == UINT32_MAX && j + 1 == a.count &&
                         e.value != UINT32_MAX) {
-                        expansions++;
+                        expansions[side]++;
+                        places[side] = (uint64_t(i) << 32) | j;
                     } else if (e.kind != template_argument::kind_t::type ||
                                !orderable(e.type, false)) {
                         unknown = true;
@@ -697,9 +728,11 @@ bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
                 unknown = true;
             }
         }
-    /* A single trailing expansion can be deduced against a fixed pack.
-       Ordering two expansions requires comparing their patterns. */
-    if (expansions > 1)
+    /* A single trailing expansion can be deduced against a fixed pack; two
+       bare ones after as many elements each deduce one another
+       ([temp.deduct.type]/9).  Other shapes are not ordered here. */
+    if (expansions[0] > 1 || expansions[1] > 1 ||
+        (expansions[0] && expansions[1] && places[0] != places[1]))
         unknown = true;
     if (unknown)
         return false;

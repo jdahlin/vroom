@@ -1307,6 +1307,10 @@ class parser
         unknown,
     };
     reading reading_at(unsigned ahead);
+    /* the names friend declarations declare, which lookup finds nowhere */
+    owned_array<uint32_t> friend_names;
+    /* a statement f(x, y); of such a friend f and declared objects */
+    bool call_of_undeclared_name(unsigned ahead);
     /* parse the tokens as declaration() or expression() by [stmt.ambig] */
     template <class Declaration, class Expression>
     node_index declaration_or_expression(reading r, Declaration declaration,

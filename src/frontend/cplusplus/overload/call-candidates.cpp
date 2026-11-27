@@ -191,6 +191,27 @@ semantic_analysis::resolve_call(SyntaxRef n,
         VTRY(r, expression(clauses[0], element));
         early[i] = element;
     }
+    /* [over.call.func]/3: an unqualified call in a non-static member
+       function whose set has a non-static member of its class or a base
+       (a static one found first): the implied object argument is (*this) */
+    uint32_t implicit_this = 0;
+    if (!object && semantics[f.node].kind == semantic_kind::entity &&
+        has_this_object()) {
+        entity_index from = current_class();
+        for (entity_index e : set) {
+            entity_index in = entity_table[e].enclosing;
+            bool ambiguous = false;
+            if (!entity_table[e].nonstatic_member || !from ||
+                (in != from && !base_step(from, in, ambiguous)) || ambiguous)
+                continue;
+            expression_meaning self;
+            VTRY(t, this_pointer(callee_at, self));
+            implicit_this = self.node;
+            break;
+        }
+    }
+    if (implicit_this)
+        object = implicit_this;
     expression_meaning implied;
     if (object) {
         /* the implied object argument, the object expression the address
@@ -238,9 +259,12 @@ semantic_analysis::resolve_call(SyntaxRef n,
         semantics[f.node].kind == semantic_kind::bound_member_function &&
         semantics[f.node].c)
         object_class = semantics[f.node].c;
+    entity_index access_class_of = object_class;
+    if (!access_class_of)
+        access_class_of = using_naming_class(callee_at);
     if (x.enclosing &&
         entity_table[x.enclosing].kind == entity_kind::class_type &&
-        !accessible(c, object_class))
+        !accessible(c, access_class_of))
         /* [class.access]/4: "access control is applied to the function
            selected by overload resolution" */
         return ill_formed(n,
@@ -264,12 +288,17 @@ semantic_analysis::resolve_call(SyntaxRef n,
         if (meaning.node != f.node)
             continue;
         meaning.type = x.type;
-        if (!bound)
+        if (!bound && !(implicit_this && !static_with_object))
             meaning.entity = c;
         break;
     }
     selected.type = x.type;
-    if (static_with_object) {
+    if (implicit_this && !static_with_object) {
+        selected.kind = semantic_kind::bound_member_function;
+        selected.a = implicit_this;
+        selected.b = c;
+        selected.c = 0;
+    } else if (static_with_object) {
         selected.kind = semantic_kind::entity;
         selected.a = c;
         selected.b = 0;

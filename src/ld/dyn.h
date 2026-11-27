@@ -24,6 +24,7 @@ struct ld_dynamic_executable {
     VVEC(NeedVer) needvers;
     VVEC(uint32_t) needed;
     uint32_t nverneed, nxdyn;
+    uint32_t rpath; /* the DT_RUNPATH string */
     uint8_t *xexport;
     uint32_t reserved_g[NRESERVED],
         dl_prev; /* linker symbols and layout predecessor */

@@ -187,12 +187,17 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     /* [ext:gnu_attributes] before the declaration (e.g. SK_API /
        visibility("default")) */
     uint32_t lead = leading_gnu_attributes(inner);
-    for (uint32_t i = 0; i < lead; i++)
-        if (!inner[i].is(syntax_kind::gnu_attribute_specifier) ||
-            !gnu_attributes_without_effect(inner[i]))
+    for (uint32_t i = 0; i < lead; i++) {
+        bool without;
+        if (inner[i].is(syntax_kind::gnu_attribute_specifier))
+            without = gnu_attributes_without_effect(inner[i]);
+        else
+            without = attributes_without_effect(inner[i]);
+        if (!without)
             return not_supported_because(n, "temp.expl.spec",
                                          "an explicit specialization with an "
                                          "attribute that has an effect");
+    }
     bool defines = inner.is(syntax_kind::function_definition);
     bool deleted_body =
         defines && inner.function_definition().function_body().deleted();
@@ -1586,12 +1591,20 @@ analysis_result semantic_analysis::member_explicit_instantiation(
             n, "temp.explicit",
             "a non-function member instantiation without specifiers");
     const entity c = entity_table[m.qualifier];
+    /* [temp.explicit]: "shall appear in an enclosing namespace of its
+       template" (a qualified name's) */
+    bool enclosed = false;
+    for (entity_index in = c.enclosing;; in = entity_table[in].enclosing) {
+        enclosed = enclosed || in == current_scope;
+        if (!in)
+            break;
+    }
     if (c.kind != entity_kind::class_type || !c.instantiation ||
-        entity_table[c.enclosing].kind == entity_kind::class_type ||
-        c.enclosing != current_scope)
+        entity_table[c.enclosing].kind == entity_kind::class_type || !enclosed)
         return not_supported_because(
             n, "temp.explicit",
-            "a member instantiation not of a specialization in this namespace");
+            "a member instantiation not of a specialization in an enclosed "
+            "namespace");
     const instantiation_record record = instantiations[c.instantiation - 1];
     if (record.pattern &&
         !function_templates[record.pattern - 1].parameter_count)

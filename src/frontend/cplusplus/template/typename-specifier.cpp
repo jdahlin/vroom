@@ -158,7 +158,8 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
     if (!e && !found.unknown) {
         VTRY(m, missing_member(t, scope.entity));
     }
-    return named_member_type(n, t, e, "temp.res", type, cv);
+    return named_member_type(n, t, e, "temp.res", type, cv, false,
+                             scope.entity);
 }
 
 /* [temp.deduct]/11: "Attempting to use a type in a nested-name-specifier

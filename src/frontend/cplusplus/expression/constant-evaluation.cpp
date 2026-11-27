@@ -283,7 +283,8 @@ fundamental_type semantic_analysis::evaluated_type(qualified_type t) const
         f = entity_table[e].underlying;
     }
     if (f == fundamental_type::float_ || f == fundamental_type::double_ ||
-        f == fundamental_type::float16 || f == fundamental_type::bfloat16)
+        f == fundamental_type::long_double || f == fundamental_type::float16 ||
+        f == fundamental_type::bfloat16)
         return f;
     if (!fundamental_type_is_integral(f) ||
         f == fundamental_type::bit_precise_int ||
@@ -4125,9 +4126,46 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
             instantiate_definition(ft.declaration, static_cast<uint32_t>(i));
         return;
     }
+    /* (C++26's later points of instantiation are not followed) */
+    size_t waiting = postponed_bodies.size();
+    if (tokens.files.behavior.edition >= standard_edition::cplusplus_26)
+        waiting = 0;
+    for (size_t i = 0; i < waiting && !entity_table[f].definition; i++) {
+        /* a member's definition outside its class template, waiting for a
+           use: by name, until f has its body */
+        const postponed_body m = postponed_bodies[i];
+        if (!m.c || !m.member_definition)
+            continue;
+        if (m.function) {
+            if (m.function != f)
+                continue;
+        } else {
+            const template_member_definition o =
+                template_member_definitions[m.member_definition - 1];
+            if (instantiations[m.instantiation].specialization !=
+                    entity_table[f].enclosing ||
+                o.definition.is(syntax_kind::simple_declaration) || o.inner ||
+                o.member_class)
+                continue;
+            token_index name = member_definition_name(o);
+            /* (a conversion function's has no name to compare) */
+            uint32_t id = 0;
+            if (name)
+                id = member_definition_lookup_id(o, name);
+            if (id && id != entity_table[f].name)
+                continue;
+        }
+        entity_table[f].member_definition_needed = true;
+        postponed_bodies[i].c = 0;
+        define_template_member(m.member_definition - 1, m.instantiation, true);
+        /* (the definition may have left its body to wait for the use) */
+        waiting = postponed_bodies.size();
+    }
+    if (entity_table[f].definition)
+        return;
     for (size_t i = 0; i < postponed_bodies.size(); i++) {
         postponed_body &b = postponed_bodies[i];
-        if (!b.c)
+        if (!b.c || b.member_definition)
             continue;
         if (b.function) {
             if (b.function != f)

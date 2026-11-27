@@ -333,6 +333,96 @@ uint32_t c_lowering::temporary_object(uint32_t n)
     return dereference(comma(pointer, made, address_of(variable, pointer)), t);
 }
 
+const semantic_node *c_lowering::backing_array(uint32_t init) const
+{
+    const semantic_node &x = node(init);
+    if (x.kind != semantic_kind::initializer_list || x.count != 2 ||
+        record(x.type).kind != type_kind::class_type)
+        return nullptr;
+    /* (the initializer_list's pointer: its conversion is marked as a read
+       of the array's compound literal) */
+    const semantic_node &first = node(analysis.semantics.items(x.first)[0]);
+    if (first.kind != semantic_kind::conversion ||
+        static_cast<conversion_kind>(first.op) !=
+            conversion_kind::lvalue_to_rvalue ||
+        node(first.a).kind != semantic_kind::compound_literal)
+        return nullptr;
+    return &node(node(first.a).a);
+}
+
+/* the object _ZGR<static_owner>_ of type t
+   ([abi:mangling-special-temporaries]), weak where static_owner's copies
+   link as one */
+uint32_t c_lowering::reference_temporary_symbol(ast_qualified_type t,
+                                                token_index at)
+{
+    owned_buffer zgr;
+    if (!itanium_reference_temporary_name(analysis, tokens.pp, static_owner,
+                                          static_temporaries, zgr.get()))
+        return fail("an entity whose symbol is not mangled", at);
+    static_temporaries++;
+    owned_buffer written;
+    if (target_id == PP_DARWIN)
+        vbuffer_string_append(written.get(), "_");
+    vbuffer_append(written.get(), zgr.data(), zgr.size());
+    entity_index named = enclosing_function(static_owner);
+    if (!named)
+        named = static_owner;
+    int storage = AST_STORAGE_NONE;
+    uint32_t linked = 0;
+    symbol_linkage(named, storage, linked);
+    uint32_t flags = AST_SYMBOL_FLAG_ADDRESS_TAKEN;
+    if (linked & AST_SYMBOL_FLAG_WEAK)
+        flags |= AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK;
+    else
+        storage = AST_STORAGE_STATIC;
+    bool weak = flags & AST_SYMBOL_FLAG_WEAK;
+    uint32_t depth = 1;
+    if (weak)
+        depth = 0;
+    uint32_t s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, zgr.data(),
+                                    zgr.size(), t, storage, flags, depth);
+    if (weak)
+        ast_builder_toplevel(c, s);
+    ast_builder_symbol_assembler_name(c, s, written.data(), written.size());
+    ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+    if (weak)
+        /* (a weak definition has a value: zero until initialized) */
+        ast_builder_symbol_body(c, s, make(AST_NODE_ZERO, t, 0, 0, 0, 0, 0));
+    ast_builder_symbol_keep(c, s);
+    return s;
+}
+
+/* the backing array n of a static std::initializer_list, an object of
+   static storage the dynamic initialization constructs */
+uint32_t c_lowering::static_array(uint32_t n)
+{
+    const semantic_node &x = node(n);
+    qualified_type element;
+    if (element_destructor(x.type, element) || !static_owner)
+        return fail("a static initializer_list of elements with destructors",
+                    x.at);
+    /* (written when the program runs: not in read-only data, though its
+       elements are const) */
+    ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(x.type, x.at));
+    const struct type &array = record(x.type);
+    ast_qualified_type element_type =
+        AST_QUALIFIED_TYPE_UNQUALIFIED(type(array.operand, x.at));
+    t = ast_builder_type_array(c, element_type, array.bound, true);
+    uint32_t s = reference_temporary_symbol(t, x.at);
+    if (!s)
+        return 0;
+    const semantic_node *outer = static_backing;
+    static_backing = nullptr;
+    uint32_t made = initialize_into(s, x.type, t, n);
+    static_backing = outer;
+    if (!made)
+        return 0;
+    ast_qualified_type pointer = pointer_to(t);
+    return dereference(
+        comma(pointer, made, address_of(c_variable(c, s, t), pointer)), t);
+}
+
 uint32_t c_lowering::array_temporary(uint32_t n)
 {
     const semantic_node &x = node(n);
@@ -591,6 +681,20 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
             return 0;
         return address_of(held, pointer);
     }
+    qualified_type element;
+    if (record(bound.type).kind == type_kind::array &&
+        element_destructor(bound.type, element)) {
+        /* [class.temporary]/4: an array whose elements have destructors,
+           destroyed as one object */
+        if (!collecting)
+            return fail("an array temporary with destructors outside a "
+                        "statement",
+                        n.at);
+        uint32_t held = array_temporary(n.a);
+        if (!held)
+            return 0;
+        return address_of(held, pointer);
+    }
     uint32_t literal = compound_literal(n.a);
     if (!literal)
         return 0;
@@ -605,22 +709,16 @@ uint32_t c_lowering::static_temporary(const semantic_node &n,
                                       ast_qualified_type pointer)
 {
     const semantic_node &bound = node(n.a);
-    owned_buffer zgr;
-    if (!itanium_reference_temporary_name(analysis, tokens.pp, static_owner,
-                                          static_temporaries, zgr.get()))
-        return fail("an entity whose symbol is not mangled", n.at);
-    static_temporaries++;
-    owned_buffer written;
-    if (target_id == PP_DARWIN)
-        vbuffer_string_append(written.get(), "_");
-    vbuffer_append(written.get(), zgr.data(), zgr.size());
+    qualified_type element;
+    if (record(bound.type).kind == type_kind::array &&
+        element_destructor(bound.type, element))
+        return fail("a static reference to an array temporary with "
+                    "destructors",
+                    n.at);
     ast_qualified_type t = type(bound.type, bound.at);
-    uint32_t s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, zgr.data(),
-                                    zgr.size(), t, AST_STORAGE_STATIC,
-                                    AST_SYMBOL_FLAG_ADDRESS_TAKEN, 1);
-    ast_builder_symbol_assembler_name(c, s, written.data(), written.size());
-    ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
-    ast_builder_symbol_keep(c, s);
+    uint32_t s = reference_temporary_symbol(t, n.at);
+    if (!s)
+        return 0;
     uint32_t made = initialize_into(s, bound.type, t, n.a);
     if (!made)
         return 0;

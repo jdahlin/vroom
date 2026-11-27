@@ -745,10 +745,38 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
                                          .type.unqualified()]
                               .entity;
         entity_index one = class_member_lookup(of, name, ambiguous);
-        if (one && found && one != found)
-            ambiguous = true;
+        /* [class.pre]/2: a base's injected-class-name is a member of it
+           (not of a specialization's here: before '<' it is the
+           template's, [temp.local]/1) */
+        const entity &b = entity_table[of];
+        if (!one && b.name == name && b.kind == entity_kind::class_type &&
+            !b.instantiation)
+            one = of;
+        if (one && found && one != found) {
+            /* [class.member.lookup]/6.1: a declaration in a virtual base
+               is hidden by one of a class derived from that base */
+            auto hides = [&](entity_index lower, entity_index upper) {
+                entity_index below = entity_table[lower].enclosing;
+                entity_index above = entity_table[upper].enclosing;
+                return virtual_base_of(below, above) &&
+                       !nonvirtual_subobjects(c, above);
+            };
+            if (hides(found, one))
+                one = found;
+            else if (!hides(one, found))
+                ambiguous = true;
+        }
         if (one)
             found = one;
+    }
+    /* [class.pre]/2: C's own injected-class-name is a declaration of the
+       name in C, so a base's of the same spelling is hidden (it is not
+       bound in C's table; without such a base the enclosing scope finds
+       the class) */
+    if (found && found != c && x.name == name &&
+        x.kind == entity_kind::class_type && !x.instantiation) {
+        ambiguous = false;
+        return c;
     }
     return found;
 }

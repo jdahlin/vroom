@@ -206,6 +206,22 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
             type_table[entity_table[k].type.unqualified()].parameter_count ==
                 entity_table[k].default_arguments)
             return true;
+    /* a constructor template callable without arguments, its parameters
+       a pack or defaulted, is user-provided too */
+    if (x.constructor_templates)
+        for (const function_template &f : function_templates) {
+            if (f.name != x.constructor_templates)
+                continue;
+            qualified_type of = entity_table[f.entity].type;
+            uint32_t required = type_table[of.unqualified()].parameter_count;
+            if (required &&
+                type_table[type_table.parameters(of.unqualified())[required - 1]
+                               .unqualified()]
+                        .kind == type_kind::pack_expansion)
+                required--;
+            if (required <= f.default_arguments)
+                return true;
+        }
     if (x.union_ && x.member_count)
         return false;
     for (uint32_t i = 0; i < x.member_count; i++) {
@@ -308,29 +324,50 @@ analysis_result semantic_analysis::declare(
            merely have been introduced by a using-declaration in the scope
            of the class or namespace nominated by the nested-name-specifier
            of the declarator-id" */
-        lookup_result found =
-            lookup_in_namespace(scope, name, lookup_filter::any);
-        if (found.ambiguous || found.unknown || !found.entity)
+        /* a function of a name a function template holds too (declared
+           above, template_name_functions): the one with these parameters */
+        entity_index beside_template = 0;
+        entity_index holder = entity_table.find(scope, name);
+        if (kind == entity_kind::function && holder &&
+            entity_table[holder].kind == entity_kind::none &&
+            entity_table[holder].held_by_template)
+            for (const template_name_function &x : template_name_functions)
+                if (x.name == holder &&
+                    entity_table[x.function].enclosing == scope &&
+                    same_parameters(type_table,
+                                    entity_table[x.function].type.unqualified(),
+                                    type.unqualified()))
+                    beside_template = x.function;
+        lookup_result found;
+        if (!beside_template)
+            found = lookup_in_namespace(scope, name, lookup_filter::any);
+        if (beside_template) {
+            prior = beside_template;
+        } else if (found.ambiguous || found.unknown || !found.entity) {
             /* one not found may be a friend's, declared in a class
                ([namespace.memdef]/3) */
             return not_supported_because(
                 declaration, "dcl.meaning",
                 "a qualified declaration of a name not found unambiguously");
-        prior = found.entity;
-        entity_index in = entity_table[prior].enclosing;
-        if (entity_table.find(found.found_in, name) != prior ||
-            found.found_in != in)
-            /* named by a using-declaration there, or found through a
+        } else {
+            prior = found.entity;
+            entity_index in = entity_table[prior].enclosing;
+            if (entity_table.find(found.found_in, name) != prior ||
+                found.found_in != in)
+                /* named by a using-declaration there, or found through a
                using-directive */
-            return not_supported_because(declaration, "dcl.meaning",
-                                         "a qualified redeclaration through a "
-                                         "using declaration or directive");
-        for (entity_index y = in; y != scope; y = entity_table[y].enclosing)
-            if (!y || !entity_table[y].inline_)
-                return not_supported_because(declaration, "dcl.meaning",
-                                             "a qualified redeclaration of a "
-                                             "member of a nested namespace");
-        scope = in;
+                return not_supported_because(
+                    declaration, "dcl.meaning",
+                    "a qualified redeclaration through a "
+                    "using declaration or directive");
+            for (entity_index y = in; y != scope; y = entity_table[y].enclosing)
+                if (!y || !entity_table[y].inline_)
+                    return not_supported_because(
+                        declaration, "dcl.meaning",
+                        "a qualified redeclaration of a "
+                        "member of a nested namespace");
+            scope = in;
+        }
     } else {
         prior = entity_table.find(scope, name);
         /* [basic.link]/7: a member of the namespace declared in a block before,
@@ -998,14 +1035,15 @@ analysis_result semantic_analysis::declare(
         }
         if (!overloads && !held_name)
             no_claims_after_hiding(name);
-        if (overloads && entity_table[overloads].named_by_using)
-            /* [namespace.udecl]/11: a using-declaration names the
-               declarations before it, so this overload is not one of the
-               set it introduced; the name is bound to the chain, not to a
-               copy of it */
-            return not_supported_because(
-                declaration, "namespace.udecl",
-                "an overload added to a name a using-declaration introduced");
+        /* [namespace.udecl]/11: a using-declaration names the
+           declarations before it, so this overload is not one of the set it
+           introduced.  The using-declaration's name is bound to that chain:
+           the new function goes in front of it, and this scope's name to
+           the new head */
+        bool shared = false;
+        for (entity_index o = overloads; o; o = entity_table[o].next_overload)
+            if (entity_table[o].named_by_using)
+                shared = true;
         entity_index e = entity_table.make(kind, name, scope);
         entity_table[e].hidden_type = hides;
         entity_table[e].unnamed_type_linkage = unnamed_type;
@@ -1015,7 +1053,11 @@ analysis_result semantic_analysis::declare(
         if (kind == entity_kind::function)
             entity_table[e].exceptions = exceptions;
         entity_table.add_declaration(e, declaration);
-        if (overloads) {
+        if (overloads && shared) {
+            entity_table[e].next_overload = overloads;
+            entity_table[e].hidden_type = entity_table[overloads].hidden_type;
+            entity_table.bind(scope, name, e);
+        } else if (overloads) {
             /* another function of the set: last in its chain, the name
                still bound to the first */
             entity_index last = overloads;

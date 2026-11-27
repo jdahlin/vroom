@@ -753,6 +753,16 @@ analysis_result semantic_analysis::class_pointer_cast(SyntaxRef at,
        complete classes ([expr.static.cast]/11, [conv.ptr]/3) */
     require_complete(fp.entity);
     require_complete(tp.entity);
+    /* a class whose definition was not analysed may derive from the
+       other: no cast is ruled out */
+    const entity_index both[] = {fp.entity, tp.entity};
+    for (entity_index c : both)
+        if (entity_table[c].kind != entity_kind::class_type) {
+            handled = true;
+            return not_supported_because(
+                at, "expr.static.cast",
+                "a cast of a class whose definition was not analysed");
+        }
     if (!entity_table[fp.entity].size || !entity_table[tp.entity].size)
         return analysis_result::well_formed;
     bool ambiguous = false;
@@ -816,8 +826,8 @@ analysis_result semantic_analysis::reference_by_conversion_function(
     converted = false;
     const struct type target = type_table[to.unqualified()];
     qualified_type referenced = target.operand;
-    const struct type &from = type_table[m.type.unqualified()];
-    const struct type &into = type_table[referenced.unqualified()];
+    const struct type from = type_table[m.type.unqualified()];
+    const struct type into = type_table[referenced.unqualified()];
     if (from.kind != type_kind::class_type ||
         referenced.unqualified() == m.type.unqualified())
         return analysis_result::well_formed;
@@ -958,14 +968,20 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
             return not_supported_because(
                 at, "expr.cast",
                 "a reference cast of a value of this category");
-        const struct type &from = type_table[m.type.unqualified()];
-        const struct type &into = type_table[referenced.unqualified()];
+        const struct type from = type_table[m.type.unqualified()];
+        const struct type into = type_table[referenced.unqualified()];
         bool related = false;
         if (from.kind == type_kind::class_type &&
             into.kind == type_kind::class_type && !same) {
             bool ambiguous = false;
-            related = base_step(from.entity, into.entity, ambiguous) ||
-                      base_step(into.entity, from.entity, ambiguous);
+            /* (copies: completing a specialization adds types) */
+            entity_index source = from.entity, destination = into.entity;
+            /* [expr.static.cast]/2: either may be a specialization not yet
+               instantiated, whose bases say whether they are related */
+            require_complete(source);
+            require_complete(destination);
+            related = base_step(source, destination, ambiguous) ||
+                      base_step(destination, source, ambiguous);
         }
         if (!related && !same && (kinds & cast_static) &&
             (kinds == cast_static ||

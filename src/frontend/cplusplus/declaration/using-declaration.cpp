@@ -352,6 +352,51 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
  * class and what hides it found in two namespaces) have no rules yet.
  */
 /*
+ * using Base::operator T: the conversion functions to T are inherited
+ * already ([class.conv.fct]/4); the using-declaration gives them the
+ * member-declaration's access ([namespace.udecl]/19).
+ */
+analysis_result semantic_analysis::using_conversion(UsingDeclarator n,
+                                                    SyntaxRef id)
+{
+    nominated_scope q;
+    VTRY(r, nested_name_specifier(n.nested_name_specifier(), q));
+    qualified_type type;
+    VTRY_SET(r, conversion_type(id, type));
+    entity_index c = defining_class;
+    bool ambiguous = false;
+    if (!c || is_namespace(q.entity) ||
+        entity_table[q.entity].kind != entity_kind::class_type ||
+        !base_step(c, q.entity, ambiguous))
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a using of a conversion function of a class not found as a base");
+    owned_array<entity_index> functions, templates;
+    if (!visible_conversion_functions(q.entity, functions, &templates))
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a using of a conversion function that is not known");
+    bool named = false;
+    for (entity_index f : functions) {
+        if (type_table[entity_table[f].type.unqualified()].operand != type)
+            continue;
+        if (!accessible(f, c))
+            return ill_formed(
+                n, "a using-declaration shall name an accessible member",
+                "namespace.udecl");
+        /* recorded whatever the base's access: the base itself may be
+           inaccessible */
+        using_accesses.append({f, c, declaration_access});
+        named = true;
+    }
+    if (!named)
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a using of a conversion function no base declares as such");
+    return analysis_result::well_formed;
+}
+
+/*
  * [namespace.udecl]/19: a using-declarator with typename names a type
  * ([temp.res]/5): "the name introduced is a synonym" for it, here a typedef
  * of the type typename Q::name has (a dependent one when Q is dependent,
@@ -424,11 +469,11 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         declarator_meaning function_name;
         VTRY(r, literal_operator_id(literal, function_name));
         t = function_name.id;
+    } else if (auto conversion = n[1].conversion_function_id()) {
+        return using_conversion(n, conversion);
     } else {
-        /* a destructor's name, a conversion function's */
-        return not_supported_because(
-            n, "namespace.udecl",
-            "a using-declaration of a destructor or conversion function");
+        return not_supported_because(n, "namespace.udecl",
+                                     "a using-declaration of a destructor");
     }
     nominated_scope q;
     VTRY(r, nested_name_specifier(n.nested_name_specifier(), q));

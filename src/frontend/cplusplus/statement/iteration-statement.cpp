@@ -598,13 +598,20 @@ analysis_result semantic_analysis::for_range_declaration(
     SyntaxElement d, const expression_meaning &element, uint32_t &built)
 {
     SyntaxRef at = node_of(d);
+    /* standard attributes without effect before it ([[maybe_unused]]) */
+    uint32_t lead = 0;
+    while (lead < at.size() &&
+           at[lead].is(syntax_kind::attribute_specifier_seq,
+                       syntax_kind::attribute_specifier) &&
+           attributes_without_effect(at[lead]))
+        lead++;
     /* the second form: a structured binding ([dcl.struct.bind]) */
-    bool binding = at.size() > 2 &&
+    bool binding = !lead && at.size() > 2 &&
                    (at[1].is(preprocessing_op_or_punc::LEFT_BRACKET,
                              preprocessing_op_or_punc::AMPERSAND,
                              preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
-    if ((at.size() != 2 && !binding) ||
-        !at[0].is(syntax_kind::decl_specifier_seq) ||
+    if ((at.size() != lead + 2 && !binding) ||
+        !at[lead].is(syntax_kind::decl_specifier_seq) ||
         at.first_token() != first_token(at[0]))
         /* an attribute-specifier-seq */
         return not_supported_because(
@@ -614,7 +621,7 @@ analysis_result semantic_analysis::for_range_declaration(
     placeholder_allowed = true;
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
     scoped_value<bool> group(placeholder_group, false);
-    VTRY(r, decl_specifier_seq(at[0], s, false));
+    VTRY(r, decl_specifier_seq(at[lead], s, false));
     /* [stmt.ranged]/2: "In the decl-specifier-seq of a for-range-declaration,
        each decl-specifier shall be either a type-specifier or constexpr.
        The decl-specifier-seq shall not define a class or enumeration." */
@@ -628,7 +635,7 @@ analysis_result semantic_analysis::for_range_declaration(
     {
         /* "The decl-specifier-seq shall not define a class or
            enumeration." */
-        auto seq = at[0];
+        auto seq = at[lead];
         for (SyntaxElement c : seq.elements()) {
             if (c.is(syntax_kind::class_specifier, syntax_kind::enum_specifier))
                 return ill_formed(at,
@@ -643,8 +650,8 @@ analysis_result semantic_analysis::for_range_declaration(
     if (binding)
         r = structured_binding_declaration(at, 1, s, &element);
     else
-        r = declare_with_initializer(at, at[1], SyntaxElement(), true, s, false,
-                                     &element);
+        r = declare_with_initializer(at, at[lead + 1], SyntaxElement(), true, s,
+                                     false, &element);
     declarations_claimable = claimable;
     if (r != analysis_result::well_formed) {
         block_variables.resize(first);

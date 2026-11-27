@@ -525,6 +525,39 @@ bool semantic_analysis::has_conversion_function_templates(entity_index c)
            !templates.empty();
 }
 
+/* whether one of them may be a candidate of a copy-initialization
+   ([over.match.copy]/1.2): not declared explicit (an explicit(bool) may be
+   either) */
+bool semantic_analysis::has_implicit_conversion_function_templates(
+    entity_index c)
+{
+    owned_array<entity_index> functions, templates;
+    if (!visible_conversion_functions(c, functions, &templates))
+        return true;
+    for (entity_index held : templates) {
+        owned_array<uint32_t> group;
+        function_template_overloads(held, group);
+        for (uint32_t g : group) {
+            bool explicit_ = false;
+            SyntaxRef d = function_templates[g - 1].declaration;
+            for (token_index t = d.first_token(); t + 1 < d.end_token(); t++) {
+                standard_keyword k = standard_keyword::none;
+                if (tokens[t].kind == token_kind::keyword)
+                    k = syntax_parser.keyword_of(tokens[t]);
+                if (k == standard_keyword::operator_)
+                    break;
+                if (k == standard_keyword::explicit_ &&
+                    !is_operator(tokens[t + 1],
+                                 preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                    explicit_ = true;
+            }
+            if (!explicit_)
+                return true;
+        }
+    }
+    return false;
+}
+
 entity_index
 semantic_analysis::conversion_function_for(const expression_meaning &m,
                                            qualified_type to, bool direct,
@@ -707,7 +740,23 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
             entity_table[owner].type.unqualified(), m.type.cv());
         qualified_type to_pointer =
             qualified_type::make(type_table.pointer_to(base_type), cv_none);
-        VTRY_SET(r, pointer_to_base(t, c, owner, to_pointer, address));
+        /* [over.match.funcs]/4: one a using-declaration made a member of a
+           derived class ([namespace.udecl]/19) takes the object whatever
+           the base's access */
+        bool introduced = false;
+        for (const using_access &u : using_accesses) {
+            bool twice = false;
+            if (u.member == f && (u.c == c || base_step(c, u.c, twice) != 0))
+                introduced = true;
+        }
+        bool repeated = false;
+        base_step(c, owner, repeated);
+        if (introduced && !repeated && nonvirtual_subobjects(c, owner)) {
+            VTRY_SET(r, pointer_along_path(t, c, owner, to_pointer, false,
+                                           false, address));
+        } else {
+            VTRY_SET(r, pointer_to_base(t, c, owner, to_pointer, address));
+        }
     }
     expression_meaning callee;
     callee.type = x.type;

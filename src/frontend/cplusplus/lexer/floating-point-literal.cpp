@@ -170,6 +170,20 @@ void lexer::convert_floating_point_literal(const pp_number_analysis &a,
                 .text(type_name, (size_t)type_length)
             << f.minimum;
     literal_value &v = add_value(out);
+    if (out.type == fundamental_type::long_double) {
+        uint64_t narrow = static_cast<uint64_t>(
+            round_to_format(significand_and_exponent, n,
+                            format_of(behavior, fundamental_type::double_)));
+        double d;
+        memcpy(&d, &narrow, sizeof d);
+        if (vsoftfloat_of_double(d) ==
+            vsoftfloat_parse_with_precision(
+                significand_and_exponent, n,
+                behavior.long_double_fraction_bits)) {
+            v.long_double_bits = narrow;
+            v.long_double_in_double = true;
+        }
+    }
     v.floating_bits_low = (uint64_t)bits;
     v.floating_bits_high = (uint64_t)(bits >> 64);
     out.value_known = true;

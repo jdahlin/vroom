@@ -691,6 +691,9 @@ struct entity {
     bool explicit_default_constructor = false;
     /* X& operator=(const X&) = default (defaulted_copy_assignment) */
     bool defaulted_copy_assignment = false;
+    /* ... and the access of one declared protected or private, which the
+       entity declared at the class's end takes */
+    uint8_t defaulted_copy_access = 0, defaulted_move_access = 0;
     /* X(X&&) = default and X& operator=(X&&) = default, trivial
        ([class.copy.ctor]/11, [class.copy.assign]/9): no entity; the move
        constructor copies the bytes (construct) */
@@ -738,6 +741,9 @@ struct entity {
        ([temp.friend]/4): clang does not check access to its members
        (-Wunsupported-friend, "turning off access control") */
     bool access_unchecked = false;
+    /* a class: the implicit assignment being defined assigns a subobject
+       of it, its operator= accessible as subobject_assignment decided */
+    bool assigned_by_implicit = false;
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
@@ -2665,6 +2671,8 @@ class semantic_analysis
                              lookup_filter filter) const;
     /* one more declaration found for a name: r's entity if it is the same
        entity or the first, else ambiguous or unknown */
+    bool all_past_horizon(entity_index e) const;
+    bool declared_around(entity_index space, uint32_t name) const;
     void found_also(lookup_result &r, entity_index e, entity_index in) const;
     /* [basic.lookup.argdep]: the functions named name in the namespaces
        associated with arguments of these types, added to found (each
@@ -2966,6 +2974,7 @@ class semantic_analysis
     analysis_result using_enum_declaration(UsingEnumDeclaration n);
     analysis_result using_declarator(UsingDeclarator n, bool if_exists = false);
     analysis_result using_typename(UsingDeclarator n);
+    analysis_result using_conversion(UsingDeclarator n, SyntaxRef id);
     /* [temp.variadic]/5: in a using-declaration the pattern is a
        using-declarator: one followed by an ellipsis, once for each element
        of the packs it names */
@@ -3088,6 +3097,9 @@ class semantic_analysis
     bool names_nothing_dependent(SyntaxRef x);
     void collect_written_casts(SyntaxElement x,
                                owned_array<written_binding> &found);
+    bool ends_in_ellipsis(SyntaxElement a) const;
+    bool collect_written_expansion(SyntaxElement a,
+                                   owned_array<written_binding> &found);
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(SyntaxRef op, qualified_type &type,
@@ -3525,6 +3537,15 @@ class semantic_analysis
     /* [expr.prim.id.qual] */
     analysis_result qualified_id(QualifiedId n, expression_meaning &m);
     analysis_result qualified_template_id(SyntaxRef n, expression_meaning &m);
+    /* [namespace.udecl]: the qualified-ids naming a member through a
+       member using-declaration, by token, and their naming class, whose
+       access the declaration gives */
+    struct using_named {
+        token_index at = 0;
+        entity_index naming = 0;
+    };
+    owned_array<using_named> using_named_members;
+    entity_index using_naming_class(token_index t) const;
     analysis_result class_member_value(SyntaxRef n, token_index t,
                                        entity_index e, expression_meaning &m);
     /* [expr.prim.id]: the expression that names the entity e, found by
@@ -3665,6 +3686,9 @@ class semantic_analysis
     analysis_result lambda_expression_analysed(LambdaExpression n,
                                                expression_meaning &m);
     bool names_init_capture(SyntaxElement part, const lambda_context &l) const;
+    analysis_result
+    lambda_default_arguments(SyntaxRef n, entity_index f,
+                             const owned_array<parameter_meaning> &list);
     analysis_result
     lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                      qualified_type &type,
@@ -4892,7 +4916,8 @@ class semantic_analysis
     analysis_result named_member_type(SyntaxRef n, token_index t,
                                       entity_index e, const char *citation,
                                       type_index &type, uint32_t &cv,
-                                      bool allow_placeholder = false);
+                                      bool allow_placeholder = false,
+                                      entity_index naming = 0);
     analysis_result qualified_type_name(SyntaxRef n, type_index &type,
                                         uint32_t &cv,
                                         bool allow_placeholder = false);
@@ -4923,29 +4948,35 @@ class semantic_analysis
        for member_template_call to deduce from the arguments */
     entity_index member_template_name = 0;
     expression_meaning member_template_object;
+    /* x.B::f<T>(): the object's class, whose member naming B it is for
+       access ([class.access.base]/5); 0 when not qualified */
+    entity_index member_template_through = 0;
     owned_array<SyntaxElement> member_template_written;
     SyntaxRef member_template_written_at = 0;
     /* the call of the functions and function templates held names
        ([over.call.func]/2, /3): object is the implied object argument
        (none: a static member's context), written the explicit template
        arguments of f<T>(...) */
-    analysis_result
-    member_template_call(SyntaxRef n, entity_index held,
-                         const expression_meaning *object,
-                         const owned_array<SyntaxElement> &arguments,
-                         owned_array<expression_meaning> &early,
-                         const owned_array<SyntaxElement> *written,
-                         SyntaxRef written_at, expression_meaning &m);
-    analysis_result bound_member_call(
-        SyntaxRef n, entity_index f, const expression_meaning &object,
+    analysis_result member_template_call(
+        SyntaxRef n, entity_index held, const expression_meaning *object,
         const owned_array<SyntaxElement> &arguments,
-        owned_array<expression_meaning> &early, expression_meaning &m);
+        owned_array<expression_meaning> &early,
+        const owned_array<SyntaxElement> *written, SyntaxRef written_at,
+        expression_meaning &m, entity_index through = 0);
+    analysis_result
+    bound_member_call(SyntaxRef n, entity_index f,
+                      const expression_meaning &object,
+                      const owned_array<SyntaxElement> &arguments,
+                      owned_array<expression_meaning> &early,
+                      expression_meaning &m, entity_index through = 0);
     /* [over.match.funcs]/4: a static member function f called, the object
        expression (if any) evaluated and discarded */
-    analysis_result static_member_call(
-        SyntaxRef n, entity_index f, const expression_meaning *object,
-        const owned_array<SyntaxElement> &arguments,
-        owned_array<expression_meaning> &early, expression_meaning &m);
+    analysis_result
+    static_member_call(SyntaxRef n, entity_index f,
+                       const expression_meaning *object,
+                       const owned_array<SyntaxElement> &arguments,
+                       owned_array<expression_meaning> &early,
+                       expression_meaning &m, entity_index through = 0);
     /* [temp.arg.explicit]: the template-arguments of a simple-template-id
        (pack expansions marked in expansion) */
     SyntaxElement member_template_id(SyntaxRef n) const;
@@ -5182,6 +5213,7 @@ class semantic_analysis
     void declare_implicit_assignment(entity_index c, bool move, bool deleted,
                                      bool non_throwing, bool nonconst = false);
     analysis_result implicit_assignments(entity_index c);
+    analysis_result defaulted_assignment_access(entity_index c, SyntaxRef n);
     analysis_result implicit_assignment_definitions(entity_index c,
                                                     SyntaxRef n);
     analysis_result defaulted_assignment_definition(SyntaxRef n,
@@ -6259,7 +6291,7 @@ class semantic_analysis
                                             bool require_trailing_defaults);
     bool equivalent_template(const function_template &f, SyntaxRef n,
                              uint32_t first, uint32_t count,
-                             qualified_type type);
+                             qualified_type type, bool signature_only = false);
     /* [temp.mem.func]/1: a member function of a class template (or of a
        partial specialization, [temp.class.spec.mfunc]/1) defined outside
        it: the definition, analysed per specialization of the class
@@ -6434,8 +6466,8 @@ class semantic_analysis
     /* a type partial ordering compares with deduce_type's rules alone;
        pack_argument set when a specialization in it has a pack of
        arguments */
-    bool orderable(qualified_type t, bool packs,
-                   bool *pack_argument = nullptr) const;
+    bool orderable(qualified_type t, bool packs, bool *pack_argument = nullptr,
+                   unsigned *value_kinds = nullptr) const;
     bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
                                  bool &unknown, bool f_reversed = false,
                                  bool g_reversed = false);
@@ -6915,6 +6947,12 @@ class semantic_analysis
     entity_index constraint_own_type_parameter(entity_index t,
                                                uint64_t position) const;
     bool constraint_parameter_is_own(entity_index t, entity_index p) const;
+    /* [abi:mangle.template-arg] the template-param-decl clang writes
+       before a template argument whose template-parameter-list is not its
+       template template-parameter's (parameter i of function template t):
+       in decl; empty when they agree.  False when it has none to give */
+    bool template_argument_declaration(entity_index t, uint32_t i,
+                                       entity_index named, vbuffer *decl) const;
     /* the type a type-id written in t's requires-clause names, analysed in
        t's template-parameter scope (what [abi:mangle.template-args] spells) */
     bool constraint_type(entity_index t, SyntaxElement written,
@@ -7270,6 +7308,9 @@ class semantic_analysis
        parameter of the member function f */
     conversion_sequence object_sequence(const expression_meaning &object,
                                         entity_index f) const;
+    /* whether a conversion function template of c may be a candidate of a
+       copy-initialization: not declared explicit */
+    bool has_implicit_conversion_function_templates(entity_index c);
     /* whether class c or a base class of it declares a conversion
        function ([class.conv.fct]/4: "Conversion functions are
        inherited") */
@@ -7351,9 +7392,10 @@ class semantic_analysis
     conversion_sequence list_scalar_sequence(SyntaxElement list,
                                              qualified_type to);
     /* [over.ics.list]/6 */
-    conversion_sequence list_array_sequence(SyntaxElement list,
-                                            qualified_type array,
-                                            bool user_defined);
+    conversion_sequence
+    list_array_sequence(SyntaxElement list, qualified_type array,
+                        bool user_defined,
+                        const expression_meaning *known = nullptr);
     int compare_standard_conversions(const conversion_sequence &a,
                                      const conversion_sequence &b) const;
     /* [over.match.viable], [over.match.best]: the best viable function of

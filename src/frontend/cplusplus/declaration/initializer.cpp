@@ -549,28 +549,27 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
         no_storage = unevaluated > default_argument_unevaluated &&
                      !entity_table[object.entity].destructor;
     /* an array's or scalar's list temporary is a literal object (static at
-       namespace scope), unless elements need destroying */
-    bool destroyed_elements = false;
+       namespace scope); one whose elements have destructors is the
+       lowering's array_temporary */
+    bool no_room = object.kind == type_kind::class_type && !at_block_scope() &&
+                   !binding_extends;
+    /* (an array of an incomplete class: clang's error, not claimed) */
     if (object.kind == type_kind::array) {
         qualified_type element = m.type;
         while (type_table[element.unqualified()].kind == type_kind::array)
             element = type_table[element.unqualified()].operand;
         const struct type &last = type_table[element.unqualified()];
-        if (last.kind == type_kind::class_type) {
-            const entity &c = entity_table[last.entity];
-            /* (or an element class that is not complete) */
-            destroyed_elements = c.destructor || (!c.defined && !c.size);
-        }
+        if (last.kind == type_kind::class_type &&
+            !entity_table[last.entity].defined &&
+            !entity_table[last.entity].size)
+            no_room = true;
     }
-    bool no_room =
-        destroyed_elements || (object.kind == type_kind::class_type &&
-                               !at_block_scope() && !binding_extends);
     if (aggregate_prvalue(m) && !closure_prvalue_binding(m) && !no_storage &&
         no_room)
         return not_supported_because(
             at, "class.temporary",
-            "an array's or scalar's list temporary, or a temporary of a call's "
-            "argument at namespace scope");
+            "a temporary of a call's argument at namespace scope, or an array "
+            "of an incomplete class");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const lvalue or rvalue reference is bound to a
        temporary holding its value ([conv.lval]) */
@@ -622,8 +621,13 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
         bool const_lvalue = !rvalue_reference && (t1.cv() & cv_const) &&
                             !(t1.cv() & cv_volatile);
         if (!const_lvalue) {
-            entity_index f = own_conversion_functions(y.entity);
-            if (f && entity_table[f].next_overload)
+            /* (an explicit one is a candidate of neither here) */
+            uint32_t implicit_ones = 0;
+            for (entity_index f = own_conversion_functions(y.entity); f;
+                 f = entity_table[f].next_overload)
+                if (!entity_table[f].explicit_)
+                    implicit_ones++;
+            if (implicit_ones > 1)
                 return not_supported_because(
                     at, "over.match.ref",
                     "a non-const reference with several conversion functions");
@@ -2099,9 +2103,16 @@ analysis_result semantic_analysis::class_list_initialization(
             size_t next = 0;
             return aggregate_elements(list, clauses, next, type, result);
         }
-        if (clauses.empty() || (!entity_table[c].first_constructor &&
-                                !entity_table[c].constructor_template &&
-                                !entity_table[c].constructor_templates))
+        bool none_declared = !entity_table[c].first_constructor &&
+                             !entity_table[c].constructor_template &&
+                             !entity_table[c].constructor_templates;
+        /* [over.match.list], [over.match.ctor]: a class with neither bases
+           nor other constructors has the implicit and defaulted ones alone,
+           none of two parameters (std::allocator_arg_t) */
+        if (none_declared && clauses.size() > 1 && !entity_table[c].base_count)
+            return ill_formed(list, "no constructor takes the elements",
+                              "over.match.list");
+        if (clauses.empty() || none_declared)
             return not_supported_because(
                 list, "over.match.list",
                 "list-initialization of a non-aggregate with no constructor "
@@ -2960,6 +2971,10 @@ analysis_result semantic_analysis::aggregate_element_clause(
        type_table's */
     const struct type record = type_table[element.unqualified()];
     bool braced = clause.is(syntax_kind::braced_init_list);
+    /* (a class template's specialization may not be instantiated yet:
+       whether it is an aggregate is known of the complete class) */
+    if (record.kind == type_kind::class_type)
+        require_complete(record.entity);
     bool subaggregate =
         record.kind == type_kind::array || is_vector_kind(record.kind) ||
         (record.kind == type_kind::class_type &&
