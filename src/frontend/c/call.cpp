@@ -366,5 +366,23 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
     AST_NODE(n)->flags |=
         aflags &
         AST_NODE_FLAG_ERROR; /* clang: a call with an invalid argument is invalid */
+    if (!c->o->no_builtin && !(aflags & AST_NODE_FLAG_ERROR) &&
+        AST_NODE(callee)->op == AST_NODE_VARIABLE) {
+        const sym *y = &c->syms[AST_NODE(callee)->a];
+
+        if (y->kind == AST_SYMBOL_FUNCTION && !y->body &&
+            (y->flags & AST_SYMBOL_FLAG_GLOBAL) &&
+            y->sc != AST_STORAGE_STATIC &&
+            !(y->attrs && c->attr[y->attrs].asmname) &&
+            !cc_library_builtin_is_disabled(
+                c->o, cc_identifier_string(y->name),
+                (size_t)cc_identifier_length(y->name))) {
+            uint32_t computed = cc_builtin_math_inline_build(
+                c, cc_identifier_string(y->name),
+                (size_t)cc_identifier_length(y->name), n, loc);
+            if (computed)
+                return computed;
+        }
+    }
     return n;
 }

@@ -602,6 +602,12 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
             AST_NODE(n)->a = cc_conversion_decay(c, fn);
             AST_NODE(n)->b = cc_id_list_freeze(c, &args);
             AST_NODE(n)->c = args.n;
+            if (b->id == CC_BUILTIN_LIBRARY) {
+                uint32_t computed = cc_builtin_math_inline_build(
+                    c, b->name + 10, strlen(b->name + 10), n, loc);
+                if (computed)
+                    return computed;
+            }
             return n;
         }
         return cc_builtin_node_new(c, b->id, rt, loc, &args);

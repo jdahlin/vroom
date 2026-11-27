@@ -495,6 +495,7 @@ typedef struct
     int x86_features_set; /* explicitly resolved by the driver; zero uses x86-64 */
     int general_regs_only; /* -mgeneral-regs-only: no FP/SIMD registers (variadic: no v0-v7 save area) */
     int fast_math; /* full fast-math permits finite, unsigned-zero root transforms */
+    int no_math_errno;  /* -fno-math-errno: sqrt of a negative sets no errno */
     int no_fp_contract; /* -ffp-contract=off: a * b + c is two operations (default on, as clang: fused within an expression) */
     int no_jump_tables; /* -fno-jump-tables: switches are compare trees */
     int no_builtin; /* -ffreestanding / -fno-builtin: abs() etc. are plain calls */
