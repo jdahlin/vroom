@@ -601,6 +601,20 @@ Risk: something of the job depends on the main file before the boundary
 (debug name, `-MT` default, `__BASE_FILE__`): CS2d's comparison with a
 *different* main file per TU finds it.
 
+**The work each child repeats** (looked at 2026-11-27, nothing kept).  A
+child compiling an empty file runs 0.32G instructions beyond the parent.
+callgrind (its child stops in code generation, so these are of the front end):
+`instantiate_pending` 192M, lowering 91M of which mangling 57M.
+- Draining the wanted work before the fork (`instantiate_pending` keeping its
+  queues): 37.2G to 33.1G, 3.5 s CPU, but the objects are no longer
+  `-include`'s: 4 TUs differ in symbol sizes at -O0 and -O2.  Of its parts,
+  `postponed_bodies` and `pending_definitions` cause it (the other two change
+  nothing and save nothing).  A body instantiated early is compiled
+  differently (`allocation_result<char*>`'s constructor spills its parameters).
+  Why is not known; until it is, nothing is drained at the boundary.
+- No symbol for a function only declared (CS8's first part): 37.2G to 37.0G,
+  and objects change.  Not worth it.
+
 ### CS5. Key and validation.  Status: not started.
 The recorded reads of 6.5 in the worker, the check, and the refusals (date,
 time, errors, open state).  Files: `preprocessor/include-directive.cpp`,
@@ -633,7 +647,8 @@ Files: `src/server/cxx-prefix-worker.cpp`.  Verify: Stockfish cold twice
 through vccd: the first build without a prefix, the second with all 52
 headers; objects as CS3 with that list.  Until then the list is explicit.
 
-### CS8. Lowering that does not visit the prefix.  Status: not started.
+### CS8. Lowering that does not visit the prefix.  Status: not started; its
+cheapest part measured under CS4 (0.4 %).
 Symbols declared when first used, not for every declared name
 [V lower/definitions.cpp:334-392]; the vtable loop over all entities
 [V :430] over the dynamic classes only; the linear `done` search [V :393, 411-415]
