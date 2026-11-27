@@ -7380,9 +7380,10 @@ class semantic_analysis
     conversion_sequence list_scalar_sequence(SyntaxElement list,
                                              qualified_type to);
     /* [over.ics.list]/6 */
-    conversion_sequence list_array_sequence(SyntaxElement list,
-                                            qualified_type array,
-                                            bool user_defined);
+    conversion_sequence
+    list_array_sequence(SyntaxElement list, qualified_type array,
+                        bool user_defined,
+                        const expression_meaning *known = nullptr);
     int compare_standard_conversions(const conversion_sequence &a,
                                      const conversion_sequence &b) const;
     /* [over.match.viable], [over.match.best]: the best viable function of

@@ -202,8 +202,15 @@ semantic_analysis::list_scalar_sequence(SyntaxElement list, qualified_type to)
  */
 semantic_analysis::conversion_sequence
 semantic_analysis::list_array_sequence(SyntaxElement list, qualified_type array,
-                                       bool user_defined)
+                                       bool user_defined,
+                                       const expression_meaning *known)
 {
+    /* (the elements as template argument deduction analysed them: a copy,
+       the analyses below add to braced_elements) */
+    owned_array<expression_meaning> analysed;
+    if (known && known->braced_known)
+        for (uint32_t i = 0; i < known->braced_count; i++)
+            analysed.append(braced_elements[known->braced_first + i]);
     conversion_sequence unknown;
     unknown.kind = conversion_sequence::form::unknown;
     const struct type t = type_table[array.unqualified()];
@@ -229,9 +236,24 @@ semantic_analysis::list_array_sequence(SyntaxElement list, qualified_type array,
         return unknown;
     conversion_sequence worst;
     worst.kind = conversion_sequence::form::standard;
-    for (SyntaxElement clause : clauses) {
+    for (size_t at = 0; at < clauses.size(); at++) {
+        SyntaxElement clause = clauses[at];
         if (clause.is(syntax_kind::designated_initializer_clause))
             return unknown;
+        if (analysed.size() == clauses.size() && analysed[at].node &&
+            !clause.is(syntax_kind::braced_init_list)) {
+            /* analysed once, outside any substitution (a lambda there
+               makes its closure type once) */
+            conversion_sequence s = implicit_conversion_sequence(
+                analysed[at], t.operand, user_defined);
+            if (s.kind == conversion_sequence::form::unknown)
+                return unknown;
+            if (s.kind == conversion_sequence::form::bad)
+                return bad;
+            if (compare_conversions(s, worst) > 0)
+                worst = s;
+            continue;
+        }
         substitution_mark mark = mark_substitution();
         if (clause.is(syntax_kind::braced_init_list)) {
             if (!of_class)
@@ -499,7 +521,8 @@ analysis_result semantic_analysis::best_viable_function(
                     } else if (type_table[list_target.unqualified()].kind ==
                                type_kind::array) {
                         a = list_array_sequence((*written_arguments)[k],
-                                                list_target, user_defined);
+                                                list_target, user_defined,
+                                                &argument);
                     } else if (argument.node) {
                         a = implicit_conversion_sequence(argument, target,
                                                          user_defined);
