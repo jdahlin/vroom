@@ -828,6 +828,15 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
         m.type = to;
         return analysis_result::well_formed;
     }
+    if (vectors_compatible(m.type, to)) {
+        /* [ext:clang_ext_vector_type] a GCC vector and an extended vector
+           of the same elements convert to each other: the same bits */
+        m.type = to;
+        m.evaluation = constness::not_constant;
+        m.beyond_integral_constant = true;
+        converted(m, conversion_kind::vector_cast);
+        return analysis_result::well_formed;
+    }
     if (type_table[m.type.unqualified()].kind == type_kind::enumeration ||
         target.kind == type_kind::enumeration) {
         if (m.type.unqualified() == to.unqualified()) {

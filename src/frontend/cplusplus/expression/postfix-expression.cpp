@@ -737,7 +737,11 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         /* [ext:gnu_vector_size] a vector type too, with a braced list or a
            single expression */
         bool vector_value = is_vector_kind(record.kind) && (braced || single);
-        if (!as_cast && !vector_value &&
+        /* [ext:clang_ext_vector_type] V() of an extended vector: zero in
+           every element */
+        bool zero_vector = record.kind == type_kind::ext_vector &&
+                           parenthesized && !written.list;
+        if (!as_cast && !vector_value && !zero_vector &&
             record.kind != type_kind::fundamental &&
             record.kind != type_kind::pointer &&
             record.kind != type_kind::enumeration)
@@ -746,6 +750,16 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 "an explicit type conversion to a type that has no rules");
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
+        if (zero_vector) {
+            m = expression_meaning();
+            m.type =
+                qualified_type::make(record.operand.unqualified(), cv_none);
+            m.evaluation = constness::constant;
+            m.value = 0;
+            m.node =
+                expression_node(semantic_kind::constant, m, n.first_token());
+            return vector_splat(n, m, to);
+        }
         if (parenthesized && !written.list) {
             /* [expr.type.conv]/2: "Otherwise, if the type is cv void and the
                initializer is () or {}, the expression is a prvalue of the
@@ -870,6 +884,13 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 return not_supported_because(
                     n, "ext.gnu",
                     "a vector or array subscript that is not of integral type");
+            /* clang: a lane of a prvalue vector is an xvalue, which the
+               prvalue made here is not; only an operand's value is the same */
+            if (!object && unevaluated)
+                return not_supported_because(
+                    n, "ext.gnu",
+                    "a subscript of a prvalue vector in an unevaluated "
+                    "operand");
             qualified_type lane = type_table[base->type.unqualified()].operand;
             lane = qualified_type::make(lane.unqualified(), base->type.cv());
             constness evaluation = constness::not_constant;
