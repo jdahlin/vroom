@@ -4648,6 +4648,23 @@ uint32_t semantic_analysis::pointer_tree(const constant_evaluation &state,
         const constant_evaluation::object &o = state.objects[v.first];
         if (!o.entity || o.frame)
             return 0;
+        /* [conv.func]/1: a function's address (a lambda's __invoke, which
+           no expression of the initializer names) */
+        const entity &named = entity_table[o.entity];
+        if (named.kind == entity_kind::function) {
+            if (named.nonstatic_member ||
+                named.type.unqualified() != pointee.unqualified())
+                return 0;
+            expression_meaning fm;
+            fm.type = named.type;
+            fm.category = value_category::lvalue;
+            fm.entity = o.entity;
+            uint32_t function =
+                expression_node(semantic_kind::entity, fm, at, o.entity);
+            return expression_node(
+                semantic_kind::conversion, m, at, function, 0,
+                static_cast<uint8_t>(conversion_kind::function_to_pointer));
+        }
         base_node = entity_object(o.entity, base_type);
         if (!base_node || base_type.unqualified() != pointee.unqualified())
             return 0;
