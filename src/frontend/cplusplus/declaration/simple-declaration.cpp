@@ -2456,9 +2456,10 @@ analysis_result semantic_analysis::declare_with_initializer(
        variable, or it is a constant-initialized variable of
        const-qualified integral or enumeration type." */
     uint32_t cv = cv_of(type_table, type);
-    bool integral_const = (cv & cv_const) && !(cv & cv_volatile) &&
-                          record.kind == type_kind::fundamental &&
-                          is_integral(type);
+    bool integral_const =
+        (cv & cv_const) && !(cv & cv_volatile) &&
+        ((record.kind == type_kind::fundamental && is_integral(type)) ||
+         record.kind == type_kind::enumeration);
     e.usable = constness::not_constant;
     /* [impl.clang] a weak variable's initializer "is not considered
        constant because it may be different at runtime" ([ext:gnu_attributes]
