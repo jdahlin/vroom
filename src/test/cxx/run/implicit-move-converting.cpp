@@ -108,6 +108,17 @@ static Target target()
     return c;
 }
 
+/* a static after a return: no guard, as clang++ -O0 (the symbols) */
+struct Counted {
+    Counted() { chosen += 1; }
+};
+static int unreached(int v)
+{
+    return v;
+    static Counted never;
+    return v + 1;
+}
+
 static void report(const char *what, int a, int b)
 {
     printf("%s %d %d destroyed %d\n", what, a, b, destroyed);
@@ -140,5 +151,6 @@ int main()
     report("end", 0, 0);
     report("base", base().how, 0);
     report("conversion", target().how, 0);
+    report("unreached", unreached(1), 0);
     return 0;
 }
