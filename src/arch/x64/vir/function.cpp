@@ -366,7 +366,7 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
     }
     L.uses_ymm = false;
     for (uint32_t k = 0; k < f->insn_count; k++)
-        L.uses_ymm |= f->insns[k].type == VIR_TYPE_I64X4;
+        L.uses_ymm |= vir_type_size(f->insns[k].type) > 16;
     for (uint32_t k = 0; k < f->slot_count; k++)
         L.slot[k] =
             walk_slot_temporary(e, f->slot[k].size ?: 1, f->slot[k].align);

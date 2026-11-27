@@ -49,22 +49,25 @@ enum {
     VIR_TYPE_I64X2, /* 128-bit vectors (RESEARCH-vectors.md 5.1; i8x16 is not in yet) */
     VIR_TYPE_I16X8, /* load, store, vsplat (of an i32), add, sub, and, or, xor only */
     VIR_TYPE_I64X4, /* 256 bits, x86-64 with AVX2: load, store, block parameters and the x86 operation */
+    VIR_TYPE_I64X8, /* 512 bits, x86-64 with AVX-512BW: as I64X4 */
     VIR_TYPE_COUNT
 };
 static inline bool vir_type_is_vector(uint32_t ty)
 {
-    return ty >= VIR_TYPE_F32X4 && ty <= VIR_TYPE_I64X4;
+    return ty >= VIR_TYPE_F32X4 && ty <= VIR_TYPE_I64X8;
 }
 /* a vector's lane type; a scalar's own */
 static inline uint32_t vir_type_element(uint32_t ty)
 {
     if (ty == VIR_TYPE_I16X8)
         return VIR_TYPE_I32; /* (no 16-bit scalar) */
-    return ty == VIR_TYPE_F32X4                           ? VIR_TYPE_F32
-           : ty == VIR_TYPE_I32X4                         ? VIR_TYPE_I32
-           : ty == VIR_TYPE_F64X2                         ? VIR_TYPE_F64
-           : ty == VIR_TYPE_I64X2 || ty == VIR_TYPE_I64X4 ? VIR_TYPE_I64
-                                                          : ty;
+    if (ty == VIR_TYPE_I64X4 || ty == VIR_TYPE_I64X8)
+        return VIR_TYPE_I64;
+    return ty == VIR_TYPE_F32X4   ? VIR_TYPE_F32
+           : ty == VIR_TYPE_I32X4 ? VIR_TYPE_I32
+           : ty == VIR_TYPE_F64X2 ? VIR_TYPE_F64
+           : ty == VIR_TYPE_I64X2 ? VIR_TYPE_I64
+                                  : ty;
 }
 /* the integer vector with a vector's lane width (its mask), the float one; VIR_TYPE_VOID for a scalar */
 static inline uint32_t vir_type_vector_integer(uint32_t ty)
@@ -184,6 +187,7 @@ enum {
         92, /* a landing pad's first instruction: multi (exception ptr, selector i32) */
     VIR_OP_EHTYPEID = 93, /* the selector of a catch clause's type (i32) */
     VIR_OP_X86 = 94,      /* an x86 instruction on vectors: c says which */
+    VIR_OP_X86_DOT = 95,  /* vpdpbusd: a plus the byte products of b and c */
     VIR_OP_TARGET_FIRST =
         128, /* 128-255: target instructions introduced by lowering */
     VIR_OP_COUNT = 256
@@ -437,6 +441,8 @@ enum { /* result type sets */
        VIR_TYPE_MASK_I64X2 = 1 << VIR_TYPE_I64X2,
        VIR_TYPE_MASK_I16X8 = 1 << VIR_TYPE_I16X8,
        VIR_TYPE_MASK_I64X4 = 1 << VIR_TYPE_I64X4,
+       VIR_TYPE_MASK_I64X8 = 1 << VIR_TYPE_I64X8,
+       VIR_TYPE_MASK_WIDE = VIR_TYPE_MASK_I64X4 | VIR_TYPE_MASK_I64X8,
        VIR_TYPE_MASK_VI = VIR_TYPE_MASK_I32X4 | VIR_TYPE_MASK_I64X2,
        VIR_TYPE_MASK_VF = VIR_TYPE_MASK_F32X4 | VIR_TYPE_MASK_F64X2,
        VIR_TYPE_MASK_VEC = VIR_TYPE_MASK_VI | VIR_TYPE_MASK_VF

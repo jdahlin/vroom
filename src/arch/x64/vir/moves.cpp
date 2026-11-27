@@ -125,33 +125,57 @@ VPRIV void x64_vir_x86_emit(x64_vir_context *L, uint32_t code, int d, int a,
 }
 
 VPRIV void x64_vir_x86_wide_emit(x64_vir_context *L, uint32_t code, int d,
-                                 int a, int b)
+                                 int a, int b, uint32_t type)
 {
     const char *mnemonic = x64_x86_code_mnemonic(code);
     char text[128];
+    char r = 'y';
+
+    if (type == VIR_TYPE_I64X8) {
+        r = 'z';
+        /* EVEX names the bitwise ones by a lane width */
+        if (!strcmp(mnemonic, "pand"))
+            mnemonic = "pandq";
+        else if (!strcmp(mnemonic, "por"))
+            mnemonic = "porq";
+        else if (!strcmp(mnemonic, "pxor"))
+            mnemonic = "pxorq";
+        else if (!strncmp(mnemonic, "pcmp", 4)) {
+            /* AVX-512 compares into a mask register: its bits back to lanes
+             * (k1 holds nothing across instructions here) */
+            snprintf(text, sizeof text,
+                     "\tv%s\t%%zmm%d, %%zmm%d, %%k1\n"
+                     "\tvpmovm2%c\t%%k1, %%zmm%d\n",
+                     mnemonic, b - XMM0, a - XMM0,
+                     mnemonic[strlen(mnemonic) - 1], d - XMM0);
+            x64_vir_text_append(L, text);
+            return;
+        }
+    }
     uint32_t immediate;
 
     if (!(code & (X64_X86_SHIFT | X64_X86_UNARY | X64_X86_IMMEDIATE)) &&
         x64_x86_shift_immediate_code(code, 0, &immediate))
         /* a shift by a count: the count in an xmm register */
-        snprintf(text, sizeof text, "\tv%s\t%%xmm%d, %%ymm%d, %%ymm%d\n",
-                 mnemonic, b - XMM0, a - XMM0, d - XMM0);
+        snprintf(text, sizeof text, "\tv%s\t%%xmm%d, %%%cmm%d, %%%cmm%d\n",
+                 mnemonic, b - XMM0, r, a - XMM0, r, d - XMM0);
     else if (code & X64_X86_SHIFT)
-        snprintf(text, sizeof text, "\tv%s\t$%u, %%ymm%d, %%ymm%d\n", mnemonic,
-                 code >> 16 & 0xff, a - XMM0, d - XMM0);
+        snprintf(text, sizeof text, "\tv%s\t$%u, %%%cmm%d, %%%cmm%d\n",
+                 mnemonic, code >> 16 & 0xff, r, a - XMM0, r, d - XMM0);
     else if (code & X64_X86_UNARY) {
         if (code & X64_X86_IMMEDIATE)
-            snprintf(text, sizeof text, "\tv%s\t$%u, %%ymm%d, %%ymm%d\n",
-                     mnemonic, code >> 16 & 0xff, a - XMM0, d - XMM0);
+            snprintf(text, sizeof text, "\tv%s\t$%u, %%%cmm%d, %%%cmm%d\n",
+                     mnemonic, code >> 16 & 0xff, r, a - XMM0, r, d - XMM0);
         else
-            snprintf(text, sizeof text, "\tv%s\t%%ymm%d, %%ymm%d\n", mnemonic,
-                     a - XMM0, d - XMM0);
+            snprintf(text, sizeof text, "\tv%s\t%%%cmm%d, %%%cmm%d\n", mnemonic,
+                     r, a - XMM0, r, d - XMM0);
     } else if (code & X64_X86_IMMEDIATE) {
-        snprintf(text, sizeof text, "\tv%s\t$%u, %%ymm%d, %%ymm%d, %%ymm%d\n",
-                 mnemonic, code >> 16 & 0xff, b - XMM0, a - XMM0, d - XMM0);
+        snprintf(text, sizeof text,
+                 "\tv%s\t$%u, %%%cmm%d, %%%cmm%d, %%%cmm%d\n", mnemonic,
+                 code >> 16 & 0xff, r, b - XMM0, r, a - XMM0, r, d - XMM0);
     } else {
-        snprintf(text, sizeof text, "\tv%s\t%%ymm%d, %%ymm%d, %%ymm%d\n",
-                 mnemonic, b - XMM0, a - XMM0, d - XMM0);
+        snprintf(text, sizeof text, "\tv%s\t%%%cmm%d, %%%cmm%d, %%%cmm%d\n",
+                 mnemonic, r, b - XMM0, r, a - XMM0, r, d - XMM0);
     }
     x64_vir_text_append(L, text);
 }
@@ -256,9 +280,11 @@ VPRIV void vx_edit(x64_vir_context *L, const vir_edit *x)
         x64_vir_slot_access(L, false, x->src, L->allocation->slot[x->value]);
         break;
     case VIR_EDIT_MOVE:
-        if (L->function->insns[x->value].type == VIR_TYPE_I64X4)
+        if (vir_type_size(L->function->insns[x->value].type) > 16)
             x64_record_emit_three_registers(
-                L->context, X64_OP_MOV, 32, x64_vir_register_number(x->dst),
+                L->context, X64_OP_MOV,
+                (int)vir_type_size(L->function->insns[x->value].type),
+                x64_vir_register_number(x->dst),
                 x64_vir_register_number(x->src), X64_REGISTER_NONE);
         else
             x64_mov(L->context, x64_vir_register_number(x->dst),

@@ -7,11 +7,11 @@
 VPRIV bool x64_record_object_prepare(codegen_context *e, const record *i,
                                      record *out)
 {
-    /* a ymm load or store: through the assembler's text */
-    if ((i->opcode == X64_OP_LD && i->size == 32) ||
-        (i->opcode == X64_OP_ST && i->size == 32) ||
-        (i->opcode == X64_OP_MOV && i->size == 32) ||
-        ((i->opcode == X64_OP_LDX || i->opcode == X64_OP_STX) && i->size == 32))
+    /* a ymm or zmm load, store or copy: through the assembler's text */
+    if ((i->opcode == X64_OP_LD || i->opcode == X64_OP_ST ||
+         i->opcode == X64_OP_MOV || i->opcode == X64_OP_LDX ||
+         i->opcode == X64_OP_STX) &&
+        i->size > 16)
         return false;
     switch (i->opcode) {
     case X64_OP_LABEL:

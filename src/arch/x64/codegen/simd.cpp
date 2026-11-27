@@ -1075,6 +1075,27 @@ static const char *const x64_x86_operators[] = {
     "pshufb",     "pminsw",    "pmaxsw",    "movmskps",  "pext",
     "pdep"};
 
+/* whether the operator can be emitted on zmm registers: a byte or word
+   compare, through a mask register; no other compare, and no shuffle */
+VPRIV bool x64_x86_code_exists_on_zmm(uint32_t code)
+{
+    static const char *const without[] = {"pcmp", "cmp",    "punpck", "pshuf",
+                                          "shuf", "psrldq", "pslldq", "movmsk",
+                                          "pext", "pdep"};
+    const char *name = x64_x86_operators[code & 0xfff];
+
+    if (code & X64_X86_TABLE)
+        return false;
+    if (!strcmp(name, "pshufb") || !strcmp(name, "pcmpeqb") ||
+        !strcmp(name, "pcmpeqw") || !strcmp(name, "pcmpgtb") ||
+        !strcmp(name, "pcmpgtw"))
+        return true;
+    for (const char *prefix : without)
+        if (!strncmp(name, prefix, strlen(prefix)))
+            return false;
+    return true;
+}
+
 VPRIV const char *x64_x86_code_mnemonic(uint32_t code)
 {
     if (code & X64_X86_TABLE)
@@ -1302,30 +1323,30 @@ VPRIV bool x64_x86_builtin_code(codegen_context *e, uint32_t n, uint32_t *code,
     return false;
 }
 
-/* the AVX2 builtins that work on each 128-bit half alone: the instruction of
-   a half, and whether the second operand is a shift count */
+/* the AVX2 and AVX-512 builtins that work on each 128-bit part alone, named
+   without the width: the instruction of a part, and whether the second operand is a shift count */
 static const struct x64_halved_builtin {
     const char *name, *mnemonic;
     bool count;
 } x64_halved_builtins[] = {
-    {"ia32_psllwi256", "psllw", true},
-    {"ia32_pslldi256", "pslld", true},
-    {"ia32_psllqi256", "psllq", true},
-    {"ia32_psrlwi256", "psrlw", true},
-    {"ia32_psrldi256", "psrld", true},
-    {"ia32_psrlqi256", "psrlq", true},
-    {"ia32_psrawi256", "psraw", true},
-    {"ia32_psradi256", "psrad", true},
-    {"ia32_packsswb256", "packsswb", false},
-    {"ia32_packssdw256", "packssdw", false},
-    {"ia32_packuswb256", "packuswb", false},
-    {"ia32_packusdw256", "packusdw", false},
-    {"ia32_pmaddubsw256", "pmaddubsw", false},
-    {"ia32_pmaddwd256", "pmaddwd", false},
-    {"ia32_pmulhw256", "pmulhw", false},
-    {"ia32_pmulhuw256", "pmulhuw", false},
-    {"ia32_pmulhrsw256", "pmulhrsw", false},
-    {"ia32_pshufb256", "pshufb", false},
+    {"ia32_psllwi", "psllw", true},
+    {"ia32_pslldi", "pslld", true},
+    {"ia32_psllqi", "psllq", true},
+    {"ia32_psrlwi", "psrlw", true},
+    {"ia32_psrldi", "psrld", true},
+    {"ia32_psrlqi", "psrlq", true},
+    {"ia32_psrawi", "psraw", true},
+    {"ia32_psradi", "psrad", true},
+    {"ia32_packsswb", "packsswb", false},
+    {"ia32_packssdw", "packssdw", false},
+    {"ia32_packuswb", "packuswb", false},
+    {"ia32_packusdw", "packusdw", false},
+    {"ia32_pmaddubsw", "pmaddubsw", false},
+    {"ia32_pmaddwd", "pmaddwd", false},
+    {"ia32_pmulhw", "pmulhw", false},
+    {"ia32_pmulhuw", "pmulhuw", false},
+    {"ia32_pmulhrsw", "pmulhrsw", false},
+    {"ia32_pshufb", "pshufb", false},
 };
 
 /* the code of the half's instruction of such a builtin, node n; the target
@@ -1342,10 +1363,20 @@ VPRIV bool x64_x86_halved_code(codegen_context *e, uint32_t n, uint32_t *code,
     uint32_t fn = e->walk_state->function_symbol;
     if (e->walk_state->inline_call)
         fn = e->walk_state->inline_call->function;
-    if (!x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX2))
+    size_t length = strlen(name);
+    unsigned feature = X86_FEATURE_AVX2;
+
+    if (length < 4)
+        return false;
+    if (!strcmp(name + length - 3, "512"))
+        feature = X86_FEATURE_AVX512BW;
+    else if (strcmp(name + length - 3, "256"))
+        return false;
+    if (!x86_feature_has(cc_x86_features_get(c, fn), feature))
         return false; /* (the direct emitter reports it) */
     for (const x64_halved_builtin &h : x64_halved_builtins)
-        if (!strcmp(name, h.name)) {
+        if (strlen(h.name) == length - 3 &&
+            !strncmp(name, h.name, length - 3)) {
             *count = h.count;
             return x64_x86_operator_find(h.mnemonic, code);
         }
@@ -1371,6 +1402,34 @@ VPRIV int x64_x86_crossing_builtin(codegen_context *e, uint32_t n)
         for (int i = 0; i < 4; i++)
             if (!strcmp(name, bits[i]))
                 return 4 + i;
+    }
+    /* (the width is the built function's; an intrinsic's own target names
+       only what its instruction needs) */
+    bool zmm =
+        x86_feature_has(cc_x86_features_get(c, e->walk_state->function_symbol),
+                        X86_FEATURE_AVX512BW);
+
+    if (zmm &&
+        x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX512VNNI) &&
+        !strcmp(name, "ia32_vpdpbusd512"))
+        return 8;
+    if (zmm && !strcmp(name, "ia32_cmpd512_mask") && x->c == 5) {
+        /* a, b, the predicate, the mask: only an unmasked one */
+        const uint32_t *argument = &c->lists[x->b];
+        cc_value predicate, mask;
+
+        if (cc_eval(c, argument[2], &predicate) &&
+            cc_eval(c, argument[3], &mask) &&
+            predicate.kind == CC_VALUE_INTEGER &&
+            mask.kind == CC_VALUE_INTEGER && (mask.i & 0xffff) == 0xffff) {
+            if (predicate.i == 6)
+                return 9;
+            if (predicate.i == 0)
+                return 10;
+            if (predicate.i == 1)
+                return 11;
+        }
+        return 0;
     }
     if (!x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX2))
         return 0;

@@ -400,6 +400,12 @@ only; its `load` and `store` have width 2.  There is no 16-bit scalar.
 7.5.1c `i64x4` is 256 bits, x86-64 with AVX2: the type of `load`, `store`,
 block parameters and `x86` (whose instruction is then the VEX form on `ymm`
 registers).  Its lanes are the instruction's business.
+`i64x8` is the same at 512 bits, x86-64 with AVX-512BW (the EVEX form on
+`zmm` registers; a byte or word compare writes a mask register, whose bits
+the lowering spreads back to the lanes).  `x86` with a scalar `i32` result
+and two `i64x8` operands is a dword compare's mask bits.  `x86dot a, b, c`
+(`i64x8`, AVX-512 VNNI) is `vpdpbusd`: each dword of `a` plus the four
+products of the unsigned bytes of `b` and the signed bytes of `c`.
 
 7.5.1b `bitcast` of a vector type takes any vector type: the same 128 bits.
 

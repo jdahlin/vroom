@@ -274,6 +274,9 @@ VPRIV const uint8_t *x64_flow_table(void);
 VPRIV __attribute__((unused)) record_effects
 x64_record_effects(const codegen_context *e, const record *i);
 VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s);
+/* a raw record's shift field: its text is the user's inline asm */
+enum { X64_RAW_USER = 1 };
+VPRIV void x64_vex_rewrite(tbuf *b, size_t from);
 VPRIV void x64_x87(codegen_context *e, int xf, const codegen_lvalue *l, int sz);
 /* fp.c: long double loaded to st(0), st(0) stored and popped */
 VPRIV void x64_x87ld(codegen_context *e, const codegen_lvalue *l);
@@ -302,6 +305,7 @@ VPRIV bool x64_x86_shift_code(codegen_context *e, int op, ast_qualified_type vt,
                               int64_t count, uint32_t *code);
 VPRIV bool x64_x86_shuffle_code(codegen_context *e, const int *bytes,
                                 x64_x86_shuffle *shuffle);
+VPRIV bool x64_x86_code_exists_on_zmm(uint32_t code);
 VPRIV bool x64_x86_halved_code(codegen_context *e, uint32_t n, uint32_t *code,
                                bool *count);
 /* an AVX2 builtin that crosses the halves: 1 movmskps256, 2 permvarsi256

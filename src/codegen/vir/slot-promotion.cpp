@@ -104,6 +104,13 @@ static uint32_t virbuild_promote_zero_vector(codegen_context *e, uint32_t ty)
          q && e->vir_builder->insns[q].insn.op == VIR_OP_PARAM;
          q = e->vir_builder->insns[q].next)
         prev = q;
+    if (vir_type_size(ty) > 16) { /* (a wide one is not bitcast: its own) */
+        vir_insn wide =
+            VCC_LITERAL(vir_insn, VIR_OP_VSPLAT, (uint8_t)ty, 0,
+                        virbuild_constant_integer(e, VIR_TYPE_I64, 0), 0, 0);
+
+        return virbuild_preir_insn_insert(e, entry, &prev, wide);
+    }
     vir_insn splat =
         VCC_LITERAL(vir_insn, VIR_OP_VSPLAT, VIR_TYPE_I32X4, 0,
                     virbuild_constant_integer(e, VIR_TYPE_I32, 0), 0, 0);

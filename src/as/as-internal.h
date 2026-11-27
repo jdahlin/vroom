@@ -157,6 +157,9 @@ struct as_gen_name {
 };
 
 struct as_context {
+    /* x86-64: the next instruction, a legacy SSE one, is encoded as VEX; this
+     * is its extra source register + 1 (0: not derived) */
+    int x64_vex_derived;
     ElfObj *object;
     const char
         *incbin_directory; /* relative .incbin paths (NULL: process cwd) */

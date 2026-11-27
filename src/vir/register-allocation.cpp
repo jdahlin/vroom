@@ -86,7 +86,8 @@ static _Thread_local struct actx {
     /* parallel moves */
     vir_alloc_parallel_move *pm;
     uint32_t *lcnt, *lcs, *ldm, *lds, *rq, lgen;
-    uint32_t ring[4][8], nring[4], cring[4]; /* by slot size: 4, 8, 16, 32 */
+    uint32_t ring[5][8], nring[5],
+        cring[5];              /* by slot size: 4, 8, 16, 32, 64 */
     uint32_t sgen, mgen, bgen; /* stamps that live across functions (22.3) */
     uint8_t vfm
         [VIR_OP_TARGET_FIRST]; /* per opcode: bits 0-2 the value fields a, b, c; 8: a list (vir_operand_iterator) */
@@ -911,6 +912,7 @@ static void vir_alloc_spill_slot_assign(vir_allocator *a, uint32_t v)
     c = vir_type_size(f->insns[v].type) == 4    ? 0
         : vir_type_size(f->insns[v].type) == 16 ? 2
         : vir_type_size(f->insns[v].type) == 32 ? 3
+        : vir_type_size(f->insns[v].type) == 64 ? 4
                                                 : 1;
     if (a->options && a->options->private_spills) {
         s = a->spill_count++;
@@ -2614,6 +2616,7 @@ bool vir_alloc(vir_function *f, const vir_loops *lp,
         ax.bmark[b] = 0;
     ax.nring[0] = ax.nring[1] = ax.nring[2] = ax.nring[3] = ax.cring[0] =
         ax.cring[1] = ax.cring[2] = ax.cring[3] = 0;
+    ax.nring[4] = ax.cring[4] = 0;
     for (uint32_t i = 0; i < f->constant_count; i++)
         ax.reg[i] = VIR_REGISTER_NONE;
     for (uint32_t r = 0; r < 256; r++)

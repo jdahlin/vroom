@@ -824,21 +824,23 @@ VPRIV bool virbuild_vector_operation(codegen_context *e, int op,
     cc *c = e->compile_context;
     if (!CODEGEN_IS_X64(c))
         return false;
-    if (codegen_type_size(c, vt) == 32 && !unary && a_vector && b_vector &&
-        virbuild_wide_vectors(e)) {
+    uint32_t wide = virbuild_wide_type(e, codegen_type_size(c, vt));
+
+    if (wide && !unary && a_vector && b_vector) {
         uint32_t code = 0;
         bool swapped = false;
 
-        if (x64_x86_operation_code(e, op, vt, &code, &swapped)) {
-            /* one VEX instruction on the whole vectors */
+        if (x64_x86_operation_code(e, op, vt, &code, &swapped) &&
+            (wide == VIR_TYPE_I64X4 || x64_x86_code_exists_on_zmm(code))) {
+            /* one VEX or EVEX instruction on the whole vectors */
             int first = ra, second = rb;
 
             if (swapped) {
                 first = rb;
                 second = ra;
             }
-            virbuild_vector_binary(e, VIR_OP_X86, code, VIR_TYPE_I64X4, 8,
-                                   first, second, d, 0);
+            virbuild_vector_binary(e, VIR_OP_X86, code, wide, 8, first, second,
+                                   d, 0);
             return true;
         }
     }
@@ -870,9 +872,11 @@ VPRIV bool virbuild_vector_shuffle(codegen_context *e, const int *bytes, int ra,
     virbuild_vector_shuffled(e, &shuffle, ra, rb, d);
     return true;
 }
-/* an AVX2 builtin as its instruction on each half */
+/* a builtin that works on each 128-bit part alone (AVX2, AVX-512): one
+ * instruction on the whole vector when `wide` holds it, else on each half */
 static codegen_value virbuild_halved_builtin(codegen_context *e, uint32_t n,
-                                             uint32_t code, bool count)
+                                             uint32_t code, bool count,
+                                             uint32_t wide)
 {
     cc *c = e->compile_context;
     const node *x = N(n);
@@ -882,23 +886,23 @@ static codegen_value virbuild_halved_builtin(codegen_context *e, uint32_t n,
         codegen_value v = walk_value_emit(e, arg[i]);
         r[i] = walk_value_to_register(e, &v);
     }
-    codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
-                        .align = 16,
-                        .offset = walk_slot_temporary(e, 32, 16)};
-    if (count && virbuild_wide_vectors(e)) {
+    codegen_lvalue d = {
+        .kind = CODEGEN_LVALUE_FRAME,
+        .align = 16,
+        .offset = walk_slot_temporary(e, codegen_type_size(c, x->ty), 16)};
+    if (count && wide) {
         /* one VEX shift of the whole vector, the count in an xmm register
 		 * (the simplifier puts a constant one in the instruction) */
-        virbuild_vector_scalar(e, VIR_OP_X86, code, VIR_TYPE_I64X4, 8, r[0],
-                               r[1], 4, false, &d, 0);
+        virbuild_vector_scalar(e, VIR_OP_X86, code, wide, 8, r[0], r[1], 4,
+                               false, &d, 0);
         for (unsigned i = 0; i < 2; i++)
             WALK_LOWER(tfree)(e, r[i]);
         return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
                            .register_number =
                                (uint8_t)WALK_LOWER(laddr)(e, &d));
     }
-    if (!count && virbuild_wide_vectors(e)) { /* one VEX instruction */
-        virbuild_vector_binary(e, VIR_OP_X86, code, VIR_TYPE_I64X4, 8, r[0],
-                               r[1], &d, 0);
+    if (!count && wide) { /* one VEX or EVEX instruction */
+        virbuild_vector_binary(e, VIR_OP_X86, code, wide, 8, r[0], r[1], &d, 0);
         for (unsigned i = 0; i < 2; i++)
             WALK_LOWER(tfree)(e, r[i]);
         return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
@@ -933,6 +937,54 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
     int crossing = 0;
     if (CODEGEN_IS_X64(c))
         crossing = x64_x86_crossing_builtin(e, n);
+    if (crossing == 8) { /* vpdpbusd */
+        const uint32_t *argument = &c->lists[x->b];
+        int r[3];
+
+        for (unsigned i = 0; i < 3; i++) {
+            codegen_value v = walk_value_emit(e, argument[i]);
+
+            r[i] = walk_value_to_register(e, &v);
+        }
+        codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
+                            .align = 16,
+                            .offset = walk_slot_temporary(e, 64, 16)};
+        virbuild_vector_dot(e, r, &d);
+        for (unsigned i = 0; i < 3; i++)
+            WALK_LOWER(tfree)(e, r[i]);
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number =
+                               (uint8_t)WALK_LOWER(laddr)(e, &d));
+    }
+    if (crossing >= 9) { /* a compare of 16 dwords to a mask */
+        const uint32_t *argument = &c->lists[x->b];
+        uint32_t value[2];
+        const char *mnemonic = "pcmpgtd";
+
+        if (crossing == 10)
+            mnemonic = "pcmpeqd";
+        for (unsigned i = 0; i < 2; i++) {
+            codegen_value v = walk_value_emit(e, argument[i]);
+            int r = walk_value_to_register(e, &v);
+
+            value[i] = virbuild_vector_load(e, VIR_TYPE_I64X8, 8, r, 0);
+            WALK_LOWER(tfree)(e, r);
+        }
+        if (crossing == 11) { /* a < b as b > a */
+            uint32_t swap = value[0];
+
+            value[0] = value[1];
+            value[1] = swap;
+        }
+        int result = WALK_LOWER(treg)(e);
+
+        virbuild_register_write(
+            e, result,
+            virbuild_insn_append(e, VIR_OP_X86, VIR_TYPE_I32, 0, value[0],
+                                 value[1], x64_x86_operator_code(mnemonic)));
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)result);
+    }
     if (crossing >= 4) { /* pext and pdep of 4 or 8 bytes */
         const uint32_t *argument = &c->lists[x->b];
         uint32_t type = VIR_TYPE_I32, value[2];
@@ -965,7 +1017,7 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
         if (crossing == 1) {
             int result = WALK_LOWER(treg)(e);
 
-            if (virbuild_wide_vectors(e)) { /* vmovmskps on the whole vector */
+            if (virbuild_wide_type(e, 32)) { /* vmovmskps on all of it */
                 uint32_t value =
                     virbuild_vector_load(e, VIR_TYPE_I64X4, 8, ra, 0);
 
@@ -1011,9 +1063,14 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
     }
     bool count = false;
     if (CODEGEN_IS_X64(c) && codegen_type_is_vector(c, x->ty) &&
-        codegen_type_size(c, x->ty) == 32 &&
-        x64_x86_halved_code(e, n, &code, &count))
-        return virbuild_halved_builtin(e, n, code, count);
+        codegen_type_size(c, x->ty) >= 32 &&
+        x64_x86_halved_code(e, n, &code, &count)) {
+        uint32_t wide = virbuild_wide_type(e, codegen_type_size(c, x->ty));
+
+        /* (a 64-byte one the function cannot hold whole stays a stencil) */
+        if (wide || codegen_type_size(c, x->ty) == 32)
+            return virbuild_halved_builtin(e, n, code, count, wide);
+    }
 
     /* movmsk and pmovmskb: a 16-byte vector to a general register */
     if (CODEGEN_IS_X64(c) && !codegen_type_is_vector(c, x->ty) &&

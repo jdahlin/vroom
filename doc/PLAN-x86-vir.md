@@ -157,6 +157,25 @@ deleted in the commit that gives it a table row or a generic operation.
     `mulhi`, `packus`, saturation) as instructions.
 - **XV4** The rest of SSE through AVX2, by family.
 - **XV5** AVX-512: 512 bits, mask registers, EVEX rounding and broadcast.
+  - XV5a (done): `i64x8` under AVX-512BW, along XV3c's and XV3d's paths:
+    copies, block parameters, spills, splats, lane operators, shifts and the
+    builtins that work on each 128-bit part as one EVEX instruction (the
+    assembler gained the forms).  Byte and word compares go through `k1`
+    (`vpcmpgtw`, `vpmovm2w`), so `min` and `max` become one instruction.
+    Stockfish `-O3 -march=native` (depth 13, node count as clang's): 250 k
+    nodes/second, from 76 k.  clang: 2157 k.
+  - XV5b (done): `vpdpbusd` (`x86dot`) and the unmasked 512-bit dword
+    compares greater, equal and less.  Native Stockfish: 1386 k.
+  - VEX (done): in a function whose target has AVX the compiler's own SSE
+    instructions are written in their VEX forms (`codegen/vex.cpp`), as
+    clang does; a loop mixing legacy SSE with `zmm` code ran three times
+    slower.  The assembler derives the forms it has no row for from the SSE
+    encodings.  Stockfish `-O3`: native 1386 k to 1460 k, AVX2 1239 k to
+    1406 k.
+  - Left: mask registers as values (the `_mask` intrinsics), the other
+    three-operand instructions, the 64-byte ABI in VIR, shift
+    operators and shuffles, EVEX rounding and broadcast.  Without VNNI
+    Stockfish's `network.cpp` does not compile (a 64-byte argument).
 - **XV6** Delete the stencils and `tools/gen-x86stencils.py`, or keep them
   for the named few the table cannot express.
 
