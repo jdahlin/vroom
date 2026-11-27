@@ -201,24 +201,13 @@ void semantic_analysis::bind_template_argument(entity_index scope,
 }
 
 /* a dependent_value's code for a relational or equality operator
-   (dependent_value_entity): 10 >, 15 <, 16 <=, 17 >=, 18 ==, 19 !=; 0 for
-   another */
+   (dependent_value_entity, dependent_value_operators); 0 for another */
 static uint64_t dependent_comparison_value(SyntaxElement op)
 {
-    static const struct {
-        preprocessing_op_or_punc token;
-        uint64_t value;
-    } table[] = {
-        {preprocessing_op_or_punc::GREATER, 10},
-        {preprocessing_op_or_punc::LESS, 15},
-        {preprocessing_op_or_punc::LESS_EQUAL, 16},
-        {preprocessing_op_or_punc::GREATER_EQUAL, 17},
-        {preprocessing_op_or_punc::EQUAL_EQUAL, 18},
-        {preprocessing_op_or_punc::EXCLAMATION_EQUAL, 19},
-    };
-    for (const auto &x : table)
-        if (op.is(x.token))
-            return x.value;
+    for (const auto &x : dependent_value_operators)
+        if (x.form != dependent_value_form::logical_and &&
+            x.form != dependent_value_form::logical_or && op.is(x.op))
+            return dependent_value_code(x.form);
     return 0;
 }
 
@@ -281,9 +270,9 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
         written[3].is(preprocessing_op_or_punc::ELLIPSIS) &&
         (written[2].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND) ||
          written[2].is(preprocessing_op_or_punc::BAR_BAR))) {
-        uint64_t code = 8;
+        uint64_t code = dependent_value_code(dependent_value_form::logical_and);
         if (written[2].is(preprocessing_op_or_punc::BAR_BAR))
-            code = 9;
+            code = dependent_value_code(dependent_value_form::logical_or);
         SyntaxElement pattern = written[1];
         uint32_t times = 0;
         bool own = false;
@@ -324,9 +313,9 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
     uint64_t binary = 0;
     if (written.size() == 3) {
         if (written.is(syntax_kind::logical_and_expression))
-            binary = 8;
+            binary = dependent_value_code(dependent_value_form::logical_and);
         else if (written.is(syntax_kind::logical_or_expression))
-            binary = 9;
+            binary = dependent_value_code(dependent_value_form::logical_or);
         else if (written.is(syntax_kind::relational_expression) ||
                  written.is(syntax_kind::equality_expression))
             binary = dependent_comparison_value(written[1]);
@@ -356,11 +345,15 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
         unsupported.resize(unsupported_before);
         if (r != analysis_result::well_formed)
             return e;
-        for (entity_index d : dependent_values_like(11, 0))
-            if (entity_table[d].value == 11 && entity_table[d].type == t)
+        for (entity_index d : dependent_values_like(
+                 dependent_value_code(dependent_value_form::sizeof_type), 0))
+            if (entity_table[d].value ==
+                    dependent_value_code(dependent_value_form::sizeof_type) &&
+                entity_table[d].type == t)
                 return d;
         entity_table[e].type = t;
-        entity_table[e].value = 11;
+        entity_table[e].value =
+            dependent_value_code(dependent_value_form::sizeof_type);
         dependent_values.append(e);
         return e;
     }
@@ -377,11 +370,18 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
         }
         if (ok) {
             uint32_t v = static_cast<uint32_t>(n);
-            for (entity_index d : dependent_values_like(12, v))
-                if (entity_table[d].value == 12 && entity_table[d].name == v)
+            for (entity_index d : dependent_values_like(
+                     dependent_value_code(
+                         dependent_value_form::integer_literal),
+                     v))
+                if (entity_table[d].value ==
+                        dependent_value_code(
+                            dependent_value_form::integer_literal) &&
+                    entity_table[d].name == v)
                     return d;
             entity_table[e].name = v;
-            entity_table[e].value = 12;
+            entity_table[e].value =
+                dependent_value_code(dependent_value_form::integer_literal);
             dependent_values.append(e);
             return e;
         }
@@ -400,14 +400,20 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
                 entity_table[lx.entity].kind == entity_kind::typedef_name) {
                 qualified_type t = entity_table[lx.entity].type;
                 uint32_t name = tokens.identifier(qid[1].token());
-                for (entity_index d : dependent_values_like(13, name))
-                    if (entity_table[d].value == 13 &&
+                for (entity_index d : dependent_values_like(
+                         dependent_value_code(
+                             dependent_value_form::member_call),
+                         name))
+                    if (entity_table[d].value ==
+                            dependent_value_code(
+                                dependent_value_form::member_call) &&
                         entity_table[d].type == t &&
                         entity_table[d].name == name)
                         return d;
                 entity_table[e].type = t;
                 entity_table[e].name = name;
-                entity_table[e].value = 13;
+                entity_table[e].value =
+                    dependent_value_code(dependent_value_form::member_call);
                 dependent_values.append(e);
                 return e;
             }
@@ -448,9 +454,15 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
                 return e;
             qualified_type type = qualified_type::make(q, cv_none);
             uint32_t name = tokens.identifier(member[0].token());
-            for (entity_index d : dependent_values_like(21, name)) {
+            for (entity_index d : dependent_values_like(
+                     dependent_value_code(
+                         dependent_value_form::member_template_call),
+                     name)) {
                 const entity &x = entity_table[d];
-                if (x.value != 21 || x.type != type || x.name != name ||
+                if (x.value !=
+                        dependent_value_code(
+                            dependent_value_form::member_template_call) ||
+                    x.type != type || x.name != name ||
                     x.member_count != arguments.size())
                     continue;
                 bool same = true;
@@ -463,7 +475,8 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
             }
             entity_table[e].type = type;
             entity_table[e].name = name;
-            entity_table[e].value = 21;
+            entity_table[e].value = dependent_value_code(
+                dependent_value_form::member_template_call);
             entity_table[e].first_member =
                 static_cast<uint32_t>(dependent_value_arguments.size());
             entity_table[e].member_count =
@@ -592,9 +605,10 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
          type_table[q].kind == type_kind::class_type)) {
         qualified_type type = qualified_type::make(q, cv_none);
         uint32_t name = tokens.identifier(member.token());
-        uint64_t value = 0x10001;
+        uint64_t value = dependent_value_alias |
+                         dependent_value_code(dependent_value_form::member);
         if (negated)
-            value = 0x10003;
+            value |= dependent_value_negated;
         if (ns_depth > 1)
             value |= static_cast<uint64_t>(ns_depth) << 8;
         value |= static_cast<uint64_t>(alias) << 32;
@@ -628,9 +642,9 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
         return e;
     qualified_type type = qualified_type::make(q, cv_none);
     uint32_t name = tokens.identifier(member.token());
-    uint64_t value = 1;
+    uint64_t value = dependent_value_code(dependent_value_form::member);
     if (negated)
-        value = 3;
+        value |= dependent_value_negated;
     if (ns_depth > 1)
         value |= static_cast<uint64_t>(ns_depth) << 8;
     /* (the member class's name, plus one, in the upper half) */
@@ -696,8 +710,8 @@ bool semantic_analysis::written_type_arguments(SyntaxElement id,
    C<args>::name of a class known once the enclosing class template's
    arguments are (fp<R>::value in a member of D<long>), a static data
    member, which [abi:mangle.template-arg] spells as an external name,
-   L_Z <encoding> E (value 20, name the member; 14 [!] around it); e if it
-   is not one */
+   L_Z <encoding> E (dependent_value_form::static_member, logical_not
+   around it for [!]); e if it is not one */
 entity_index semantic_analysis::static_member_value_entity(entity_index c,
                                                            uint32_t name,
                                                            entity_index e,
@@ -710,23 +724,32 @@ entity_index semantic_analysis::static_member_value_entity(entity_index c,
         entity_table[x.entity].nonstatic_member)
         return e;
     entity_index member = 0;
-    for (entity_index d : dependent_values_like(20, x.entity))
-        if (entity_table[d].value == 20 && entity_table[d].name == x.entity)
+    for (entity_index d : dependent_values_like(
+             dependent_value_code(dependent_value_form::static_member),
+             x.entity))
+        if (entity_table[d].value ==
+                dependent_value_code(dependent_value_form::static_member) &&
+            entity_table[d].name == x.entity)
             member = d;
     if (!member) {
         member = e;
         entity_table[member].name = x.entity;
-        entity_table[member].value = 20;
+        entity_table[member].value =
+            dependent_value_code(dependent_value_form::static_member);
         dependent_values.append(member);
     }
     if (!negated)
         return member;
-    for (entity_index d : dependent_values_like(14, 0))
-        if (entity_table[d].value == 14 && entity_table[d].enclosing == member)
+    for (entity_index d : dependent_values_like(
+             dependent_value_code(dependent_value_form::logical_not), 0))
+        if (entity_table[d].value ==
+                dependent_value_code(dependent_value_form::logical_not) &&
+            entity_table[d].enclosing == member)
             return d;
     entity_index n = entity_table.make(entity_kind::dependent_value, 0, 0);
     entity_table[n].enclosing = member;
-    entity_table[n].value = 14;
+    entity_table[n].value =
+        dependent_value_code(dependent_value_form::logical_not);
     dependent_values.append(n);
     return n;
 }
@@ -735,8 +758,8 @@ entity_index semantic_analysis::static_member_value_entity(entity_index c,
    with a dependent argument, as a value-dependent template-argument
    (enable_if_t<is_fp<T>, bool>): a dependent specialization of the
    variable template (one per arguments), which [abi:mangle.template-arg]
-   spells X <source-name> <template-args> E (value 4); e if it is not
-   one */
+   spells X <source-name> <template-args> E (variable_specialization);
+   e if it is not one */
 entity_index semantic_analysis::dependent_variable_specialization(
     SyntaxRef id, entity_index e, bool negated, entity_index scope)
 {
@@ -801,9 +824,10 @@ entity_index semantic_analysis::dependent_variable_specialization(
         instantiations.append(record);
     }
     qualified_type type = entity_table[s].type;
-    uint64_t value = 4;
+    uint64_t value =
+        dependent_value_code(dependent_value_form::variable_specialization);
     if (negated)
-        value = 6;
+        value |= dependent_value_negated;
     for (entity_index d : dependent_values_like(value, 0))
         if (entity_table[d].type == type && entity_table[d].value == value &&
             entity_table[d].enclosing == scope)

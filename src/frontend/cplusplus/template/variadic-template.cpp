@@ -174,11 +174,11 @@ semantic_analysis::template_parameter_kind(entity_index t, uint32_t i,
     return template_parameter_form_kind::value;
 }
 
-bool semantic_analysis::template_argument_declaration(entity_index t,
-                                                      uint32_t i,
-                                                      entity_index named,
-                                                      vbuffer *decl) const
+bool semantic_analysis::template_argument_declaration(
+    entity_index t, uint32_t i, entity_index named,
+    entity_index &declared) const
 {
+    declared = 0;
     entity_index parameter = template_parameter_entities
         [function_templates[entity_table[t].instantiation - 1].first_parameter +
          i];
@@ -211,16 +211,7 @@ bool semantic_analysis::template_argument_declaration(entity_index t,
         return true;
     if (!types_only)
         return false;
-    vbuffer_string_append(decl, "Tt");
-    for (uint32_t k = 0; k < count; k++) {
-        bool pack = false;
-        qualified_type value_type;
-        template_parameter_kind(parameter, k, pack, value_type);
-        if (pack)
-            vbuffer_string_append(decl, "Tp");
-        vbuffer_string_append(decl, "Ty");
-    }
-    vbuffer_string_append(decl, "E");
+    declared = parameter;
     return true;
 }
 
