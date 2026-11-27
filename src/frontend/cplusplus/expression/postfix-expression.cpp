@@ -737,7 +737,11 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         /* [ext:gnu_vector_size] a vector type too, with a braced list or a
            single expression */
         bool vector_value = is_vector_kind(record.kind) && (braced || single);
-        if (!as_cast && !vector_value &&
+        /* [ext:clang_ext_vector_type] V() of an extended vector: zero in
+           every element */
+        bool zero_vector = record.kind == type_kind::ext_vector &&
+                           parenthesized && !written.list;
+        if (!as_cast && !vector_value && !zero_vector &&
             record.kind != type_kind::fundamental &&
             record.kind != type_kind::pointer &&
             record.kind != type_kind::enumeration)
@@ -746,6 +750,16 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 "an explicit type conversion to a type that has no rules");
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
+        if (zero_vector) {
+            m = expression_meaning();
+            m.type =
+                qualified_type::make(record.operand.unqualified(), cv_none);
+            m.evaluation = constness::constant;
+            m.value = 0;
+            m.node =
+                expression_node(semantic_kind::constant, m, n.first_token());
+            return vector_splat(n, m, to);
+        }
         if (parenthesized && !written.list) {
             /* [expr.type.conv]/2: "Otherwise, if the type is cv void and the
                initializer is () or {}, the expression is a prvalue of the
@@ -870,6 +884,13 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 return not_supported_because(
                     n, "ext.gnu",
                     "a vector or array subscript that is not of integral type");
+            /* clang: a lane of a prvalue vector is an xvalue, which the
+               prvalue made here is not; only an operand's value is the same */
+            if (!object && unevaluated)
+                return not_supported_because(
+                    n, "ext.gnu",
+                    "a subscript of a prvalue vector in an unevaluated "
+                    "operand");
             qualified_type lane = type_table[base->type.unqualified()].operand;
             lane = qualified_type::make(lane.unqualified(), base->type.cv());
             constness evaluation = constness::not_constant;
@@ -938,6 +959,74 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
 }
 
 /*
+ * Whether no guide of the class template with one parameter is as
+ * specialized as the copy deduction candidate ([temp.func.order]) for a
+ * specialization of the template: a guide of one is a forwarding
+ * reference, a template parameter or a const reference to one, a pointer or
+ * a reference to an array.  A constructor's guide that names the template
+ * itself is not told, but for a constructor template whose own parameter
+ * stands for the class's first, which has no default.
+ */
+bool semantic_analysis::copy_candidate_wins(uint32_t ct)
+{
+    entity_index primary = function_templates[ct - 1].entity;
+    template_parameter_parts form;
+    if (!function_templates[ct - 1].parameter_count ||
+        !template_parameter_form(
+            template_parameter_nodes[function_templates[ct - 1]
+                                         .first_parameter],
+            form) ||
+        form.has_default)
+        return false;
+    for (const function_template &g : function_templates) {
+        if (g.guide_of != ct)
+            continue;
+        const struct type &f =
+            type_table[entity_table[g.entity].type.unqualified()];
+        if (f.kind != type_kind::function || f.parameter_count != 1)
+            continue;
+        qualified_type p =
+            type_table.parameters(entity_table[g.entity].type.unqualified())[0];
+        const struct type *k = &type_table[p.unqualified()];
+        bool lvalue = k->kind == type_kind::lvalue_reference;
+        bool reference = lvalue || k->kind == type_kind::rvalue_reference;
+        if (reference) {
+            p = k->operand;
+            k = &type_table[p.unqualified()];
+        }
+        if (g.implicit_guide) {
+            if (k->kind == type_kind::dependent) {
+                uint32_t i = entity_table[k->entity].instantiation;
+                if (!i || instantiations[i - 1].template_entity != primary)
+                    continue;
+                /* a constructor template naming the template with another
+                   parameter than the class's first leaves that one
+                   undeduced ([temp.deduct.type]): not viable */
+                const instantiation_record &spec = instantiations[i - 1];
+                uint32_t own = function_templates[ct - 1].parameter_count;
+                bool undeduced = false;
+                for (uint32_t j = own;
+                     spec.argument_count && j < g.parameter_count; j++)
+                    if (entity_table
+                            [template_parameter_entities[g.first_parameter + j]]
+                                .type ==
+                        template_arguments[spec.first_argument].type)
+                        undeduced = true;
+                if (!undeduced)
+                    return false;
+            }
+            continue;
+        }
+        if (k->kind == type_kind::pointer || k->kind == type_kind::array)
+            continue;
+        if (k->kind != type_kind::template_parameter ||
+            (lvalue && p.cv() != cv_const))
+            return false;
+    }
+    return true;
+}
+
+/*
  * [over.match.class.deduct]/1: "When resolving a placeholder for a deduced
  * class type ([dcl.type.simple]) where the template-name names a primary
  * class template C, a set of functions and function templates, called the
@@ -992,19 +1081,37 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                 "class template argument deduction from a function argument");
         arguments.append(e);
     }
-    /* [over.match.class.deduct]/1.2: a lone argument of the template's own
-       specialization selects the copy deduction candidate (not a guide
-       here) */
+    implicit_deduction_guides(ct);
+    /* [over.match.class.deduct]/1.2, [over.match.best]: a lone argument of
+       the template's own specialization selects the copy deduction
+       candidate, which deduces its class, unless a guide could be as
+       specialized */
     if (arguments.size() == 1) {
         const struct type &argument =
             type_table[arguments[0].type.unqualified()];
         if (argument.kind == type_kind::class_type &&
-            class_template_of(argument.entity) == ct)
-            return not_supported_because(n, "over.match.class.deduct",
-                                         "class template argument deduction "
-                                         "from a specialization of itself");
+            class_template_of(argument.entity) == ct) {
+            /* only a function parameter: another argument may be a
+               template's, whose explicit instantiation is analysed after
+               its point of instantiation ([temp.point]) */
+            entity_index named = arguments[0].entity;
+            if (!named ||
+                !entity_table[entity_table[named].enclosing].parameter_scope)
+                return not_supported_because(
+                    n, "over.match.class.deduct",
+                    "class template argument deduction from a specialization "
+                    "of itself that is not a parameter");
+            if (!copy_candidate_wins(ct))
+                return not_supported_because(
+                    n, "over.match.class.deduct",
+                    "class template argument deduction from a "
+                    "specialization of itself, beside such a guide");
+            expressions.resize(expressions_before);
+            name_uses.resize(uses_before);
+            c = argument.entity;
+            return analysis_result::well_formed;
+        }
     }
-    implicit_deduction_guides(ct);
     owned_array<uint32_t> group;
     for (size_t i = 0; i < function_templates.size(); i++)
         if (function_templates[i].guide_of == ct)
@@ -1436,6 +1543,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
        lookup's */
     owned_array<entity_index> found_by_adl;
     bool looked_up = false;
+    /* the namespace whose functions declared after the template are no
+       candidates ([temp.dep.candidate]/1) */
+    entity_index hides_late = 0;
     token_index adl_token = 0;
     uint32_t adl_name = 0;
     if (callee.is_token() && callee.is_identifier()) {
@@ -1565,6 +1675,37 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 return not_supported_because(
                     n, "basic.lookup.argdep",
                     "argument-dependent lookup that could not be completed");
+            /* [temp.dep.candidate]/1: of the functions declared after the
+               template, only argument-dependent lookup's are candidates,
+               and only for a dependent call: which of the two an
+               associated namespace that unqualified lookup also searched
+               is for is not told apart */
+            entity_index first_early = 0;
+            if (x.past_horizon) {
+                owned_array<entity_index> associated_classes, associated_spaces;
+                if (!associated_namespaces(types, associated_classes,
+                                           associated_spaces))
+                    return not_supported_because(
+                        n, "basic.lookup.argdep",
+                        "a call whose associated namespaces could not be "
+                        "determined");
+                for (entity_index space : associated_spaces)
+                    if (space == x.found_in)
+                        return not_supported_because(
+                            n, "temp.dep.candidate",
+                            "a function declared after the template in an "
+                            "associated namespace");
+                if (!held.empty() || several)
+                    return not_supported_because(
+                        n, "temp.dep.candidate",
+                        "functions declared after the template beside "
+                        "function templates or other namespaces' functions");
+                hides_late = x.found_in;
+                for (entity_index o = x.entity; o && !first_early;
+                     o = entity_table[o].next_overload)
+                    if (!declared_past_horizon(o, hides_late))
+                        first_early = o;
+            }
             if (!held.empty()) {
                 /* (the other templates and non-template functions ADL found
                    join the first's, the candidates of template_call) */
@@ -1589,7 +1730,16 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                candidate functions */
             for (entity_index e : set)
                 overload_set(e, found_by_adl);
-            if (!x.entity && !set.empty()) {
+            if (first_early) {
+                /* the callee named here: its own lookup would not tell
+                   the later declarations apart */
+                overloaded_callee = t;
+                r = named_entity(t, first_early, f);
+                overloaded_callee = 0;
+                if (r != analysis_result::well_formed)
+                    return r;
+                looked_up = true;
+            } else if (!x.entity && !set.empty()) {
                 /* found by argument-dependent lookup alone: no claim is
                    made about the name, which names nothing elsewhere */
                 overloaded_callee = t;
@@ -1763,7 +1913,14 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         overload_set(named, set);
     for (entity_index e : found_by_adl)
         overload_set(e, set);
-    if (set.size() > 1) {
+    if (hides_late) {
+        size_t kept = 0;
+        for (entity_index e : set)
+            if (!declared_past_horizon(e, hides_late))
+                set[kept++] = e;
+        set.resize(kept);
+    }
+    if (set.size() > 1 || (hides_late && set.size() == 1)) {
         {
             resolving_call scope(resolving_calls);
             VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));

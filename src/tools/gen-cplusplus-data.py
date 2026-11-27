@@ -362,6 +362,13 @@ def feature_check_queries():
     return queries
 
 
+# answers vcc cannot give as clang does: [[clang::musttail]] promises a tail
+# call, which vcc's code generation does not guarantee (the analysis refuses
+# the attribute), so code asking takes its portable path
+FEATURE_CHECKS_NOT_VCCS = {('attribute', 'musttail'),
+                           ('cpp_attribute', 'clang::musttail')}
+
+
 def feature_checks(clang='clang-23'):
     import subprocess
     macro = {'feature': '__has_feature', 'extension': '__has_extension', 'builtin': '__has_builtin',
@@ -385,7 +392,7 @@ def feature_checks(clang='clang-23'):
                     out = subprocess.run(args, input=source, capture_output=True, text=True).stdout
                     for m in re.finditer(r'^@(\d+) (\d+)L?$', out, re.M):
                         value = int(m.group(2))
-                        if value:
+                        if value and queries[int(m.group(1))] not in FEATURE_CHECKS_NOT_VCCS:
                             key = queries[int(m.group(1))] + (value,)
                             rows[key] = rows.get(key, 0) | (1 << variant)
     version = subprocess_version(clang)

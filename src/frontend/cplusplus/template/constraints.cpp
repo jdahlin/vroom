@@ -561,6 +561,53 @@ bool semantic_analysis::constraint_parameter_is_own(entity_index t,
     return false;
 }
 
+/* the typedef-name token i spells where t's constraint is written, when
+   its declaration names only itself and entities of namespaces: clang
+   mangles the type unsubstituted, which is then its type (0: not known) */
+entity_index semantic_analysis::constraint_plain_typedef(entity_index t,
+                                                         token_index i) const
+{
+    entity_index e = constraint_name(entity_table[t].enclosing, i);
+    if (!e || entity_table[e].kind != entity_kind::typedef_name ||
+        !entity_table[e].first_declaration)
+        return 0;
+    SyntaxRef declaration =
+        entity_table.declaration(entity_table[e].first_declaration).node;
+    for (token_index k = declaration.first_token(); k < declaration.end_token();
+         k++) {
+        if (!tokens.identifier(k))
+            continue;
+        if (constraint_parameter(t, k))
+            return 0;
+        entity_index named = constraint_name(entity_table[e].enclosing, k);
+        if (!named || named == e)
+            continue;
+        entity_index scope = entity_table[named].enclosing;
+        if (scope && entity_table[scope].kind != entity_kind::namespace_entity)
+            return 0;
+    }
+    return e;
+}
+
+/* function template t's own type parameter at position (0: none) */
+entity_index
+semantic_analysis::constraint_own_type_parameter(entity_index t,
+                                                 uint64_t position) const
+{
+    uint32_t ft = template_record(t);
+    if (!ft)
+        return 0;
+    const struct function_template &f = function_templates[ft - 1];
+    for (uint32_t k = 0; k < f.parameter_count; k++) {
+        entity_index pe = template_parameter_entities[f.first_parameter + k];
+        if (type_table[entity_table[pe].type.unqualified()].kind ==
+                type_kind::template_parameter &&
+            entity_table[pe].value == position)
+            return pe;
+    }
+    return 0;
+}
+
 /* (the mangler holds the analysis const; this analysis leaves nothing
    behind: the records it adds are dropped) */
 bool semantic_analysis::constraint_type(entity_index t, SyntaxElement written,

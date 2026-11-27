@@ -1420,7 +1420,12 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                     continue;
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
                    the declaration */
-                VTRY_SET(r, gnu_attribute_specifier(c, s));
+                bool outer = s.vector_size_allowed;
+                s.vector_size_allowed = true;
+                r = gnu_attribute_specifier(c, s);
+                s.vector_size_allowed = outer;
+                if (r != analysis_result::well_formed)
+                    return r;
                 continue;
             } else
                 return not_supported_because(
@@ -1925,6 +1930,19 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     } else if (atomic_qualifier) {
         return not_supported_because(seq, "ext.clang",
                                      "_Atomic with no type to apply to");
+    }
+    if (s.vector_bytes) {
+        /* [ext:gnu_vector_size] a dependent or placeholder element type has
+           no vector yet */
+        if (!type || type_table[type].kind != type_kind::fundamental)
+            return not_supported_because(
+                seq, "ext.gnu",
+                "a vector_size attribute among the decl-specifiers of a type "
+                "that is no fundamental type");
+        qualified_type vector = qualified_type::make(type, cv_none);
+        VTRY(r, gnu_vector_type(seq, s.vector_bytes, vector));
+        type = vector.unqualified();
+        s.vector_bytes = 0;
     }
     if (type)
         s.type = add_cv(qualified_type::make(type, cv_none), cv);

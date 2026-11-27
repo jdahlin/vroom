@@ -181,8 +181,11 @@ semantic_analysis::resolve_call(SyntaxRef n,
         if (!has_scalar_parameter)
             continue;
         owned_array<SyntaxElement> clauses;
-        VTRY(listed, list_clauses(arguments[i], clauses));
-        if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list))
+        designation_set designations;
+        VTRY(listed,
+             list_clauses(arguments[i], clauses, nullptr, &designations));
+        if (designations.any || clauses.size() != 1 ||
+            clauses[0].is(syntax_kind::braced_init_list))
             continue;
         expression_meaning element;
         VTRY(r, expression(clauses[0], element));

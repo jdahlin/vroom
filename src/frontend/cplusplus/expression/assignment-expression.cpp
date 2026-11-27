@@ -145,19 +145,23 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
                 owned_array<entity_index> candidates;
                 overload_set(found.entity, candidates);
                 bool others = false, declared_copy = false;
+                bool declared_move = false;
                 for (entity_index f : candidates) {
                     if (copy_assignment_operator(f, c))
                         declared_copy = true;
-                    else if (!move_assignment_operator(f, c))
+                    else if (move_assignment_operator(f, c))
+                        declared_move = true;
+                    else
                         others = true;
                 }
-                /* a class that declares its copy assignment operator has no
-                   implicit one beside what it declares
-                   ([class.copy.assign]/2, /4): overload resolution takes
-                   the list as the argument */
+                /* a class whose copy assignment operator is an entity
+                   (declared, or the implicit one, not trivial), as its
+                   defaulted move one if it has one, has no candidate
+                   beside them ([class.copy.assign]/2, /4): overload
+                   resolution takes the list as the argument */
                 if (others && declared_copy &&
-                    !entity_table[c].defaulted_copy_assignment &&
-                    !entity_table[c].defaulted_move_assignment)
+                    (declared_move ||
+                     !entity_table[c].defaulted_move_assignment))
                     return braced_assignment(n, op, left, m);
                 if (others)
                     return not_supported_because(
@@ -321,10 +325,14 @@ analysis_result semantic_analysis::assignment_of(
             expression_meaning value = left, result;
             r = operand_value(n, value);
             if (r == analysis_result::well_formed &&
-                is_vector_kind(record.kind))
-                /* [ext:gnu_vector_size] E1 = E1 op E2 lane by lane */
+                is_vector_kind(record.kind)) {
+                /* [ext:gnu_vector_size] E1 = E1 op E2 lane by lane;
+                   [ext:clang_ext_vector_type] a compatible E2 counts as
+                   E1's type, which the result has */
+                if (vectors_compatible(value.type, right.type))
+                    right.type = value.type;
                 r = vector_binary(n, at, arithmetic_op, value, right, result);
-            else if (r == analysis_result::well_formed)
+            } else if (r == analysis_result::well_formed)
                 r = arithmetic(n, arithmetic_op, value, right, result);
             computation = result.type;
             if (r == analysis_result::well_formed)

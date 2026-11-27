@@ -665,6 +665,26 @@ bool semantic_analysis::refuted_by_rule(uint32_t node)
     return c == constness::not_constant && evaluation_rule_applied();
 }
 
+bool semantic_analysis::splat_call_value(SyntaxRef at, uint32_t node,
+                                         qualified_type type,
+                                         initialized_value &m)
+{
+    const struct type to = type_table[type.unqualified()];
+    if (to.kind != type_kind::ext_vector || !node ||
+        semantics[node].kind != semantic_kind::call)
+        return false;
+    constant_evaluation state;
+    state.splats = true;
+    reset_evaluation_trace();
+    constant_value v;
+    if (evaluate_node(state, node, v) != constness::constant ||
+        state.heap_live || !v.splat || !is_value(v) ||
+        !value_kept_exactly(to.operand, v))
+        return false;
+    splat_constant(at, type, to.operand, v, m);
+    return true;
+}
+
 constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
 {
     if (semantics[node].evaluation == constness::not_constant)
@@ -1080,12 +1100,15 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         constant_value v;
         constness c = constness::constant;
         bool pointer = record.kind == type_kind::pointer;
+        bool to_member = record.kind == type_kind::pointer_to_member;
         fundamental_type f = evaluated_type(t);
-        if (f == fundamental_type::none && !pointer)
+        if (f == fundamental_type::none && !pointer && !to_member)
             return CONST_UNKNOWN;
         /* a null pointer's zero ([conv.ptr]/1) */
         if (zero && pointer)
             v.kind = constant_value_kind::pointer;
+        else if (zero && to_member)
+            v.kind = constant_value_kind::member_pointer;
         else if (zero)
             v = value_of(f, 0);
         else if (init)
@@ -1186,8 +1209,15 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         (!c_entity || held.designator == c_entity) &&
         held.first + count <= state.elements.size()) {
         first = held.first;
+        /* (a member that is itself a class keeps its elements for its own
+           initialization to find, which clears them: new ones would go
+           with the invocation too.  Not one with a destructor, whose
+           lifetime the evaluation does not follow through this) */
         for (uint32_t i = 0; i < count; i++) {
-            state.elements[first + i] = constant_value();
+            const constant_value kept = state.elements[first + i];
+            if (init || kept.kind != constant_value_kind::class_object ||
+                !kept.designator || destroys(kept.designator))
+                state.elements[first + i] = constant_value();
             state.element_read_only[first + i] = read_only;
         }
     } else {
@@ -1460,6 +1490,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         const entity &e = entity_table[x.a];
         type_kind tk = type_table[e.type.unqualified()].kind;
         bool scalar_variable = tk == type_kind::pointer ||
+                               tk == type_kind::pointer_to_member ||
                                evaluated_type(e.type) != fundamental_type::none;
         /* a variable of static storage duration of scalar type: its address
            is a permitted result ([expr.const]/11), its value is read only
@@ -1808,11 +1839,16 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             return CONST_UNKNOWN;
         const entity &k = entity_table[o.designator];
         /* [expr.const]/5.9: reading a mutable subobject of an object that
-           is usable in constant expressions is not constant: which object
-           this is is not modelled */
-        if (entity_table[x.b].mutable_member) {
+           is usable in constant expressions is not constant; one of an
+           object the evaluation is making (its constructor's
+           initialization of the member) is any other member.  Not one of
+           a class with a destructor: constant destruction
+           ([expr.const]/6) is not checked, where the member is read */
+        if (entity_table[x.b].mutable_member &&
+            (place_read_only(state, whole) || destroys(o.designator))) {
             /* a read of it in an object that began its life outside the
-               evaluation ([expr.const]/5.9) is not constant */
+               evaluation ([expr.const]/5.9) is not constant; which other
+               access this is is not modelled */
             if (state.reading && !state.potential &&
                 place_read_only(state, whole))
                 return CONST_NOT_CONSTANT_NOTE(rule_note::read_mutable_member);
@@ -2223,7 +2259,8 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     }
     type_kind tk = type_table[x.type.unqualified()].kind;
     bool scalar = evaluated_type(x.type) != fundamental_type::none;
-    if (!scalar && tk != type_kind::pointer && tk != type_kind::class_type)
+    if (!scalar && tk != type_kind::pointer && tk != type_kind::class_type &&
+        tk != type_kind::pointer_to_member)
         return CONST_UNKNOWN;
     bool lazy_pointer =
         tk == type_kind::pointer && x.kind == semantic_kind::entity && x.a &&
@@ -3090,6 +3127,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         type_kind k = type_table[x.type.unqualified()].kind;
         if (k != type_kind::class_type && k != type_kind::pointer &&
             k != type_kind::complex && k != type_kind::array &&
+            k != type_kind::pointer_to_member &&
             fundamental_of(x.type) != fundamental_type::void_)
             return CONST_UNKNOWN;
     }
@@ -3105,8 +3143,22 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
     switch (x.kind) {
     case semantic_kind::call:
         return evaluate_call(state, node, v);
+    /* [expr.unary.op]/3.1: &C::m designates the member m */
+    case semantic_kind::member_pointer:
+        v = constant_value();
+        v.kind = constant_value_kind::member_pointer;
+        v.designator = x.a;
+        return constness::constant;
     case semantic_kind::conversion: {
         conversion_kind k = static_cast<conversion_kind>(x.op);
+        /* [ext:clang_ext_vector_type] the scalar in every lane */
+        if (k == conversion_kind::vector_splat && state.splats) {
+            c = evaluate_node(state, x.a, v);
+            if (c == constness::constant && !is_value(v))
+                return CONST_UNKNOWN;
+            v.splat = true;
+            return c;
+        }
         /* (the pointer of a std::initializer_list's backing array: its
            conversion is marked as a read, which an array has none) */
         if (k == conversion_kind::lvalue_to_rvalue &&
@@ -3121,6 +3173,34 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         }
         if (k == conversion_kind::array_to_pointer)
             return evaluate_array_pointer(state, x.a, v);
+        /* [conv.mem]/1: the null member pointer value; [conv.qual]: the
+           same member.  A conversion between a base's and a derived
+           class's ([conv.mem]/2) is not followed */
+        if (k == conversion_kind::null_member_pointer) {
+            v = constant_value();
+            v.kind = constant_value_kind::member_pointer;
+            return constness::constant;
+        }
+        if (k == conversion_kind::member_pointer_qualification) {
+            c = evaluate_node(state, x.a, v);
+            if (c == constness::constant &&
+                v.kind != constant_value_kind::member_pointer)
+                return CONST_UNKNOWN;
+            return c;
+        }
+        /* [conv.bool]/1 of a pointer to member */
+        if (k == conversion_kind::boolean &&
+            type_table[semantics[x.a].type.unqualified()].kind ==
+                type_kind::pointer_to_member) {
+            c = evaluate_node(state, x.a, v);
+            if (c != constness::constant)
+                return c;
+            if (v.kind != constant_value_kind::member_pointer ||
+                fundamental_of(x.type) != fundamental_type::bool_)
+                return CONST_UNKNOWN;
+            v = value_of(fundamental_type::bool_, v.designator != 0);
+            return constness::constant;
+        }
         /* [conv.func]/1: a function lvalue becomes a pointer to the
            function, the address of its object ([expr.unary.op]/3) */
         if (k == conversion_kind::function_to_pointer) {
@@ -4082,14 +4162,23 @@ constness semantic_analysis::evaluate_invocation(
     const entity &e = entity_table[f];
     if (e.kind != entity_kind::function)
         return CONST_UNKNOWN;
-    /* [expr.prim.lambda.closure]/4: a closure's function call operator is
-       a constexpr function "if it satisfies the requirements for a
-       constexpr function": evaluated, and not a constant expression where
-       its body is not one */
-    bool implicit_constexpr =
-        (e.enclosing && entity_table[e.enclosing].lambda &&
-         entity_table[e.enclosing].call_operator == f) ||
-        (e.implicit && e.definition);
+    /* [expr.prim.lambda.closure]/4: a closure's function call operator
+       (a generic lambda's specialization of it too) is a constexpr
+       function "if it satisfies the requirements for a constexpr
+       function": evaluated, and not a constant expression where its body
+       is not one */
+    bool call_operator = false;
+    if (e.enclosing && entity_table[e.enclosing].lambda) {
+        entity_index declared = entity_table[e.enclosing].call_operator;
+        /* (before C++17 no lambda's is constexpr, which a non-generic
+           one's evaluation does not tell apart yet) */
+        call_operator =
+            declared == f ||
+            (e.instantiation &&
+             instantiations[e.instantiation - 1].template_entity == declared &&
+             tokens.files.behavior.edition >= standard_edition::cplusplus_17);
+    }
+    bool implicit_constexpr = call_operator || (e.implicit && e.definition);
     if (!e.constexpr_ && !implicit_constexpr) {
         /* (a library builtin, declared with C language linkage, may be
            one the evaluator does not know clang evaluates) */
@@ -4725,6 +4814,32 @@ uint32_t semantic_analysis::pointer_tree(const constant_evaluation &state,
     return 0;
 }
 
+/* [dcl.init]/7.2: the initializer list of array type t whose every element
+   is the constant element, 0 if too long to write out */
+uint32_t semantic_analysis::repeated_value(qualified_type t, uint32_t element,
+                                           token_index at)
+{
+    constexpr uint64_t longest = 4096;
+    const struct type array = type_table[t.unqualified()];
+    if (array.kind != type_kind::array)
+        return element;
+    if (array.bound > longest)
+        return 0;
+    uint32_t one = repeated_value(array.operand, element, at);
+    if (!one)
+        return 0;
+    owned_array<uint32_t> elements;
+    for (uint64_t i = 0; i < array.bound; i++)
+        elements.append(one);
+    expression_meaning m;
+    m.type = qualified_type::make(t.unqualified(), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::constant;
+    uint32_t node = expression_node(semantic_kind::initializer_list, m, at);
+    semantics.set_list(node, elements.data(), elements.size());
+    return node;
+}
+
 uint32_t semantic_analysis::value_tree(const constant_evaluation &state,
                                        qualified_type t,
                                        const constant_value &v, token_index at)
@@ -4746,6 +4861,14 @@ uint32_t semantic_analysis::value_tree(const constant_evaluation &state,
     }
     if (v.kind == constant_value_kind::pointer)
         return pointer_tree(state, t, v, at);
+    /* &C::m as written (the null member pointer value has no such tree:
+       the initializer as written is lowered) */
+    if (v.kind == constant_value_kind::member_pointer) {
+        if (!v.designator)
+            return 0;
+        return expression_node(semantic_kind::member_pointer, m, at,
+                               v.designator);
+    }
     if (v.kind != constant_value_kind::array &&
         v.kind != constant_value_kind::class_object)
         return 0;

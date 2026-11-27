@@ -20,8 +20,22 @@ uint32_t c_lowering::store(ast_qualified_type t, qualified_type object_type,
 {
     /* [class.copy.elision]/1, [abi:calls]: a class passed by address is
        built where it ends up, a call's result too */
-    if (built_in_place(object_type) && ast_builder_node_is_call(c, value))
-        return make(AST_NODE_CALL_INTO, void_type, object, value, 0, 0, 0);
+    if (built_in_place(object_type)) {
+        /* (the call may follow, as comma operands, what is held for it) */
+        owned_array<uint32_t> before;
+        uint32_t made = value;
+        while (ast_builder_ast(c)->nodes[made].op == AST_NODE_COMMA) {
+            before.append(ast_builder_ast(c)->nodes[made].a);
+            made = ast_builder_ast(c)->nodes[made].b;
+        }
+        if (ast_builder_node_is_call(c, made)) {
+            uint32_t into =
+                make(AST_NODE_CALL_INTO, void_type, object, made, 0, 0, 0);
+            for (size_t i = before.size(); i; i--)
+                into = comma(void_type, before[i - 1], into);
+            return into;
+        }
+    }
     /* an empty class has no value: its byte may be another member's
        ([[no_unique_address]], an empty base) */
     if (empty_object(object_type))
@@ -661,6 +675,14 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
         entity_index ce = record(n.type).entity;
         const entity &x = analysis.entity_table[ce];
         class_type(ce, n.at);
+        entity_index complete = vptr_class;
+        uint64_t at = vptr_offset;
+        vptr_class = 0;
+        vptr_offset = 0;
+        if (!complete) {
+            complete = ce;
+            at = 0;
+        }
         if (x.union_ && n.a) {
             /* a union's member a designator named but the first (n.a): C's
                field a, the list holding its value alone after zeros */
@@ -680,21 +702,51 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
             if (i >= x.member_count)
                 return fail("an initializer for no member", n.at);
             entity_index member = analysis.class_members[x.first_member + i];
-            /* the padding fields before it (class_type) */
-            while (values.size() < c_fields[member])
+            /* the padding fields before it (class_type); a primary base's
+               field is first, whatever its place among the bases */
+            while (values.size() <= c_fields[member])
                 values.append(0);
-            if (!analysis.initializer_member(member)) {
-                values.append(0);
+            if (!analysis.initializer_member(member))
                 continue;
-            }
             if (tail_reused[member])
                 return fail("an initializer of a base whose tail padding "
                             "is reused",
                             n.at);
+            const entity &m = analysis.entity_table[member];
+            if (m.base_subobject) {
+                vptr_class = complete;
+                vptr_offset = at + m.offset;
+            }
             uint32_t e = expression(items[item++]);
+            vptr_class = 0;
+            vptr_offset = 0;
             if (!e)
                 return 0;
-            values.append(e);
+            values[c_fields[member]] = e;
+        }
+        /* [basic.start.static]/2, [abi:class-types]: a constant dynamic
+           object's virtual table pointer is part of its value, no
+           constructor storing it: the address point, in the complete
+           object's table, of the group at this subobject */
+        const dynamic_class *dynamic = analysis.dynamic_of(ce);
+        if (dynamic && !dynamic->primary_base) {
+            if (analysis.entity_table[complete].virtual_base_count)
+                return fail("a constant object with virtual bases", n.at);
+            const dynamic_class *whole = analysis.dynamic_of(complete);
+            uint32_t group = 0;
+            while (group < whole->group_count &&
+                   analysis.vtable_groups[whole->first_group + group].offset !=
+                       at)
+                group++;
+            if (group == whole->group_count)
+                return fail("a constant object's virtual table pointer", n.at);
+            uint32_t point = address_point(complete, group, n.at);
+            if (!point)
+                return 0;
+            if (values.empty())
+                values.append(0);
+            values[0] = cast(point, pointer_to(pointer_to(void_type)),
+                             AST_CAST_POINTER_TO_POINTER);
         }
         /* the members C zero-fills: a pointer to data member's null value
            is not zero bits ([abi:data-member-pointers]) */

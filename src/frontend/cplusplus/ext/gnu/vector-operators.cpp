@@ -17,7 +17,11 @@
  * What is analysed: two operands of one vector type, or a vector and a
  * scalar the element type holds (vector_scalar_fits: clang's "implicit
  * conversion would cause truncation");
- * different vector types (clang's lax conversions) and && || <=> are not.
+ * a GCC vector with a Clang extended vector of the same element type and
+ * count ([ext:clang_ext_vector_type]; clang's "compatible" vector types),
+ * whose result is the extended vector's, or the left operand's in a
+ * compound assignment; other pairs of vector types (clang's lax
+ * conversions) and && || <=> are not.
  * The result is as C's front end builds it (frontend/c/expression.cpp):
  * the scalar converted to the element type, the node left to code
  * generation, which does the lanes.
@@ -124,6 +128,70 @@ bool semantic_analysis::vector_scalar_fits(const expression_meaning &scalar,
     return true;
 }
 
+/* [ext:clang_ext_vector_type] a GCC vector and an extended vector of the
+   same element type and number of elements: the same values */
+bool semantic_analysis::vectors_compatible(qualified_type a,
+                                           qualified_type b) const
+{
+    const struct type x = type_table[a.unqualified()],
+                      y = type_table[b.unqualified()];
+    return is_vector_kind(x.kind) && is_vector_kind(y.kind) &&
+           x.kind != y.kind && x.bound == y.bound &&
+           x.operand.unqualified() == y.operand.unqualified();
+}
+
+/* each lane of v compared with zero by op: a mask */
+analysis_result semantic_analysis::vector_against_zero(
+    SyntaxRef n, token_index at, preprocessing_op_or_punc op,
+    expression_meaning &v, expression_meaning &m)
+{
+    expression_meaning zero;
+    zero.type = qualified_type::make(
+        type_table.fundamental(fundamental_type::int_), cv_none);
+    zero.category = value_category::prvalue;
+    zero.evaluation = constness::constant;
+    zero.node = expression_node(semantic_kind::constant, zero, at);
+    return vector_binary(n, at, op, v, zero, m);
+}
+
+/* [ext:gnu_vector_size] !v: the lanes that are zero */
+analysis_result semantic_analysis::vector_logical_not(SyntaxRef n,
+                                                      token_index at,
+                                                      expression_meaning &m)
+{
+    VTRY(r, operand_value(n, m));
+    expression_meaning v = m;
+    return vector_against_zero(n, at, preprocessing_op_or_punc::EQUAL_EQUAL, v,
+                               m);
+}
+
+/* [ext:gnu_vector_size] && and || of two vectors of one type, as clang
+   does them: both operands evaluated, each lane compared with zero, the
+   masks combined */
+analysis_result semantic_analysis::vector_logical(SyntaxRef n, token_index at,
+                                                  preprocessing_op_or_punc op,
+                                                  expression_meaning &left,
+                                                  expression_meaning &right,
+                                                  expression_meaning &m)
+{
+    using op_t = preprocessing_op_or_punc;
+    VTRY(r, operand_value(n, left));
+    VTRY_SET(r, operand_value(n, right));
+    if (left.type.unqualified() != right.type.unqualified())
+        return not_supported_because(
+            n, "ext.gnu",
+            "a logical operator on a vector and an operand of another type");
+    expression_meaning *operands[] = {&left, &right};
+    expression_meaning masks[2];
+    for (int i = 0; i < 2; i++)
+        VTRY_SET(r, vector_against_zero(n, at, op_t::EXCLAMATION_EQUAL,
+                                        *operands[i], masks[i]));
+    op_t combined = op_t::BAR;
+    if (op == op_t::AMPERSAND_AMPERSAND)
+        combined = op_t::AMPERSAND;
+    return vector_binary(n, at, combined, masks[0], masks[1], m);
+}
+
 analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
                                                  preprocessing_op_or_punc op,
                                                  expression_meaning &left,
@@ -151,10 +219,15 @@ analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
         vector = right.type;
     vector = qualified_type::make(vector.unqualified(), cv_none);
     if (left_vector && right_vector &&
-        left.type.unqualified() != right.type.unqualified())
-        /* clang's lax vector conversions */
-        return not_supported_because(
-            n, "ext.gnu", "a binary operator on vectors of different types");
+        left.type.unqualified() != right.type.unqualified()) {
+        if (!vectors_compatible(left.type, right.type))
+            /* clang's lax vector conversions */
+            return not_supported_because(
+                n, "ext.gnu",
+                "a binary operator on vectors of different types");
+        if (type_table[right.type.unqualified()].kind == type_kind::ext_vector)
+            vector = qualified_type::make(right.type.unqualified(), cv_none);
+    }
     const struct type record = type_table[vector.unqualified()];
     qualified_type element = record.operand;
     if (integer_only && !is_integral(element))
@@ -171,7 +244,12 @@ analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
                 n, "ext.gnu",
                 "a vector operator with a non-arithmetic scalar operand");
         bool fits = true;
-        if (!shift && !vector_scalar_fits(*scalar, element, fits))
+        /* [ext:clang_ext_vector_type] clang converts any integer that is
+           no constant to an extended vector's integer element, truncated */
+        bool truncated = record.kind == type_kind::ext_vector &&
+                         scalar->evaluation == constness::not_constant &&
+                         is_integral(element) && is_integral(scalar->type);
+        if (!shift && !truncated && !vector_scalar_fits(*scalar, element, fits))
             return not_supported_because(
                 n, "ext.gnu",
                 "a vector operator with a scalar whose fit in the element type "

@@ -849,13 +849,19 @@ uint32_t c_lowering::call(const semantic_node &n)
     uint32_t before_call = 0;
     bool member_pointer_call =
         node(n.a).kind == semantic_kind::member_pointer_access;
+    /* a result built where it is used ([class.copy.elision]/1) comes
+       from the call itself, no statement expression's copy of it: the
+       values held for the call are then temporaries of the
+       full-expression, assigned by comma operands */
+    bool in_place = false;
     if (member_pointer_call) {
-        if (passed_indirectly(record(function_type).operand))
+        in_place = built_in_place(record(function_type).operand);
+        if (in_place && !in_function)
             return fail("a call through a pointer to member function "
-                        "returning a class by address",
+                        "returning a class by address outside a function",
                         n.at);
         uint32_t object = 0;
-        callee = member_function_call(n, through, object);
+        callee = member_function_call(n, through, object, in_place);
         if (!callee)
             return 0;
         arguments.append(object);
@@ -1137,7 +1143,10 @@ uint32_t c_lowering::call(const semantic_node &n)
                 made = computed;
         }
     }
-    if (member_pointer_call) {
+    if (member_pointer_call && in_place) {
+        for (size_t i = through.size(); i; i--)
+            made = comma(t, through[i - 1], made);
+    } else if (member_pointer_call) {
         through.append(
             ast_builder_node(c, AST_NODE_EXPRESSION, t, made, 0, 0, 0, 0));
         made = statement_expression(t, block(through));

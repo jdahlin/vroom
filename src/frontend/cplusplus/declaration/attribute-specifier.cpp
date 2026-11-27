@@ -647,6 +647,15 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
         bool reinitializes = in_member_declaration && ns &&
                              name_is(ns, ns_length, "clang") &&
                              name_is(name, length, "reinitializes");
+        /* [impl.clang] clang::musttail (and gnu::) promises a tail call, which
+           code generation does not guarantee: never ignored, though
+           __has_cpp_attribute answers 0 for it */
+        if (ns &&
+            (name_is(ns, ns_length, "clang") ||
+             name_is(ns, ns_length, "_Clang") ||
+             name_is(ns, ns_length, "gnu")) &&
+            name_is(name, length, "musttail"))
+            return false;
         return reinitializes ||
                attribute_without_effect(ns, ns_length, name, length) ||
                (is_attribute_syntax &&

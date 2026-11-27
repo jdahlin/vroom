@@ -105,6 +105,17 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
     return true;
 }
 
+/* whether the braced-init-list list is a designated-initializer-list
+   ([dcl.init.list]/1) */
+static bool designated_list(SyntaxElement list)
+{
+    for (uint32_t i = 0; i < list.size(); i++)
+        if (list[i].is(syntax_kind::designated_initializer_list) ||
+            list[i].is(syntax_kind::designated_initializer_clause))
+            return true;
+    return false;
+}
+
 /*
  * [over.ics.list]/2: "If the parameter type is a class X and the
  * initializer list has a single element of type cv U, where U is X or a
@@ -115,9 +126,9 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
 bool semantic_analysis::list_is_identity(SyntaxElement list, entity_index x)
 {
     owned_array<SyntaxElement> clauses;
-    if (list_clauses(list, clauses) != analysis_result::well_formed ||
-        clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list) ||
-        clauses[0].is(syntax_kind::designated_initializer_clause))
+    if (designated_list(list) ||
+        list_clauses(list, clauses) != analysis_result::well_formed ||
+        clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list))
         return false;
     substitution_mark mark = mark_substitution();
     expression_meaning e;
@@ -150,16 +161,20 @@ semantic_analysis::list_scalar_sequence(SyntaxElement list, qualified_type to)
     owned_array<SyntaxElement> clauses;
     s.kind = conversion_sequence::form::unknown;
     if (kind == type_kind::lvalue_reference ||
-        kind == type_kind::rvalue_reference ||
-        list_clauses(list, clauses) != analysis_result::well_formed)
+        kind == type_kind::rvalue_reference)
+        return s;
+    if (designated_list(list)) {
+        s.kind = conversion_sequence::form::bad;
+        return s;
+    }
+    if (list_clauses(list, clauses) != analysis_result::well_formed)
         return s;
     if (clauses.empty()) {
         s.kind = conversion_sequence::form::standard;
         s.from_list = true;
         return s;
     }
-    if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list) ||
-        clauses[0].is(syntax_kind::designated_initializer_clause)) {
+    if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list)) {
         s.kind = conversion_sequence::form::bad;
         return s;
     }
@@ -261,6 +276,14 @@ semantic_analysis::list_array_sequence(SyntaxElement list, qualified_type array,
     worst.from_list = true;
     worst.to_array = true;
     return worst;
+}
+
+bool semantic_analysis::declared_past_horizon(entity_index e,
+                                              entity_index space) const
+{
+    uint32_t d = entity_table[e].first_declaration;
+    return entity_table[e].enclosing == space && d &&
+           entity_table.declaration(d).node.first_token() > lookup_horizon;
 }
 
 void semantic_analysis::overload_set(entity_index e,
@@ -401,13 +424,26 @@ analysis_result semantic_analysis::best_viable_function(
                          (referred.cv() & cv_const)))
                         list_target = qualified_type::make(
                             tr.operand.unqualified(), cv_none);
-                    if (list_class && i == first &&
+                    if (designated_list((*written_arguments)[k]) &&
                         type_table[list_target.unqualified()].kind ==
                             type_kind::class_type &&
-                        type_table[list_target.unqualified()].entity ==
-                            list_class &&
-                        !list_is_identity((*written_arguments)[k],
-                                          list_class)) {
+                        entity_table[type_table[list_target.unqualified()]
+                                         .entity]
+                            .size &&
+                        !is_aggregate(
+                            type_table[list_target.unqualified()].entity)) {
+                        /* [over.ics.list]/2 (C++20): "If the initializer
+                           list is a designated-initializer-list, a
+                           conversion is only possible if the parameter has
+                           an aggregate type" */
+                        a.kind = sequence::form::bad;
+                    } else if (list_class && i == first &&
+                               type_table[list_target.unqualified()].kind ==
+                                   type_kind::class_type &&
+                               type_table[list_target.unqualified()].entity ==
+                                   list_class &&
+                               !list_is_identity((*written_arguments)[k],
+                                                 list_class)) {
                         /* [over.best.ics]/4: "user-defined conversion
                            sequences are not considered" for this
                            parameter, of a copy or move constructor */

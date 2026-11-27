@@ -381,15 +381,23 @@ semantic_analysis::default_array_initialization(token_index at, entity_index m,
     const struct type &record = type_table[entity_table[m].type.unqualified()];
     if (record.kind != type_kind::array || !record.bound_known || !record.bound)
         return analysis_result::well_formed;
+    /* an array of arrays' elements as one sequence ([dcl.array]/6) */
     qualified_type et = record.operand;
+    uint64_t bound = record.bound;
+    while (type_table[et.unqualified()].kind == type_kind::array) {
+        const struct type &inner = type_table[et.unqualified()];
+        if (!inner.bound_known || !inner.bound)
+            return analysis_result::well_formed;
+        bound *= inner.bound;
+        et = inner.operand;
+    }
     const struct type &er = type_table[et.unqualified()];
     if (er.kind != type_kind::class_type ||
         !entity_table[er.entity].first_constructor ||
         trivial_defaulted_default_constructor(er.entity))
         return analysis_result::well_formed;
-    /* (read before subobject and the pointer type add types, which may move
-       record) */
-    uint64_t bound = record.bound;
+    /* (the bound and element read before subobject and the pointer type
+       add types, which may move record) */
     expression_meaning arr;
     VTRY(r, subobject(at, m, arr));
     expression_meaning elem =
@@ -539,7 +547,12 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
                           "within itself",
                           "class.mem");
     entity_table[e].initializer_active = true;
-    r = initializer(init, type, value);
+    {
+        scoped_value<token_index> horizon(
+            lookup_horizon,
+            member_initializer_horizon(entity_table[e].enclosing));
+        r = initializer(init, type, value);
+    }
     entity_table[e].initializer_active = false;
     initialized_member = outer_member;
     if (r == analysis_result::ill_formed)
@@ -3720,17 +3733,27 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
 uint32_t semantic_analysis::subobject_destructions(entity_index c,
                                                    token_index at)
 {
+    /* a union's members are all variant members: none is destroyed */
+    if (entity_table[c].union_)
+        return 0;
     owned_array<entity_index> order;
     construction_order(c, order);
     owned_array<uint32_t> statements;
     for (size_t i = order.size(); i-- > 0;) {
         const struct type r =
             type_table[entity_table[order[i]].type.unqualified()];
-        if (r.kind == type_kind::array && r.bound_known && r.bound > 0 &&
-            type_table[r.operand.unqualified()].kind == type_kind::class_type &&
-            entity_table[type_table[r.operand.unqualified()].entity]
-                .destructor) {
-            qualified_type et = r.operand;
+        /* an array of arrays' elements as one sequence ([dcl.array]/6) */
+        qualified_type et = r.operand;
+        uint64_t bound = r.bound;
+        while (r.kind == type_kind::array &&
+               type_table[et.unqualified()].kind == type_kind::array) {
+            const struct type &inner = type_table[et.unqualified()];
+            bound *= inner.bound;
+            et = inner.operand;
+        }
+        if (r.kind == type_kind::array && r.bound_known && bound > 0 &&
+            type_table[et.unqualified()].kind == type_kind::class_type &&
+            entity_table[type_table[et.unqualified()].entity].destructor) {
             entity_index destructor =
                 entity_table[type_table[et.unqualified()].entity].destructor;
             expression_meaning arr;
@@ -3748,7 +3771,7 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
             uint32_t destroyed = expression_node(semantic_kind::destroy, call,
                                                  at, elem.node, destructor);
             statements.append(array_loop_statement(
-                at, r.bound, true,
+                at, bound, true,
                 statement_node(semantic_kind::expression_statement, at,
                                destroyed)));
             continue;

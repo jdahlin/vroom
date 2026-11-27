@@ -1130,15 +1130,19 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     g.ext_vector.allowed =
         s.ext_vector.allowed &&
         tokens.files.behavior.has(extension::clang_ext_vector_type);
+    if (s.vector_size_allowed)
+        g.vector_bytes = s.vector_bytes;
     analysis_result r = gnu_attribute_specifier(n, g);
     s.ext_vector = g.ext_vector;
     s.gnu_priority = g.priority;
     s.gnu_cleanup = g.cleanup;
-    if (g.mode || g.vector_bytes)
-        /* the mode of a decl-specifier's attribute: not analysed */
+    if (g.mode || (g.vector_bytes && !s.vector_size_allowed))
+        /* the mode of a decl-specifier's attribute, and vector_size outside
+           the decl-specifier-seq: not analysed */
         return not_supported_because(
             n, "ext.gnu",
             "a mode or vector_size attribute among the decl-specifiers");
+    s.vector_bytes = g.vector_bytes;
     s.aligned = g.aligned;
     s.gnu_flags = g.flags;
     s.section = g.section;

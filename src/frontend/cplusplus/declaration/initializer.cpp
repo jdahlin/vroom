@@ -737,13 +737,22 @@ analysis_result semantic_analysis::converted_temporary_binding(
             at, "dcl.init.ref",
             "too deeply nested converting reference binding");
     qualified_type made_type = qualified_type::make(t1.unqualified(), cv_none);
+    /* (of this binding only, not of the ones the conversion makes) */
+    bool direct = direct_reference_binding;
+    direct_reference_binding = false;
     const struct type &source = type_table[m.type.unqualified()];
     if (source.kind == type_kind::class_type &&
         has_conversion_functions(source.entity)) {
         /* /5.1.2, /5.3.2: "can be converted to an lvalue [or rvalue] of
-           type "cv3 T3"" by a conversion function ([over.match.ref]) */
+           type "cv3 T3"" by a conversion function ([over.match.ref]/1.1:
+           explicit ones too in a direct-initialization) */
         bool converted = false;
-        VTRY(c, conversion_function_call(at, m, made_type, false, converted));
+        VTRY(c, conversion_function_call(at, m, made_type, direct, converted));
+        if (converted && (m.type.cv() & ~t1.cv()))
+            return not_supported_because(
+                at, "dcl.init.ref",
+                "a conversion function result more cv-qualified than the "
+                "reference");
         if (converted && (!lvalue_only || m.category == value_category::lvalue))
             return analysis_result::well_formed;
         if (converted)
@@ -927,8 +936,10 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
                                direct, list, result);
     switch (type_table[type.unqualified()].kind) {
     case type_kind::lvalue_reference:
-    case type_kind::rvalue_reference:
+    case type_kind::rvalue_reference: {
+        scoped_value<bool> binding(direct_reference_binding, direct);
         return reference_initialization(at, m, type, result);
+    }
     case type_kind::class_type:
         return class_initialization(at, m, type, direct, result);
     case type_kind::ext_vector:
@@ -1005,17 +1016,8 @@ analysis_result semantic_analysis::vector_splat(SyntaxRef at,
         vector_converted(m, to, conversion_kind::vector_splat);
         return r;
     }
-    expression_meaning folded;
-    folded.type = m.type;
-    folded.category = value_category::prvalue;
-    evaluated_meaning(folded, v);
-    uint32_t lane =
-        expression_node(semantic_kind::constant, folded, at.first_token());
-    owned_array<uint32_t> lanes;
-    for (uint64_t i = 0; i < type_table[to.unqualified()].bound; i++)
-        lanes.append(lane);
     initialized_value value;
-    aggregate_value(at, to, constness::constant, lanes, value);
+    splat_constant(at, to, m.type, v, value);
     m = expression_meaning();
     m.type = qualified_type::make(to.unqualified(), cv_none);
     m.category = value_category::prvalue;
@@ -1023,6 +1025,23 @@ analysis_result semantic_analysis::vector_splat(SyntaxRef at,
     m.beyond_integral_constant = true;
     m.node = value.node;
     return r;
+}
+
+void semantic_analysis::splat_constant(SyntaxRef at, qualified_type to,
+                                       qualified_type element,
+                                       const constant_value &v,
+                                       initialized_value &result)
+{
+    expression_meaning folded;
+    folded.type = element;
+    folded.category = value_category::prvalue;
+    evaluated_meaning(folded, v);
+    uint32_t lane =
+        expression_node(semantic_kind::constant, folded, at.first_token());
+    owned_array<uint32_t> lanes;
+    for (uint64_t i = 0; i < type_table[to.unqualified()].bound; i++)
+        lanes.append(lane);
+    aggregate_value(at, to, constness::constant, lanes, result);
 }
 
 /* m as a prvalue of the vector type to, by the conversion kind */
@@ -1323,11 +1342,41 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
     if (expanded)
         clause_packs = &packs;
     analysis_result r;
-    if (designations.any)
+    /* (an rvalue reference to a union is not followed: the constant
+       evaluator misses a read of its inactive member) */
+    bool binds_temporary = false;
+    if (target == type_kind::lvalue_reference)
+        binds_temporary =
+            (type_table[type.unqualified()].operand.cv() & cv_const) != 0;
+    else if (target == type_kind::rvalue_reference) {
+        const struct type &referred =
+            type_table[type_table[type.unqualified()].operand.unqualified()];
+        binds_temporary = referred.kind == type_kind::class_type &&
+                          !entity_table[referred.entity].union_;
+    }
+    if (designations.any && binds_temporary) {
+        /* [dcl.init.list]/3.10, [impl.clang] for a designated list: a
+           prvalue of the referenced aggregate, which the reference binds */
+        qualified_type prvalue = qualified_type::make(
+            type_table[type.unqualified()].operand.unqualified(), cv_none);
+        initialized_value made;
+        r = designated_list_initialization(list, clauses, designations, prvalue,
+                                           made);
+        if (r == analysis_result::well_formed) {
+            expression_meaning m;
+            m.type = prvalue;
+            m.category = value_category::prvalue;
+            m.evaluation = made.evaluation;
+            m.value = made.value;
+            m.node = made.node;
+            r = initialize_with(list, m, type, true, false, result);
+        }
+    } else if (designations.any) {
         r = designated_list_initialization(list, clauses, designations, type,
                                            result);
-    else
+    } else {
         r = list_initialization_of(list, clauses, type, direct, result);
+    }
     clause_packs = saved;
     return r;
 }
@@ -2050,7 +2099,9 @@ analysis_result semantic_analysis::class_list_initialization(
             size_t next = 0;
             return aggregate_elements(list, clauses, next, type, result);
         }
-        if (clauses.empty() || !entity_table[c].first_constructor)
+        if (clauses.empty() || (!entity_table[c].first_constructor &&
+                                !entity_table[c].constructor_template &&
+                                !entity_table[c].constructor_templates))
             return not_supported_because(
                 list, "over.match.list",
                 "list-initialization of a non-aggregate with no constructor "
@@ -2630,6 +2681,20 @@ analysis_result semantic_analysis::omitted_element_checks(
     return analysis_result::well_formed;
 }
 
+/* [temp.res]/10 hides from an instantiation's names what is declared
+   after the template; a default member initializer of a class that is not
+   templated is not part of any template, though one analysed where it is
+   first needed may be inside an instantiation ([class.mem]/7: it is a
+   complete-class context of its class) */
+token_index
+semantic_analysis::member_initializer_horizon(entity_index cls) const
+{
+    for (entity_index c = cls; c; c = entity_table[c].enclosing)
+        if (entity_table[c].instantiation)
+            return lookup_horizon;
+    return 0;
+}
+
 /* [dcl.init.aggr]/5.1, [class.mem]/6: a default member initializer that
    names members is a complete-class context whose `this` is the aggregate
    being initialized: analysed in the class's scope with a `this` of its
@@ -2677,6 +2742,8 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     uint32_t locations_before = source_location_uses;
     uint32_t nodes_before = static_cast<uint32_t>(semantics.size());
     member_defaults_analysed.append(default_initializer);
+    scoped_value<token_index> horizon(lookup_horizon,
+                                      member_initializer_horizon(owner));
     analysis_result r = initializer(default_initializer, member_type, one);
     member_defaults_analysed.resize(member_defaults_analysed.size() - 1);
     function_state = static_cast<function_context &&>(outer);

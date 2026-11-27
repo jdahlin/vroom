@@ -166,15 +166,20 @@ void semantic_analysis::default_argument_used(uint32_t node)
 /* [class.virtual]/17 with [basic.def.odr]/5: a class's virtual functions
    are needed by its virtual table, which an object of the class (or of a
    class derived from it, whose constructor uses the base's) wants: some
-   constructor of the class is needed [impl.clang] (clang emits the table
-   where a constructor is defined) */
+   constructor of the class is needed and defined here, or its key function
+   is [impl.clang] (clang emits the table, or uses its entries, where a
+   constructor is defined; a constructor only declared here leaves that to
+   the translation unit that defines it) */
 bool semantic_analysis::virtual_table_needed(entity_index c) const
 {
     for (entity_index k = entity_table[c].first_constructor; k;
-         k = entity_table[k].next_constructor)
-        if (entity_table[k].member_definition_needed)
+         k = entity_table[k].next_constructor) {
+        const entity &x = entity_table[k];
+        if (x.member_definition_needed && (x.defined || x.implicit))
             return true;
-    return false;
+    }
+    const dynamic_class *d = dynamic_of(c);
+    return d && d->key_function && entity_table[d->key_function].defined;
 }
 
 /* the needs of a defaulted special member now needed (or virtual: its
@@ -224,7 +229,11 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
             mark_needed(function);
         }
         require_complete(m.type);
-        if (m.category == value_category::prvalue)
+        /* [class.dtor]/15 and [expr.new]/10: the object a non-array
+           new-expression makes is not destroyed by it: no use of its
+           destructor */
+        if (m.category == value_category::prvalue &&
+            !(kind == semantic_kind::construct && a && a == new_object_made))
             require_destructor_definition(m.type);
     } else if (default_argument_unevaluated &&
                unevaluated == default_argument_unevaluated) {

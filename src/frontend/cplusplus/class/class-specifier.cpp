@@ -2592,6 +2592,13 @@ analysis_result semantic_analysis::member_declarator(
         first.type = type;
         first.claimable = declarations_claimable;
         declared_names.append(first);
+        /* [class.static.data]/3, [dcl.init]/12: an inline one without an
+           initializer is defined here, default-initialized */
+        if (s.inline_ && !initialized) {
+            bool constructed = false;
+            VTRY(made, default_initialize_variable(declaration, e, type,
+                                                   s.constexpr_, constructed));
+        }
     } else {
         if (s.inline_)
             /* [dcl.inline]/5: "The inline specifier shall not appear on a

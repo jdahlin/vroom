@@ -631,6 +631,11 @@ class c_lowering
        being initialized (a declared variable, a returned value, an
        argument's temporary), and whether expression() is at it now */
     uint32_t result_object = 0;
+    /* [class.cdtor]: while a constant's base subobject is lowered, the
+       class of the complete object, whose virtual table its virtual
+       table pointer addresses, and the subobject's offset in it */
+    entity_index vptr_class = 0;
+    uint64_t vptr_offset = 0;
     bool at_result_object = false;
     /* [class.copy.elision]/1.1: the automatic variable every return
        statement of the function lowered returns, constructed in the
@@ -824,7 +829,7 @@ class c_lowering
     uint32_t member_pointer_equality(const semantic_node &n, int op);
     uint32_t member_function_call(const semantic_node &n,
                                   owned_array<uint32_t> &items,
-                                  uint32_t &object);
+                                  uint32_t &object, bool expressions);
     /* a value read more than once: lowered again when that has no effect,
        else held in a temporary of the full-expression */
     struct reread {

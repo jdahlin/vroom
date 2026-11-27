@@ -71,11 +71,46 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     bool array = count - i == 3;
     expression_meaning operand;
     VTRY(r, expression(n[count - 1], operand));
-    if (type_table[operand.type.unqualified()].kind == type_kind::class_type)
-        /* /2: "the operand is converted to a pointer type by calling the
-           above-mentioned conversion function" */
-        return not_supported_because(n, "expr.delete",
-                                     "a delete whose operand has class type");
+    if (type_table[operand.type.unqualified()].kind == type_kind::class_type) {
+        /* /1: "the class type shall have a single non-explicit conversion
+           function to a pointer to object type"; /2: "the operand is
+           converted to a pointer type by calling the above-mentioned
+           conversion function" */
+        entity_index cls = type_table[operand.type.unqualified()].entity;
+        require_complete(cls);
+        owned_array<entity_index> functions, templates;
+        qualified_type to;
+        unsigned pointers = 0;
+        bool followed =
+            visible_conversion_functions(cls, functions, &templates);
+        /* (an explicit conversion function template is none of /1's) */
+        for (entity_index held : templates) {
+            owned_array<uint32_t> group;
+            function_template_overloads(held, group);
+            for (uint32_t g : group)
+                if (!entity_table[function_templates[g - 1].entity].explicit_)
+                    followed = false;
+        }
+        if (followed)
+            for (entity_index f : functions) {
+                if (entity_table[f].explicit_)
+                    continue;
+                qualified_type result = conversion_function_result(f).type;
+                if (type_table[result.unqualified()].kind != type_kind::pointer)
+                    continue;
+                to = qualified_type::make(result.unqualified(), cv_none);
+                pointers++;
+            }
+        bool converted = false;
+        if (pointers == 1)
+            VTRY_SET(
+                r, conversion_function_call(n, operand, to, false, converted));
+        if (!converted)
+            return not_supported_because(
+                n, "expr.delete",
+                "a delete whose operand has class type without one pointer "
+                "conversion function that analysis follows");
+    }
     VTRY_SET(r, operand_value(n, operand));
     const struct type &pointer = type_table[operand.type.unqualified()];
     if (pointer.kind != type_kind::pointer)

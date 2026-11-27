@@ -959,6 +959,8 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
            ! is contextually converted to bool; its value is true if the
            converted operand is false and false otherwise.  The type of the
            result is bool." */
+        if (is_vector_kind(type_table[m.type.unqualified()].kind))
+            return vector_logical_not(n, at, m);
         VTRY_SET(r, contextual_bool(n, m));
         m.value = !m.value;
         break;

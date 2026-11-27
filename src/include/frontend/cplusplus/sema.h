@@ -1241,6 +1241,9 @@ enum class constant_value_kind : uint8_t {
     array,
     class_object,
     union_object,
+    /* [basic.compound]/1.8: a pointer to a member: designator is the
+       member, 0 for the null member pointer value */
+    member_pointer,
 };
 
 struct constant_value {
@@ -1266,6 +1269,9 @@ struct constant_value {
     uint32_t stamp = 0;
     /* pointer into a string literal's array ([lex.string]/9) */
     bool literal = false;
+    /* integer or floating: every lane of a vector has this value
+       (splat_call_value) */
+    bool splat = false;
 };
 
 /* [implimits]/2's quantities for constant evaluation, the bracketed
@@ -2338,6 +2344,7 @@ class semantic_analysis
     /* [over.match.class.deduct]/1.1: the implicit guides of the class
        template ct made from its constructors (once) */
     void implicit_deduction_guides(uint32_t ct);
+    bool copy_candidate_wins(uint32_t ct);
     analysis_result implicit_guide_member(uint32_t ct, SyntaxElement member);
     /* [over.match.class.deduct]/1, [dcl.type.class.deduct]/2: the class
        template specialization the placeholder for a deduced class type
@@ -2370,6 +2377,11 @@ class semantic_analysis
         /* [ext:clang_ext_vector_type] ext_vector_type(N) among the specifiers
            (only where the declaration applies it: ext_vector_allowed) */
         ext_vector_attribute ext_vector;
+        /* [ext:gnu_vector_size] vector_size within the
+           decl-specifier-seq: of the type it names (decl_specifier_seq,
+           which says it takes one) */
+        uint64_t vector_bytes = 0;
+        bool vector_size_allowed = false;
         /* [dcl.constexpr]/2: consteval (constexpr_ too) */
         bool consteval_ = false;
         /* [diff.cpp14.dcl.dcl]/1: register */
@@ -3808,8 +3820,20 @@ class semantic_analysis
                                  const expression_meaning &left,
                                  const expression_meaning &right,
                                  expression_meaning &m);
+    bool vectors_compatible(qualified_type a, qualified_type b) const;
     bool vector_scalar_fits(const expression_meaning &scalar,
                             qualified_type element, bool &fits) const;
+    analysis_result vector_against_zero(SyntaxRef n, token_index at,
+                                        preprocessing_op_or_punc op,
+                                        expression_meaning &v,
+                                        expression_meaning &m);
+    analysis_result vector_logical_not(SyntaxRef n, token_index at,
+                                       expression_meaning &m);
+    analysis_result vector_logical(SyntaxRef n, token_index at,
+                                   preprocessing_op_or_punc op,
+                                   expression_meaning &left,
+                                   expression_meaning &right,
+                                   expression_meaning &m);
     analysis_result vector_binary(SyntaxRef n, token_index at,
                                   preprocessing_op_or_punc op,
                                   expression_meaning &left,
@@ -4014,6 +4038,12 @@ class semantic_analysis
     entity_index skipped_member_body = 0;
     void defer_needs_of_instantiated_body(entity_index f);
     bool virtual_table_needed(entity_index c) const;
+    /* [over.match.ref]/1.1: the reference being bound is
+       direct-initialized */
+    bool direct_reference_binding = false;
+    /* the node of the object the latest non-array new-expression
+       initializes: its construction needs no destructor */
+    uint32_t new_object_made = 0;
     owned_array<deferred_need> deferred_needs;
     void mark_needed(entity_index function);
     bool pass_deferred_needs();
@@ -4331,6 +4361,9 @@ class semantic_analysis
            first ([dcl.init]/8.2): a constructor of one an implicit
            constructor runs keeps those zeros */
         bool zeroed = false;
+        /* a conversion of a scalar to a vector is evaluated, its value
+           the lanes' (splat_call_value) */
+        bool splats = false;
         /* the elements of the arrays in objects (an element's value may be
            an array whose elements are further on), and whether each may
            not be modified: an element of a variable whose lifetime did not
@@ -4607,6 +4640,12 @@ class semantic_analysis
        be, an indeterminate member, a pointer) */
     uint32_t value_tree(const constant_evaluation &state, qualified_type t,
                         const constant_value &v, token_index at);
+    analysis_result default_initialize_variable(SyntaxRef declaration,
+                                                entity_index e,
+                                                qualified_type type,
+                                                bool constexpr_variable,
+                                                bool &constructed);
+    uint32_t repeated_value(qualified_type t, uint32_t element, token_index at);
     /* the case or default label of switch body a jump with the kept value
        goes to, or 0 ([stmt.switch]/5) */
     uint32_t switch_target(uint32_t body, uint64_t value, bool &found) const;
@@ -4765,6 +4804,8 @@ class semantic_analysis
     analysis_result omitted_element_checks(SyntaxRef list,
                                            qualified_type element,
                                            bool has_default);
+    /* the lookup_horizon for a default member initializer of cls */
+    token_index member_initializer_horizon(entity_index cls) const;
     analysis_result member_default_in_aggregate(SyntaxRef list,
                                                 entity_index owner,
                                                 SyntaxRef default_initializer,
@@ -5136,6 +5177,7 @@ class semantic_analysis
                                         bool move, bool &non_throwing,
                                         bool &nonconst_form);
     bool assignment_not_trivial(entity_index c);
+    bool variant_member_prevents_assignment(entity_index u, bool move);
     void declare_implicit_assignment(entity_index c, bool move, bool deleted,
                                      bool non_throwing, bool nonconst = false);
     analysis_result implicit_assignments(entity_index c);
@@ -6864,6 +6906,9 @@ class semantic_analysis
     entity_index constraint_parameter(entity_index t, token_index i) const;
     /* whether parameter p is one of t's own (not of an enclosing class
        template's) */
+    entity_index constraint_plain_typedef(entity_index t, token_index i) const;
+    entity_index constraint_own_type_parameter(entity_index t,
+                                               uint64_t position) const;
     bool constraint_parameter_is_own(entity_index t, entity_index p) const;
     /* the type a type-id written in t's requires-clause names, analysed in
        t's template-parameter scope (what [abi:mangle.template-args] spells) */
@@ -7018,7 +7063,8 @@ class semantic_analysis
         form kind = form::bad;
         /* [over.ics.scs]/3: the rank of the standard conversion sequence
            (a user-defined one's second): 0 Exact Match, 1 Promotion, 2
-           Conversion */
+           Conversion; 3, a scalar to a vector's lanes
+           ([ext:clang_ext_vector_type]) */
         uint8_t rank = 0;
         /* the identity conversion: none but lvalue transformations
            ([over.ics.rank]/3.2.1) */
@@ -7325,6 +7371,9 @@ class semantic_analysis
     /* the functions of the overload set whose first is e
        (entity::next_overload), each once, added to out */
     void overload_set(entity_index e, owned_array<entity_index> &out) const;
+    /* [temp.dep.candidate]/1: e, a function of space, declared first after
+       the template instantiated */
+    bool declared_past_horizon(entity_index e, entity_index space) const;
     /* [over.call.func]: the token of the name a call's postfix-expression
        is, and the call's callee f made the best viable function of the
        set (its implied object argument's address object, 0 if none) */
@@ -7630,6 +7679,14 @@ class semantic_analysis
                                           qualified_type type,
                                           initialized_value &result);
     uint64_t vector_value_bytes(qualified_type type) const;
+    /* [ext:gnu_vector_size] node, a call that returns one scalar in every
+       lane of the vector type: m, that vector as a constant; false when
+       it is not such a call */
+    bool splat_call_value(SyntaxRef at, uint32_t node, qualified_type type,
+                          initialized_value &m);
+    /* the vector type whose every lane is v, as a constant */
+    void splat_constant(SyntaxRef at, qualified_type to, qualified_type element,
+                        const constant_value &v, initialized_value &result);
     analysis_result vector_splat(SyntaxRef at, expression_meaning &m,
                                  qualified_type to);
     void vector_converted(expression_meaning &m, qualified_type to,

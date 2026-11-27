@@ -643,8 +643,20 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
             bool copyable = class_trivially_copyable(c, known);
             if (!known)
                 return false;
-            if (clang_template_default_constructor_of(entity_table[c]))
-                return false;
+            if (clang_template_default_constructor_of(entity_table[c])) {
+                /* [ext:clang_type_traits] __is_trivial: a constructor
+                   template is no default constructor to be trivial
+                   (beside an X() = default or = delete: not followed) */
+                if (entity_table[c].defaulted_default_constructor)
+                    return false;
+                for (entity_index k = entity_table[c].first_constructor; k;
+                     k = entity_table[k].next_constructor)
+                    if (declared_deleted(k) &&
+                        !type_table[entity_table[k].type.unqualified()]
+                             .parameter_count)
+                        return false;
+                return true;
+            }
             bool known_default = true;
             answer = copyable && clang_trivial_special_members(c) &&
                      trivial_default_constructor(c, known_default);
