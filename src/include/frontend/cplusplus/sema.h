@@ -2370,6 +2370,11 @@ class semantic_analysis
         /* [ext:clang_ext_vector_type] ext_vector_type(N) among the specifiers
            (only where the declaration applies it: ext_vector_allowed) */
         ext_vector_attribute ext_vector;
+        /* [ext:gnu_vector_size] vector_size within the
+           decl-specifier-seq: of the type it names (decl_specifier_seq,
+           which says it takes one) */
+        uint64_t vector_bytes = 0;
+        bool vector_size_allowed = false;
         /* [dcl.constexpr]/2: consteval (constexpr_ too) */
         bool consteval_ = false;
         /* [diff.cpp14.dcl.dcl]/1: register */
