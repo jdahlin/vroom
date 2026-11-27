@@ -1343,6 +1343,16 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             no = swap;
             cc ^= 1;
             nt = i->b;
+        } else if ((next == VIR_BLOCK_NONE || no != L->label[next]) &&
+                   nt == i->c && L->position[i->c] <= L->position[b] &&
+                   L->position[i->b] > L->position[b]) {
+            /* neither falls through and the false edge goes back: the
+			 * conditional jump takes it, one branch per iteration */
+            uint32_t swap = yes;
+            yes = no;
+            no = swap;
+            cc ^= 1;
+            nt = i->b;
         }
         record *r = x64_record_emit(e, X64_OP_JCC);
         r->condition = cc;
