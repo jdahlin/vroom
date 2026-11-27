@@ -1100,12 +1100,15 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         constant_value v;
         constness c = constness::constant;
         bool pointer = record.kind == type_kind::pointer;
+        bool to_member = record.kind == type_kind::pointer_to_member;
         fundamental_type f = evaluated_type(t);
-        if (f == fundamental_type::none && !pointer)
+        if (f == fundamental_type::none && !pointer && !to_member)
             return CONST_UNKNOWN;
         /* a null pointer's zero ([conv.ptr]/1) */
         if (zero && pointer)
             v.kind = constant_value_kind::pointer;
+        else if (zero && to_member)
+            v.kind = constant_value_kind::member_pointer;
         else if (zero)
             v = value_of(f, 0);
         else if (init)
@@ -1480,6 +1483,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         const entity &e = entity_table[x.a];
         type_kind tk = type_table[e.type.unqualified()].kind;
         bool scalar_variable = tk == type_kind::pointer ||
+                               tk == type_kind::pointer_to_member ||
                                evaluated_type(e.type) != fundamental_type::none;
         /* a variable of static storage duration of scalar type: its address
            is a permitted result ([expr.const]/11), its value is read only
@@ -2243,7 +2247,8 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     }
     type_kind tk = type_table[x.type.unqualified()].kind;
     bool scalar = evaluated_type(x.type) != fundamental_type::none;
-    if (!scalar && tk != type_kind::pointer && tk != type_kind::class_type)
+    if (!scalar && tk != type_kind::pointer && tk != type_kind::class_type &&
+        tk != type_kind::pointer_to_member)
         return CONST_UNKNOWN;
     bool lazy_pointer =
         tk == type_kind::pointer && x.kind == semantic_kind::entity && x.a &&
@@ -3110,6 +3115,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         type_kind k = type_table[x.type.unqualified()].kind;
         if (k != type_kind::class_type && k != type_kind::pointer &&
             k != type_kind::complex && k != type_kind::array &&
+            k != type_kind::pointer_to_member &&
             fundamental_of(x.type) != fundamental_type::void_)
             return CONST_UNKNOWN;
     }
@@ -3125,6 +3131,12 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
     switch (x.kind) {
     case semantic_kind::call:
         return evaluate_call(state, node, v);
+    /* [expr.unary.op]/3.1: &C::m designates the member m */
+    case semantic_kind::member_pointer:
+        v = constant_value();
+        v.kind = constant_value_kind::member_pointer;
+        v.designator = x.a;
+        return constness::constant;
     case semantic_kind::conversion: {
         conversion_kind k = static_cast<conversion_kind>(x.op);
         /* [ext:clang_ext_vector_type] the scalar in every lane */
@@ -3149,6 +3161,34 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         }
         if (k == conversion_kind::array_to_pointer)
             return evaluate_array_pointer(state, x.a, v);
+        /* [conv.mem]/1: the null member pointer value; [conv.qual]: the
+           same member.  A conversion between a base's and a derived
+           class's ([conv.mem]/2) is not followed */
+        if (k == conversion_kind::null_member_pointer) {
+            v = constant_value();
+            v.kind = constant_value_kind::member_pointer;
+            return constness::constant;
+        }
+        if (k == conversion_kind::member_pointer_qualification) {
+            c = evaluate_node(state, x.a, v);
+            if (c == constness::constant &&
+                v.kind != constant_value_kind::member_pointer)
+                return CONST_UNKNOWN;
+            return c;
+        }
+        /* [conv.bool]/1 of a pointer to member */
+        if (k == conversion_kind::boolean &&
+            type_table[semantics[x.a].type.unqualified()].kind ==
+                type_kind::pointer_to_member) {
+            c = evaluate_node(state, x.a, v);
+            if (c != constness::constant)
+                return c;
+            if (v.kind != constant_value_kind::member_pointer ||
+                fundamental_of(x.type) != fundamental_type::bool_)
+                return CONST_UNKNOWN;
+            v = value_of(fundamental_type::bool_, v.designator != 0);
+            return constness::constant;
+        }
         /* [conv.func]/1: a function lvalue becomes a pointer to the
            function, the address of its object ([expr.unary.op]/3) */
         if (k == conversion_kind::function_to_pointer) {
@@ -4800,6 +4840,14 @@ uint32_t semantic_analysis::value_tree(const constant_evaluation &state,
     }
     if (v.kind == constant_value_kind::pointer)
         return pointer_tree(state, t, v, at);
+    /* &C::m as written (the null member pointer value has no such tree:
+       the initializer as written is lowered) */
+    if (v.kind == constant_value_kind::member_pointer) {
+        if (!v.designator)
+            return 0;
+        return expression_node(semantic_kind::member_pointer, m, at,
+                               v.designator);
+    }
     if (v.kind != constant_value_kind::array &&
         v.kind != constant_value_kind::class_object)
         return 0;

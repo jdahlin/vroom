@@ -1241,6 +1241,9 @@ enum class constant_value_kind : uint8_t {
     array,
     class_object,
     union_object,
+    /* [basic.compound]/1.8: a pointer to a member: designator is the
+       member, 0 for the null member pointer value */
+    member_pointer,
 };
 
 struct constant_value {

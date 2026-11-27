@@ -2325,6 +2325,8 @@ analysis_result semantic_analysis::declare_with_initializer(
         bool of_class =
             type_table[element.unqualified()].kind == type_kind::class_type ||
             type_table[element.unqualified()].kind == type_kind::pointer ||
+            type_table[element.unqualified()].kind ==
+                type_kind::pointer_to_member ||
             !(element == type);
         if (!value.node) {
             if (s.constexpr_)
