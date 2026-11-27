@@ -2217,6 +2217,13 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                              statement_node(semantic_kind::expression_statement,
                                             id, value.node));
                     continue;
+                } else if (entity_table[e].base_subobject &&
+                           init.is(syntax_kind::braced_init_list)) {
+                    /* [class.base.init]/7 with [dcl.init]/16: B({...}) of
+                       a base with no constructors (libjpeg's
+                       jpeg_error_mgr): the temporary the list makes is
+                       the base, as for B{...} */
+                    r = list_initialization(init, type, true, value);
                 } else if (entity_table[e].base_subobject) {
                     /* a base copied from an expression: [conv.ptr]/3's
                    conversion of the source */
