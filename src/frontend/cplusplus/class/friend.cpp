@@ -359,6 +359,14 @@ analysis_result semantic_analysis::friend_elaborated_class(entity_index c,
             n, "class.friend",
             "a friend class in a namespace with names that are not known");
     lookup_result found = lookup_unqualified(name, lookup_filter::types);
+    /* in a specialization, lookup does not see what was declared after the
+       template ([temp.res]): a class declared there, or by an earlier
+       friend declaration, is the friend by its name ([temp.friend]) */
+    if (found.unknown && !found.ambiguous && instantiation_depth && !local &&
+        !found.entity) {
+        befriend_by_name(c, space, name);
+        return analysis_result::well_formed;
+    }
     if (found.unknown || found.ambiguous)
         return not_supported_because(
             n, "class.friend",
