@@ -1856,7 +1856,8 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
                 e->unit->function_node_counts[caller] <= WALK_INLINE_ONCE_MAX;
             /* a call in no loop is run seldom, so only a small callee earns
 			 * its copy there, as gcc and clang weigh a call by how often it
-			 * runs; `inline` and constant arguments keep the larger limits */
+			 * runs; `inline` functions (in C++ templates and in-class ones
+			 * too) and constant arguments keep the larger limits */
             /* (a switch is on the loop stack too; the entries of the callers
 			 * stay on it inside an inlined copy) */
             bool in_loop = false;
@@ -1866,7 +1867,9 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
             lim = WALK_INLINE_VIR_MAX;
             if (once)
                 lim = WALK_INLINE_ONCE_MAX;
-            else if (!(y->flags & AST_SYMBOL_FLAG_INLINE) && !in_loop)
+            else if (!(y->flags &
+                       (AST_SYMBOL_FLAG_INLINE | AST_SYMBOL_FLAG_LINKONCE)) &&
+                     !in_loop)
                 lim = WALK_INLINE_VIR_OUTSIDE_LOOP_MAX;
             /* codegen_inline_size includes the same constant-argument sites bottom-up,
 			 * so selected nested copies are included in the caller's bound. */
