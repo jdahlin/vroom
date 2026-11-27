@@ -1334,11 +1334,30 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
     if (expanded)
         clause_packs = &packs;
     analysis_result r;
-    if (designations.any)
+    if (designations.any && target == type_kind::lvalue_reference &&
+        (type_table[type.unqualified()].operand.cv() & cv_const)) {
+        /* [dcl.init.list]/3.10, [impl.clang] for a designated list: a
+           prvalue of the referenced aggregate, which the reference binds */
+        qualified_type prvalue = qualified_type::make(
+            type_table[type.unqualified()].operand.unqualified(), cv_none);
+        initialized_value made;
+        r = designated_list_initialization(list, clauses, designations, prvalue,
+                                           made);
+        if (r == analysis_result::well_formed) {
+            expression_meaning m;
+            m.type = prvalue;
+            m.category = value_category::prvalue;
+            m.evaluation = made.evaluation;
+            m.value = made.value;
+            m.node = made.node;
+            r = initialize_with(list, m, type, true, false, result);
+        }
+    } else if (designations.any) {
         r = designated_list_initialization(list, clauses, designations, type,
                                            result);
-    else
+    } else {
         r = list_initialization_of(list, clauses, type, direct, result);
+    }
     clause_packs = saved;
     return r;
 }
