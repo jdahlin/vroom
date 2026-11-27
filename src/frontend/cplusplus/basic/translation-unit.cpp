@@ -206,6 +206,22 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
             type_table[entity_table[k].type.unqualified()].parameter_count ==
                 entity_table[k].default_arguments)
             return true;
+    /* a constructor template callable without arguments, its parameters
+       a pack or defaulted, is user-provided too */
+    if (x.constructor_templates)
+        for (const function_template &f : function_templates) {
+            if (f.name != x.constructor_templates)
+                continue;
+            qualified_type of = entity_table[f.entity].type;
+            uint32_t required = type_table[of.unqualified()].parameter_count;
+            if (required &&
+                type_table[type_table.parameters(of.unqualified())[required - 1]
+                               .unqualified()]
+                        .kind == type_kind::pack_expansion)
+                required--;
+            if (required <= f.default_arguments)
+                return true;
+        }
     if (x.union_ && x.member_count)
         return false;
     for (uint32_t i = 0; i < x.member_count; i++) {
