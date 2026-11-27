@@ -278,8 +278,15 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
          s.is(s[1 + gnu], syntax_kind::declarator)))
         return function_template_definition(t, s);
     char shape[160];
-    snprintf(shape, sizeof shape, "%u parts, part 1 is %s", s.size(),
-             syntax_kind_name(s[1 + gnu].kind()));
+    /* (that part may be missing, or a token, which has no kind) */
+    const char *part = "none";
+    if (1 + gnu < s.size()) {
+        if (s[1 + gnu].is_token())
+            part = "a token";
+        else
+            part = syntax_kind_name(s[1 + gnu].kind());
+    }
+    snprintf(shape, sizeof shape, "%u parts, part 1 is %s", s.size(), part);
     return not_supported_because(t, "temp.class", shape);
 }
 
