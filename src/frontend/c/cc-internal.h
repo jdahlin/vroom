@@ -143,6 +143,8 @@ CC_PRIVATE bool cc_builtin_x86_sse2_build(cc *c, const char *name,
                                           cc_id_list *args,
                                           ast_qualified_type rt, uint32_t loc,
                                           uint32_t *out);
+uint32_t cc_vector_convert_node(cc *c, ast_qualified_type rt, uint32_t a,
+                                uint32_t loc);
 CC_PRIVATE uint32_t cc_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b,
                                      uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_elementwise_minmax_build(cc *c,

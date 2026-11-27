@@ -19,6 +19,18 @@ typedef struct virbuild_elements {
     uint16_t covered;   /* a bit per byte stored */
 } virbuild_elements;
 
+/* a slot a memset has zeroed: the 8-byte half no store has touched holds 0 */
+static void virbuild_elements_zero_half(codegen_context *e,
+                                        virbuild_elements *E)
+{
+    for (uint32_t at = 0; at < 16; at += 8)
+        if (!(E->covered & 0xffu << at)) {
+            E->value[at] = virbuild_constant_integer(e, VIR_TYPE_I64, 0);
+            E->width[at] = 8;
+            E->covered = (uint16_t)(E->covered | 0xffu << at);
+        }
+}
+
 /* the 32-bit word at byte `at` is made of the same values as the one at 0 */
 static bool virbuild_elements_word_repeats(const virbuild_elements *E,
                                            uint32_t at)
@@ -177,6 +189,7 @@ VPRIV bool virbuild_vectors_from_elements(codegen_context *e)
         uint32_t b = V->block_order[oi];
         virbuild_elements E = {};
         uint32_t prev = 0;
+        uint32_t zeroed = 0; /* slot + 1 of the last 16-byte memset of 0 */
 
         for (uint32_t q = V->blocks[b].first_insn; q;
              prev = q, q = V->insns[q].next) {
@@ -191,10 +204,18 @@ VPRIV bool virbuild_vectors_from_elements(codegen_context *e)
                 uint32_t size = virbuild_access_bytes(V, &in);
 
                 if (!slot || size > 8 || offset + size > 16) {
+                    /* a vector store, or one that may write any slot */
                     E.slot = 0;
+                    zeroed = 0;
                     continue;
                 }
                 uint32_t bytes = (1u << size) - 1;
+                if (zeroed && zeroed != slot)
+                    zeroed = 0;
+                /* a byte stored twice: what the slot holds is no longer tracked,
+                   its zeros neither */
+                if (E.slot == slot && (E.covered & bytes << offset))
+                    zeroed = 0;
                 if (E.slot != slot || (E.covered & bytes << offset)) {
                     E = {};
                     E.slot = slot;
@@ -208,6 +229,8 @@ VPRIV bool virbuild_vectors_from_elements(codegen_context *e)
                     offset || (in.flags & VIR_INSN_FLAG_VOL))
                     continue;
                 virbuild_elements_at W = {e, b, &prev};
+                if (zeroed == E.slot)
+                    virbuild_elements_zero_half(e, &E);
                 uint32_t value = virbuild_elements_vector(&W, &E, in.type);
 
                 if (value) {
@@ -218,7 +241,22 @@ VPRIV bool virbuild_vectors_from_elements(codegen_context *e)
                        (VIR_EFFECT_W | VIR_EFFECT_C | VIR_EFFECT_A |
                         VIR_EFFECT_F)) {
                 /* a memset before the stores begins again; anything else may write */
+                int64_t value = 0, bytes = 0;
+
                 E.slot = 0;
+                zeroed = 0;
+                if (in.op == VIR_OP_MEMSET &&
+                    virbuild_value_integer_constant(
+                        V, virbuild_value_resolve(V, in.b), &value) &&
+                    !value &&
+                    virbuild_value_integer_constant(
+                        V, virbuild_value_resolve(V, in.c), &bytes) &&
+                    bytes >= 16) {
+                    uint32_t slot = virbuild_elements_slot(V, in.a, &offset);
+
+                    if (!offset)
+                        zeroed = slot;
+                }
             }
         }
     }

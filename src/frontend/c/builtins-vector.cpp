@@ -2,6 +2,28 @@
 #include "cc-internal.h"
 
 /*
+ * convertvector of the low half of a 16-byte integer vector (a shufflevector of its lanes
+ * 0..n-1) to lanes twice as wide, which _mm_cvtepu8_epi16 and its like are: the lanes
+ * interleaved with zeros, or with themselves and shifted down, so that no 8-byte vector is
+ * made.  0 when node is not that.
+ */
+static uint32_t cc_vector_widen_half_build(cc *c, ast_qualified_type rt,
+                                           uint32_t node, uint32_t loc);
+
+uint32_t cc_vector_convert_node(cc *c, ast_qualified_type rt, uint32_t a,
+                                uint32_t loc)
+{
+    uint32_t widened = cc_vector_widen_half_build(c, rt, a, loc);
+
+    if (widened)
+        return widened;
+    cc_id_list args;
+    cc_id_list_init(&args);
+    cc_id_list_append(c, &args, a);
+    return cc_builtin_node_new(c, CC_BUILTIN_CONVERTVECTOR, rt, loc, &args);
+}
+
+/*
  * __builtin_shufflevector(a, b, i...): lanes of a then b picked by constant
  * indices (-1: undefined, here 0), a vector of as many lanes;
  * __builtin_convertvector(v, AST_TYPE): each lane converted to AST_TYPE's lane type.
@@ -29,8 +51,7 @@ CC_PRIVATE uint32_t cc_builtin_vector_build(cc *c, bool shuffle, uint32_t loc)
                             "must have the same number of elements");
             return cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc);
         }
-        cc_id_list_append(c, &args, a);
-        return cc_builtin_node_new(c, CC_BUILTIN_CONVERTVECTOR, rt, loc, &args);
+        return cc_vector_convert_node(c, rt, a, loc);
     }
     b = cc_node_rvalue(c, cc_assignment_parse(c));
     cc_id_list_append(c, &args, a);
@@ -502,6 +523,74 @@ static uint32_t cc_vector_pick(cc *c, ast_qualified_type rt, uint32_t a,
                           cc_node_integer_new(
                               c, indices[i], cc_type_basic(AST_TYPE_INT), loc));
     return cc_builtin_node_new(c, CC_BUILTIN_SHUFFLEVECTOR, rt, loc, &list);
+}
+
+static uint32_t cc_vector_widen_half_build(cc *c, ast_qualified_type rt,
+                                           uint32_t node, uint32_t loc)
+{
+    const struct node *x = AST_NODE(node);
+
+    if (!CC_X86_64(c) || x->op != AST_NODE_BUILTIN ||
+        x->aux != CC_BUILTIN_SHUFFLEVECTOR || x->c < 2)
+        return 0;
+    uint32_t first = c->lists[x->b];
+    uint32_t second = c->lists[x->b + 1];
+    uint32_t lanes = x->c - 2;
+    ast_qualified_type from =
+        AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(first)->ty);
+
+    if (!cc_type_is_vector(c, from) || !cc_type_is_vector(c, rt) ||
+        cc_type_size(c, from) != 16 || cc_type_size(c, rt) != 16 ||
+        cc_expression_has_side_effects(c, second))
+        return 0;
+    ast_qualified_type narrow = AST_TYPE(c, from)->base;
+    ast_qualified_type wide = AST_TYPE(c, rt)->base;
+    uint32_t width = (uint32_t)cc_type_size(c, narrow);
+
+    if (!cc_type_is_integer(c, narrow) || !cc_type_is_integer(c, wide) ||
+        cc_type_size(c, wide) != 2 * width || lanes * width != 8 || width > 4)
+        return 0;
+    for (uint32_t i = 0; i < lanes; i++) {
+        i128 index = 0;
+
+        if (!cc_constant_integer(c, c->lists[x->b + 2 + i], &index) ||
+            index != (i128)i)
+            return 0;
+    }
+    bool zero = !cc_type_is_signed(c, narrow);
+    uint32_t pre = 0;
+    uint32_t held = cc_vector_hold(c, first, from, &pre, loc);
+    uint32_t other = cc_node_rvalue(c, held);
+
+    if (zero)
+        other = cc_vector_op(c, LEX_TOKEN_CARET, from, cc_node_rvalue(c, held),
+                             cc_node_rvalue(c, held), loc);
+    int picked[16];
+
+    for (uint32_t i = 0; i < lanes; i++) {
+        picked[2 * i] = (int)i;
+        picked[2 * i + 1] = (int)i;
+        if (zero)
+            picked[2 * i + 1] = (int)(2 * lanes + i);
+    }
+    uint32_t mixed = cc_vector_pick(c, from, cc_node_rvalue(c, held), other,
+                                    picked, 2 * lanes, loc);
+    if (!zero) { /* each wide lane holds its narrow one twice: shift one out */
+        ast_qualified_type shorts = cc_type_basic(AST_TYPE_SHORT);
+
+        if (width == 2)
+            shorts = cc_type_basic(AST_TYPE_INT);
+        if (width == 4)
+            shorts = cc_type_basic(AST_TYPE_LONG_LONG);
+        ast_qualified_type work = cc_type_vector(c, shorts, 16);
+
+        mixed =
+            cc_vector_op(c, LEX_TOKEN_GREATER_GREATER, work,
+                         cc_cast_insert(c, mixed, work, AST_CAST_NOP),
+                         cc_node_integer_new(c, 8 * width, shorts, loc), loc);
+    }
+    return cc_lowering_sequence(c, pre,
+                                cc_cast_insert(c, mixed, rt, AST_CAST_NOP));
 }
 
 /* __builtin_elementwise_add_sat and _sub_sat of two vectors of one integer
