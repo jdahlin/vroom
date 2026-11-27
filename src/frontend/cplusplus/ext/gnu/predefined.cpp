@@ -48,7 +48,7 @@ bool preprocessor::gnu_dynamic_macro(const macro_definition &m,
     case dynamic_macro::timestamp: {
         struct stat st;
         char stamp[64];
-        if (stat(inclusions.back().file->name.c_str(), &st) == 0) {
+        if (stat_file(inclusions.back().file->name.c_str(), &st) == 0) {
             struct tm t;
             localtime_r(&st.st_mtime, &t);
             strftime(stamp, sizeof stamp, "\"%a %b %e %H:%M:%S %Y\"", &t);

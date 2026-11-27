@@ -194,6 +194,12 @@ static bool report_psabi(void *context, uint32_t location, const char *text)
     return m.severity == diagnostic_severity::error;
 }
 
+/* the driver's C preprocessor p keeps the list -MD writes */
+static void compile_dependency(void *context, const char *path, bool system)
+{
+    pp_dependency_note(static_cast<pp *>(context), path, system);
+}
+
 /* phases 7 to 9: the parse, the analysis, and unless -fsyntax-only the
    code; the developer outputs of the parse or of the analysis on out */
 static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
@@ -370,8 +376,11 @@ static int compile(const cplusplus_compile_options *o, pp *p,
     diagnostic_consumer diagnostics(settings);
     dump_phase phase = request.phase();
     if (phase == dump_phase::lexing) {
-        if (!dump_raw_tokens(o->path, behavior, diagnostics, out.get(),
-                             messages.get())) {
+        owned_buffer storage;
+        source_files where(behavior, diagnostics);
+        where.directory = o->directory;
+        if (!dump_raw_tokens(where.on_disk(o->path, storage), behavior,
+                             diagnostics, out.get(), messages.get())) {
             dprintf(o->errfd, "vcc: error: cannot read %s\n", o->path);
             return 1;
         }
@@ -382,10 +391,13 @@ static int compile(const cplusplus_compile_options *o, pp *p,
     }
     /* (source_files keeps a reference) */
     source_files files(behavior, diagnostics);
+    files.directory = o->directory;
     diagnostics.files = &files;
     files.file_options.preprocessed_input = o->preprocessed_input != 0;
     preprocessor_options options;
     options.predefined_macros = false;
+    options.dependency = compile_dependency;
+    options.dependency_context = p;
     compile_predefines(o, options);
     compile_search_path(o->search, options);
     for (int i = 0; i < o->embed_directory_count; i++)

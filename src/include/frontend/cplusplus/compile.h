@@ -15,9 +15,11 @@ extern "C" {
 #endif
 
 struct cplusplus_compile_options {
-    const char *path; /* the main file */
-    int edition;      /* the standard's year as -std= gives it: 98 .. 26 */
-    int gnu;          /* -std=gnu++NN */
+    const char *path; /* the main file, as the command line names it */
+    /* the directory relative paths are read from, or NULL: the process's */
+    const char *directory;
+    int edition; /* the standard's year as -std= gives it: 98 .. 26 */
+    int gnu;     /* -std=gnu++NN */
     /* clang's predefined macros and the command line's -D/-U/-include, as
        #define/#undef/#include lines (the driver's predefine text) */
     const char *predefines;

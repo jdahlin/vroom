@@ -20,11 +20,6 @@ namespace cplusplus
 namespace
 {
 
-bool is_regular_file(const char *path, struct stat *st)
-{
-    return stat(path, st) == 0 && S_ISREG(st->st_mode);
-}
-
 /* the place of a directory in the search: -iquote first, then -I,
    -isystem, -idirafter, each in command line order */
 unsigned search_rank(include_search s)
@@ -33,6 +28,18 @@ unsigned search_rank(include_search s)
 }
 
 } // namespace
+
+int preprocessor::stat_file(const char *path, struct stat *st) const
+{
+    owned_buffer storage;
+    return stat(files.on_disk(path, storage), st);
+}
+
+void preprocessor::note_dependency(const char *path, bool system)
+{
+    if (options.dependency)
+        options.dependency(options.dependency_context, path, system);
+}
 
 /*
  * [cpp.include]/2-3: the file named by a header-name's characters between
@@ -52,7 +59,7 @@ bool preprocessor::find_header(const char *name, size_t length, bool angled,
     if (length && name[0] == '/') {
         vbuffer_append(path.get(), name, length);
         vbuffer_append(path.get(), "", 1);
-        return is_regular_file(path.data(), &st);
+        return stat_file(path.data(), &st) == 0 && S_ISREG(st.st_mode);
     }
     if (!angled && after_directory < 0 && !inclusions.empty()) {
         /* the directory of the file containing the directive */
@@ -65,7 +72,7 @@ bool preprocessor::find_header(const char *name, size_t length, bool angled,
         vbuffer_append(path.get(), "/", 1);
         vbuffer_append(path.get(), name, length);
         vbuffer_append(path.get(), "", 1);
-        if (is_regular_file(path.data(), &st)) {
+        if (stat_file(path.data(), &st) == 0 && S_ISREG(st.st_mode)) {
             *system = inclusions.back().system_header;
             return true;
         }
@@ -88,7 +95,7 @@ bool preprocessor::find_header(const char *name, size_t length, bool angled,
                 vbuffer_append(path.get(), "/", 1);
             vbuffer_append(path.get(), name, length);
             vbuffer_append(path.get(), "", 1);
-            if (is_regular_file(path.data(), &st)) {
+            if (stat_file(path.data(), &st) == 0 && S_ISREG(st.st_mode)) {
                 *directory = here;
                 *system = dirs[i].search == include_search::system ||
                           dirs[i].search == include_search::after;
@@ -232,7 +239,9 @@ void preprocessor::directive_include(const preprocessing_token &name,
     }
     struct stat st;
     /* OPTIMIZATION: the guard only for a file stat identifies */
-    bool identified = stat(path.data(), &st) == 0;
+    bool identified = stat_file(path.data(), &st) == 0;
+    /* before a skip below: a file included again is still depended on */
+    note_dependency(path.data(), system);
     for (const included_once &o : once_files)
         if (o.device == (uint64_t)st.st_dev && o.inode == (uint64_t)st.st_ino)
             return;
@@ -319,7 +328,7 @@ bool preprocessor::guard_skips(uint64_t device, uint64_t inode)
 void preprocessor::include_once()
 {
     struct stat st;
-    if (stat(inclusions.back().file->name.c_str(), &st) == 0)
+    if (stat_file(inclusions.back().file->name.c_str(), &st) == 0)
         once_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
 }
 

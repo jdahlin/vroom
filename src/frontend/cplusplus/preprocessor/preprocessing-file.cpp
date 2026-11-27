@@ -149,7 +149,7 @@ bool preprocessor::start(const char *path)
     if (!main_file)
         return false;
     struct stat st;
-    if (stat(path, &st) == 0)
+    if (stat_file(path, &st) == 0)
         entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
     inclusions.append(
         {main_file, -1, 0, 0, false, false, preprocessing_token()});

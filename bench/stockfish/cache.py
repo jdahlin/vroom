@@ -3,8 +3,8 @@
 files are unchanged (a result cache in "direct mode", as vccd could keep in
 memory).  Stockfish cold, warm, and with one header edited, in a copy.
 
-The dependencies come from a separate vpp -M: -c -MD does not list a C++
-translation unit's headers yet.  Not covered: a new header that now shadows
+The dependencies are the compile's own -MD, hashed after it: a file edited
+while it is compiled is not noticed.  Not covered: a new header that now shadows
 one found later on the search path, and __DATE__/__TIME__.
 """
 import hashlib, os, shutil, subprocess, time
@@ -37,16 +37,14 @@ def build(tree, cache):
         entry = cache.get(key)
         if entry and all(current(p) == h for p, h in entry[0]):
             return 0
-        m = subprocess.run([VPP] + FLAGS + ['-M', s], cwd=tree, check=True,
-                           capture_output=True, text=True).stdout
-        deps = [w for w in m.split(':', 1)[1].split() if w != '\\']
-        # hashed before the compile: a file edited meanwhile misses next time
-        before = [(p, digest(os.path.join(tree, p))) for p in deps]
         obj = os.path.join(OUT, s.replace('/', '_') + '.o')
-        subprocess.run([VPP] + FLAGS + ['-c', s, '-o', obj], cwd=tree,
-                       check=True)
+        subprocess.run([VPP] + FLAGS + ['-c', s, '-o', obj, '-MD', '-MF',
+                                        obj + '.d'], cwd=tree, check=True)
+        with open(obj + '.d') as f:
+            deps = [w for w in f.read().split(':', 1)[1].split() if w != '\\']
+        inputs = [(p, digest(os.path.join(tree, p))) for p in deps]
         with open(obj, 'rb') as f:
-            cache[key] = (before, f.read())
+            cache[key] = (inputs, f.read())
         return 1
 
     tus = [os.path.relpath(os.path.join(d, f), tree)

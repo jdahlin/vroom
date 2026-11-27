@@ -225,7 +225,6 @@ static int driver_job_compile_cplusplus(struct driver_job *job, pp *p,
                                         const cc_options *co)
 {
 #ifdef __cplusplus
-    char path[4096];
     const char *main = job->main_file;
 
     if (job->stdin_src) {
@@ -233,12 +232,9 @@ static int driver_job_compile_cplusplus(struct driver_job *job, pp *p,
                             "compiled yet\n");
         return 1;
     }
-    if (main[0] != '/' && env->cwd) {
-        snprintf(path, sizeof path, "%s/%s", env->cwd, main);
-        main = path;
-    }
     struct cplusplus_compile_options o = {};
     o.path = main;
+    o.directory = env->cwd;
     o.edition = job->cxx;
     o.gnu = !job->strict_standard;
     o.predefines = job->predefines.data;

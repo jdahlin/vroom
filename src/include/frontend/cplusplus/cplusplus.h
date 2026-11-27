@@ -26,6 +26,8 @@
 #include "common/buffer.h"
 #include "frontend/cplusplus/owned.h"
 
+struct stat;
+
 namespace cplusplus
 {
 
@@ -647,6 +649,11 @@ class source_files
     /* the source file at path, or nullptr if it cannot be read */
     entry *open(const char *path);
     entry *open(const char *path, lexer_options options);
+    /* where relative paths are read from (the client's directory in a
+       server), or nullptr: the process's.  Names stay as written. */
+    const char *directory = nullptr;
+    /* path as the filesystem is to see it: itself, or in storage */
+    const char *on_disk(const char *path, owned_buffer &storage) const;
     /* the options of the files open() reads */
     lexer_options file_options;
     /* a pragma that changes the floating-point environment or its
@@ -754,6 +761,11 @@ struct preprocessor_options {
     bool predefined_macros = true;
     /* [cpp.include]/6: "up to an implementation-defined nesting limit" */
     unsigned include_nesting_limit = 200;
+    /* told of each file the translation unit depends on, as spelled, at
+       every use of it: what is included (a skipped file too), embedded or
+       found by __has_include */
+    void (*dependency)(void *context, const char *path, bool system) = nullptr;
+    void *dependency_context = nullptr;
     /* for clang's -dM: keep definitions in the order made */
     bool keep_definition_order = false;
 };
@@ -984,6 +996,9 @@ class preprocessor
                            directive_kind kind);
     bool header_name_from_tokens(const preprocessing_token &first,
                                  owned_buffer &header, source_location *at);
+    void note_dependency(const char *path, bool system);
+    /* stat of a path as spelled (source_files::directory) */
+    int stat_file(const char *path, struct stat *st) const;
     bool find_header(const char *name, size_t length, bool angled,
                      int32_t after_directory, owned_buffer &path,
                      int32_t *directory, bool *system);
