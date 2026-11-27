@@ -2090,7 +2090,9 @@ analysis_result semantic_analysis::class_list_initialization(
             size_t next = 0;
             return aggregate_elements(list, clauses, next, type, result);
         }
-        if (clauses.empty() || !entity_table[c].first_constructor)
+        if (clauses.empty() || (!entity_table[c].first_constructor &&
+                                !entity_table[c].constructor_template &&
+                                !entity_table[c].constructor_templates))
             return not_supported_because(
                 list, "over.match.list",
                 "list-initialization of a non-aggregate with no constructor "
