@@ -3733,6 +3733,9 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
 uint32_t semantic_analysis::subobject_destructions(entity_index c,
                                                    token_index at)
 {
+    /* a union's members are all variant members: none is destroyed */
+    if (entity_table[c].union_)
+        return 0;
     owned_array<entity_index> order;
     construction_order(c, order);
     owned_array<uint32_t> statements;
