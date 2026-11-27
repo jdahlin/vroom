@@ -1942,7 +1942,7 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
     int64_t saved_sp = 0;
     codegen_value res;
 
-    uint32_t lmark = W->local_slot_count;
+    uint32_t lmark = 0;
 
     memcpy(I.caller_array_elements, W->array_elements,
            sizeof I.caller_array_elements),
@@ -2008,6 +2008,9 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
             }
             av[i] = v;
         }
+        /* (after the arguments: a compound literal among them lives as long
+		   as the caller's block, not as this copy) */
+        lmark = W->local_slot_count;
         W->inline_local_depth++;
         for (uint32_t i = 0; i < body->aux; i++) {
             uint32_t p = c->lists[body->a + i];
