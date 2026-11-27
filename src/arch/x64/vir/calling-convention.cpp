@@ -220,9 +220,9 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
     /* Prefer the dying first input for x86's destructive operations: the SSE
 	 * ones on vectors too, which would else copy through a scratch. */
     if (vir_type_is_vector(i->type) &&
-        (i->op == VIR_OP_X86 || i->op == VIR_OP_ADD || i->op == VIR_OP_SUB ||
-         i->op == VIR_OP_MUL || i->op == VIR_OP_AND || i->op == VIR_OP_OR ||
-         i->op == VIR_OP_XOR))
+        ((i->op == VIR_OP_X86 && vir_type_is_vector(f->insns[i->a].type)) ||
+         i->op == VIR_OP_ADD || i->op == VIR_OP_SUB || i->op == VIR_OP_MUL ||
+         i->op == VIR_OP_AND || i->op == VIR_OP_OR || i->op == VIR_OP_XOR))
         x->flags |= VIR_CONSTRAINT_FLAG_TIED;
     switch (i->op) {
     case VIR_OP_CRC32C64:

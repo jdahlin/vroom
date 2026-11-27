@@ -485,6 +485,20 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         x64_record_emit_three_registers(e, X64_OP_CRC32, 8, d, a, c);
         return;
     case VIR_OP_X86:
+        if (vir_type_is_vector(i->type) &&
+            !vir_type_is_vector(L->function->insns[i->a].type)) {
+            /* a broadcast of a general register, through an xmm one */
+            char text[96], r = 'y';
+
+            if (i->type == VIR_TYPE_I64X8)
+                r = 'z';
+            snprintf(text, sizeof text,
+                     "\tvmovd\t%%%s, %%xmm%d\n\tv%s\t%%xmm%d, %%%cmm%d\n",
+                     x64_register_names_32[a], d - XMM0,
+                     x64_x86_code_mnemonic(i->c), d - XMM0, r, d - XMM0);
+            x64_vir_text_append(L, text);
+            return;
+        }
         if (!vir_type_is_vector(i->type) &&
             !vir_type_is_vector(L->function->insns[i->a].type)) {
             /* pext, pdep: three general registers */

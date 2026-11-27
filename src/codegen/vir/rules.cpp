@@ -556,12 +556,41 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
     case VIR_OP_SUB:
     case VIR_OP_OR:
     case VIR_OP_XOR:
-    case VIR_OP_SHL:
-    case VIR_OP_LSHR:
     case VIR_OP_ASHR:
         if (virbuild_value_integer_constant(V, in.b, &k) && !k)
             *r = in.a;
         return false;
+    case VIR_OP_SHL:
+    case VIR_OP_LSHR: {
+        if (!virbuild_value_integer_constant(V, in.b, &k))
+            return false;
+        if (!k) {
+            *r = in.a;
+            return false;
+        }
+        /* two shifts the same way by constants are one */
+        uint32_t first = virbuild_value_resolve(V, in.a);
+        vir_insn inner = V->insns[first].insn;
+        int64_t j = 0, width = 64;
+
+        if (in.type == VIR_TYPE_I32)
+            width = 32;
+        if (inner.op != in.op || inner.type != in.type ||
+            !virbuild_value_integer_constant(
+                V, virbuild_value_resolve(V, inner.b), &j) ||
+            j < 0 || k < 0 || j + k >= width)
+            return false;
+        uint32_t value = virbuild_value_resolve(V, inner.a);
+        uint32_t count = virbuild_constant_integer(e, in.type, j + k);
+
+        virbuild_use_count_decrement(V, S, in.a),
+            virbuild_use_count_decrement(V, S, in.b);
+        virbuild_use_count_increment(V, S, value),
+            virbuild_use_count_increment(V, S, count);
+        V->insns[q].insn.a = value;
+        V->insns[q].insn.b = count;
+        return true;
+    }
     case VIR_OP_MUL:
         if (virbuild_value_integer_constant(V, in.b, &k) && k == 1)
             *r = in.a;

@@ -137,7 +137,21 @@ static uint32_t virbuild_elements_wide(const virbuild_elements_at *W,
     if (type != VIR_TYPE_I32 && type != VIR_TYPE_I64)
         return 0;
     uint32_t word = E->value[0];
+    int64_t constant;
 
+    /* a value of 1, 2 or 4 bytes not known here: broadcast it as it is */
+    if (width < 8 && !virbuild_value_integer_constant(V, word, &constant)) {
+        const char *broadcast = "pbroadcastd";
+
+        if (width == 2)
+            broadcast = "pbroadcastw";
+        else if (width == 1)
+            broadcast = "pbroadcastb";
+        uint32_t narrow = virbuild_elements_i32(W, word);
+
+        return virbuild_elements_insn(W, VIR_OP_X86, ty, narrow, narrow,
+                                      x64_x86_operator_code(broadcast));
+    }
     if (width < 8) {
         uint64_t mask = (1ull << 8 * width) - 1, pattern = 1;
 
