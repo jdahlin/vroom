@@ -59,15 +59,21 @@ semantic_analysis::out_of_class_variable_member(SyntaxRef declaration,
        parts) */
     SyntaxTail parts(declaration, leading_gnu_attributes(declaration));
     if (parts.size() != 3 || !parts[0].is(syntax_kind::decl_specifier_seq) ||
-        !parts[1].is(syntax_kind::init_declarator, syntax_kind::qualified_id))
+        !parts[1].is(syntax_kind::init_declarator, syntax_kind::qualified_id,
+                     syntax_kind::ptr_declarator))
         return 0;
     auto item = parts[1];
-    if (item.is(syntax_kind::init_declarator) &&
-        (item.size() != 2 || !item[0].is(syntax_kind::qualified_id)))
-        return 0;
     auto q = item;
-    if (item.is(syntax_kind::init_declarator))
+    if (item.is(syntax_kind::init_declarator)) {
+        if (item.size() != 2)
+            return 0;
         q = item[0];
+    }
+    /* (behind ptr-operators: T *S<T>::m) */
+    while (q.is(syntax_kind::ptr_declarator) && q.size())
+        q = q[q.size() - 1];
+    if (!q.is(syntax_kind::qualified_id))
+        return 0;
     if (q.size() != 2 || !q[0].is(syntax_kind::nested_name_specifier) ||
         !q[1].is_identifier())
         return 0;
