@@ -2746,10 +2746,21 @@ analysis_result semantic_analysis::aggregate_element_clause(
         }
         /* a conversion from another class (a constructor or conversion
            function) into a subaggregate */
-        if (type_table[e.type.unqualified()].kind == type_kind::class_type)
-            return not_supported_because(
-                list, "dcl.init.aggr",
-                "a subaggregate converted from another class");
+        if (type_table[e.type.unqualified()].kind == type_kind::class_type) {
+            /* [dcl.init.aggr]/16: the element is initialized from the
+               expression if an implicit conversion sequence reaches it;
+               else braces are elided into the subaggregate */
+            conversion_sequence reached =
+                implicit_conversion_sequence(e, element, true);
+            if (reached.kind == conversion_sequence::form::unknown)
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "a subaggregate converted from another class");
+            if (reached.kind != conversion_sequence::form::bad) {
+                next++;
+                return initialize_with(at, e, element, false, true, one);
+            }
+        }
     }
     if (is_vector_kind(record.kind)) {
         /* /16: a clause that is a vector initializes the whole vector;
