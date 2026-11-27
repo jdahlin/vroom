@@ -299,15 +299,19 @@ def reference(suite, name, path, flags, rthash, wd):
         json.dump(r, cache)
     return r
 
-def one(t):
-    t, st, cat, why = one_(t)
+def inline_xfail(t, st, cat, why):
+    """the result of an inline-suite test, with its known gaps (INLINE_XFAIL) applied"""
     if t[0] == 'inline' and t[1] in INLINE_XFAIL:
         xf = INLINE_XFAIL[t[1]]
         if st == 'fail':
             return t, 'xfail', cat, f'{xf} [{why}]'
         if st == 'pass':
             return t, 'fail', 'xpass', f'passes now: remove it from INLINE_XFAIL ({xf})'
-    if t[0] != 'vcc':
+    return t, st, cat, why
+
+def one(t):
+    t, st, cat, why = inline_xfail(*one_(t))
+    if st == 'xfail' or t[0] != 'vcc':
         return t, st, cat, why
     _, xf = exec_marks(open(t[2], 'rb').read().decode('latin-1'))
     if st == 'skip':	# our tests must run on clang: a skip is a broken test
