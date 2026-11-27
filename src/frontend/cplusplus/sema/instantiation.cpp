@@ -438,6 +438,10 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     /* (leave_instantiation drops the claims of the template's expressions:
        they are about one specialization, which clang makes none of) */
     instantiation_context context;
+    /* [temp.deduct]/8: a definition instantiated while a candidate's
+       declaration is (a return type deduced) is outside the immediate
+       context of that substitution */
+    scoped_value<unsigned> outside(substituting, 0);
     uint32_t dependent_before = dependent_errors;
     uint32_t independent_before = independent_errors;
     enter_instantiation(context, instantiations[index].scope, ft.declaration);
