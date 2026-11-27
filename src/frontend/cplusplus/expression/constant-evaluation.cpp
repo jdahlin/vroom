@@ -665,6 +665,26 @@ bool semantic_analysis::refuted_by_rule(uint32_t node)
     return c == constness::not_constant && evaluation_rule_applied();
 }
 
+bool semantic_analysis::splat_call_value(SyntaxRef at, uint32_t node,
+                                         qualified_type type,
+                                         initialized_value &m)
+{
+    const struct type to = type_table[type.unqualified()];
+    if (to.kind != type_kind::ext_vector || !node ||
+        semantics[node].kind != semantic_kind::call)
+        return false;
+    constant_evaluation state;
+    state.splats = true;
+    reset_evaluation_trace();
+    constant_value v;
+    if (evaluate_node(state, node, v) != constness::constant ||
+        state.heap_live || !v.splat || !is_value(v) ||
+        !value_kept_exactly(to.operand, v))
+        return false;
+    splat_constant(at, type, to.operand, v, m);
+    return true;
+}
+
 constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
 {
     if (semantics[node].evaluation == constness::not_constant)
@@ -3107,6 +3127,14 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         return evaluate_call(state, node, v);
     case semantic_kind::conversion: {
         conversion_kind k = static_cast<conversion_kind>(x.op);
+        /* [ext:clang_ext_vector_type] the scalar in every lane */
+        if (k == conversion_kind::vector_splat && state.splats) {
+            c = evaluate_node(state, x.a, v);
+            if (c == constness::constant && !is_value(v))
+                return CONST_UNKNOWN;
+            v.splat = true;
+            return c;
+        }
         /* (the pointer of a std::initializer_list's backing array: its
            conversion is marked as a read, which an array has none) */
         if (k == conversion_kind::lvalue_to_rvalue &&

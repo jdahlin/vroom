@@ -1266,6 +1266,9 @@ struct constant_value {
     uint32_t stamp = 0;
     /* pointer into a string literal's array ([lex.string]/9) */
     bool literal = false;
+    /* integer or floating: every lane of a vector has this value
+       (splat_call_value) */
+    bool splat = false;
 };
 
 /* [implimits]/2's quantities for constant evaluation, the bracketed
@@ -4344,6 +4347,9 @@ class semantic_analysis
            first ([dcl.init]/8.2): a constructor of one an implicit
            constructor runs keeps those zeros */
         bool zeroed = false;
+        /* a conversion of a scalar to a vector is evaluated, its value
+           the lanes' (splat_call_value) */
+        bool splats = false;
         /* the elements of the arrays in objects (an element's value may be
            an array whose elements are further on), and whether each may
            not be modified: an element of a variable whose lifetime did not
@@ -7655,6 +7661,14 @@ class semantic_analysis
                                           qualified_type type,
                                           initialized_value &result);
     uint64_t vector_value_bytes(qualified_type type) const;
+    /* [ext:gnu_vector_size] node, a call that returns one scalar in every
+       lane of the vector type: m, that vector as a constant; false when
+       it is not such a call */
+    bool splat_call_value(SyntaxRef at, uint32_t node, qualified_type type,
+                          initialized_value &m);
+    /* the vector type whose every lane is v, as a constant */
+    void splat_constant(SyntaxRef at, qualified_type to, qualified_type element,
+                        const constant_value &v, initialized_value &result);
     analysis_result vector_splat(SyntaxRef at, expression_meaning &m,
                                  qualified_type to);
     void vector_converted(expression_meaning &m, qualified_type to,

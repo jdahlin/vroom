@@ -2413,6 +2413,14 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* [dcl.constexpr]/10: "In any constexpr variable declaration, the
        full-expression of the initialization shall be a constant
        expression" */
+    /* [basic.start.static]/2: constant initialization, the value as data */
+    initialized_value lanes_value;
+    if (s.constexpr_ && value.evaluation == constness::not_constant &&
+        splat_call_value(declaration, value.node, type, lanes_value)) {
+        value.node = lanes_value.node;
+        value.evaluation = constness::constant;
+        entity_table[declared_entity].definition = value.node;
+    }
     if (s.constexpr_ && value.evaluation == constness::not_constant) {
         /* [ext:gnu_vector_size] a vector computed by a function or by lane
            operators: the evaluator has no rules for it, so whether it is a

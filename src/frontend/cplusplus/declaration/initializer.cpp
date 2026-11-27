@@ -1016,17 +1016,8 @@ analysis_result semantic_analysis::vector_splat(SyntaxRef at,
         vector_converted(m, to, conversion_kind::vector_splat);
         return r;
     }
-    expression_meaning folded;
-    folded.type = m.type;
-    folded.category = value_category::prvalue;
-    evaluated_meaning(folded, v);
-    uint32_t lane =
-        expression_node(semantic_kind::constant, folded, at.first_token());
-    owned_array<uint32_t> lanes;
-    for (uint64_t i = 0; i < type_table[to.unqualified()].bound; i++)
-        lanes.append(lane);
     initialized_value value;
-    aggregate_value(at, to, constness::constant, lanes, value);
+    splat_constant(at, to, m.type, v, value);
     m = expression_meaning();
     m.type = qualified_type::make(to.unqualified(), cv_none);
     m.category = value_category::prvalue;
@@ -1034,6 +1025,23 @@ analysis_result semantic_analysis::vector_splat(SyntaxRef at,
     m.beyond_integral_constant = true;
     m.node = value.node;
     return r;
+}
+
+void semantic_analysis::splat_constant(SyntaxRef at, qualified_type to,
+                                       qualified_type element,
+                                       const constant_value &v,
+                                       initialized_value &result)
+{
+    expression_meaning folded;
+    folded.type = element;
+    folded.category = value_category::prvalue;
+    evaluated_meaning(folded, v);
+    uint32_t lane =
+        expression_node(semantic_kind::constant, folded, at.first_token());
+    owned_array<uint32_t> lanes;
+    for (uint64_t i = 0; i < type_table[to.unqualified()].bound; i++)
+        lanes.append(lane);
+    aggregate_value(at, to, constness::constant, lanes, result);
 }
 
 /* m as a prvalue of the vector type to, by the conversion kind */
