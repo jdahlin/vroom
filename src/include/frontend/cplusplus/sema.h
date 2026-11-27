@@ -1900,6 +1900,9 @@ class semantic_analysis
 
     types type_table;
     entities entity_table;
+    /* the closure types made, in increasing order: numbering one among
+       its context's looks at these, not at every entity */
+    owned_array<entity_index> closure_entities;
     /* a dependent value's written template arguments (types): those of an
        alias template's specialization as the qualifier, Q<args>::name
        (dependent_alias_value), and of a member function template called,
