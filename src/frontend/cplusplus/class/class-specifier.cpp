@@ -1582,6 +1582,19 @@ bool semantic_analysis::accessible_here(entity_index member,
                 }
         }
     }
+    /* [class.access.base]/5: named in class r.c, which a using-declaration
+       made it a member of with that declaration's access
+       ([namespace.udecl]/19) */
+    for (const using_access &r : using_accesses) {
+        bool ambiguous = false;
+        if (r.member != member || !object_class ||
+            (object_class != r.c && !base_step(object_class, r.c, ambiguous)))
+            continue;
+        entity_index here = current_class();
+        if (!r.access ||
+            (here && (here == r.c || base_step(here, r.c, ambiguous))))
+            return true;
+    }
     return false;
 }
 

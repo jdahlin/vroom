@@ -628,20 +628,32 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                 "a using of a member of a class not found as a base");
         /* [namespace.udecl]/19: "A synonym created by a using-declaration
            has the usual accessibility for a member-declaration."  Access
-           is the entity's here, so only a declaration that leaves it as
-           it is has rules; a name the derived class declares too would be
-           an overload or hide the base's */
-        if (kind == entity_kind::none ||
-            entity_table[e].access != declaration_access)
-            return not_supported_because(
-                n, "namespace.udecl",
-                "a using of a held name or with a different access");
-        /* (the access of every function of the set the head begins) */
-        for (entity_index o = e; o; o = entity_table[o].next_overload)
-            if (entity_table[o].access != declaration_access)
+           is the entity's here: a declaration that makes a non-static
+           member function more accessible is recorded beside it
+           (using_accesses, which accessible asks); a name the derived
+           class declares too would be an overload or hide the base's */
+        if (kind == entity_kind::none)
+            return not_supported_because(n, "namespace.udecl",
+                                         "a using of a held name");
+        /* [class.qual]/2: T::T through an alias T names constructors, which
+           analysis does not follow: no member's access changes */
+        bool names_constructors =
+            tokens[t - 2].kind == token_kind::identifier &&
+            tokens.identifier(t - 2) == name;
+        /* (every function of the set the head begins) */
+        for (entity_index o = e; o; o = entity_table[o].next_overload) {
+            const entity &x = entity_table[o];
+            if (x.access == declaration_access)
+                continue;
+            if (declaration_access > x.access || names_constructors ||
+                x.kind != entity_kind::function || !x.nonstatic_member ||
+                !accessible(o))
                 return not_supported_because(
                     n, "namespace.udecl",
-                    "a using of overloads with differing access");
+                    "a using that makes a member less accessible, or changes "
+                    "the access of one that is no non-static member function");
+            using_accesses.append({o, c, declaration_access});
+        }
         entity_index own = entity_table.find(c, name);
         if (own) {
             /* [namespace.udecl]/15 (C++20 /14): the base's member

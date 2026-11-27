@@ -2726,6 +2726,14 @@ class semantic_analysis
         entity_index template_entity = 0;
     };
     owned_array<friend_record> friends;
+    /* a member function that a using-declaration in class c made more
+       accessible than it is declared ([namespace.udecl]/19) */
+    struct using_access {
+        entity_index member = 0;
+        entity_index c = 0;
+        uint8_t access = 0;
+    };
+    owned_array<using_access> using_accesses;
     /* function_template_definition: the function_templates index plus one
        of the template its last declaration declared or redeclared */
     uint32_t last_function_template = 0;
