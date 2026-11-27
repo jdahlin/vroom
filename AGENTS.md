@@ -124,7 +124,8 @@ relative to it); `TODO.md` stays at the top.
   - `port/`: what depends on the host (headers in `include/port/`; `port_SRC`,
     linked by every tool): job regions kept from one job to the next
     (`job-regions.h`), file mapping, reading and writing (`file.h`), clocks
-    (`clock.h`), thread counters (`performance-counters.h`), the stack guard
+    (`clock.h`), `std::thread`'s interface without a C++ library (`thread.h`;
+    test `src/test/port/thread-test.cpp`), thread counters (`performance-counters.h`), the stack guard
     (`stack-guard.h`), CRC32C (`crc32c.h`), `-march=native` on x86
     (`x86native.h`), the shared thread pool and CPU budget (`task.h`,
     `vtask_*`: parallel-for, jobs, blocking regions;
@@ -464,6 +465,9 @@ bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2)
 bench/vcpkg/build.py [-j N] [--clang] [-v] [PAT]   # microsoft/vcpkg-tool (C++17, 119 TUs; work/vcpkg-tool, work/vcpkg-deps-{fmt,cmrc,curl}: git clone --depth 1): vpp -x c++ -c per TU, refusals grouped by reason; --clang is the reference (all 119 build)
 bench/cxx-json.py [-v] [--force] [PAT]     # nlohmann/json's 71 test TUs (work/cxx/json/src/tests) by vpp -x c++ -std=c++17 -c against libc++, one at a time (nice, 60 s each): ok or the first error (refused subclause, vcc file:line), grouped by first error; cached in build/cxx-json.json (a rerun compiles only what changed; the full run ~1.5 min)
 bench/stockfish/run.py [--arch sse2|avx2] [-O 0123] [--depth N] [--mix] [-v]   # Stockfish 17.1 (work/stockfish, 23 TUs, libc++) by vpp -x c++ -c, first error per TU; once all compile, linked by clang++ and `bench` node count = clang++'s, with both nodes/second (--mix: one vcc object among clang's; --arch sse2: the SIMD build; ~20 s)
+bench/stockfish/threads.py [-j N] [--warm N] [--bin-dir build/linux/src-tsan]   # proof of concept: its TUs on threads of one process = one process each, byte for byte
+bench/stockfish/vccd.py             # ... concurrently through the vcc shim and one vccd (after threads.py)
+bench/stockfish/cache.py            # ... a result cache keyed on command, compiler and inputs: cold, unchanged, one header edited
 bench/highway/run.py [-O 0123] [-j N] [--bless] [-v] [PAT]   # Google Highway (work/highway, pinned commit in the file's header; x86-64 host, static SSE2 target, libc++): each TU by vpp -x c++ -c, the tests linked by clang++ (library objects vcc's where it compiles them) and run; a test lost from bench/highway/passing-O2 is an error, refusals grouped by first error (~1 min cold)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
