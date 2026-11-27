@@ -693,8 +693,13 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
         template_template_parameter(specialized_template(pr.entity)))
         return -1;
     /* (a class declared and not defined is no derived class here; a
-       specialization not instantiated has bases not known yet) */
-    const entity &x = entity_table[ar.entity];
+       specialization's bases are known once it is complete,
+       [temp.deduct.call]/4.3 looking for one) */
+    entity_index argument_class = ar.entity;
+    if (!entity_table[argument_class].defined &&
+        entity_table[argument_class].instantiation)
+        require_complete(argument_class);
+    const entity &x = entity_table[argument_class];
     if (!x.defined) {
         if (!x.instantiation && !x.size)
             return 0;
