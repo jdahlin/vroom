@@ -62,6 +62,34 @@ static int has_vnni(void)
     __asm__("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(7), "c"(0));
     return c >> 11 & 1;
 }
+typedef int rv16 __attribute__((vector_size(64)));
+/* values that trade registers on the loop's back edge keep every lane */
+__attribute__((noinline, target("avx512f,avx512bw"))) static unsigned rotate512(const rv16 *a,
+                                                          int k)
+{
+    rv16 x = a[0], y = a[1], z = a[2], w = a[3];
+    unsigned h = 0;
+
+    for (int i = 0; i < k; i++) {
+        rv16 t = x;
+
+        x = y + z;
+        y = z;
+        z = w;
+        w = t;
+        if (i % 3 == 1) {
+            rv16 u = y;
+
+            y = w;
+            w = u;
+        }
+    }
+    rv16 s = x + y * 3 + z * 5 + w * 7;
+
+    for (int i = 0; i < 16; i++)
+        h = h * 31 + (unsigned)s[i];
+    return h;
+}
 static unsigned run(void) {
   static __m512i a[16], b[16], o[22]; unsigned h = 0;
   for (int t = 0; t < 200; t++) {
@@ -72,6 +100,8 @@ static unsigned run(void) {
     for (unsigned i = 0; i < sizeof o; i++) h = h * 31 + ((unsigned char *)o)[i];
     for (unsigned i = 0; i < sizeof a; i++) h = h * 31 + ((unsigned char *)a)[i];
   }
+  for (int k = 0; k < 12; k++)
+    h = h * 31 + rotate512((const rv16 *)a, k);
   if (has_vnni()) {
     static __m512i d[5];
 
@@ -93,13 +123,13 @@ int main(void)
     if (has_avx512bw())
         printf("%08x\n", run());
     else
-        printf("fde9aed3\n");
+        printf("no AVX-512BW\n");
     return 0;
 }
 #else
 int main(void)
 {
-    printf("fde9aed3\n");
+    printf("no AVX-512BW\n");
     return 0;
 }
 #endif
