@@ -128,9 +128,16 @@ bool semantic_analysis::argument_unit_local(const template_argument &a) const
                unit_local(named);
     }
     case template_argument::kind_t::pack:
-        for (uint32_t k = 0; k < a.count; k++)
-            if (argument_unit_local(pack_arguments[a.value + k]))
+        /* (a pack's elements are not packs; one still standing for a
+           template parameter pack has no elements here) */
+        if (a.template_entity)
+            return false;
+        for (uint32_t k = 0; k < a.count; k++) {
+            const template_argument &element = pack_arguments[a.value + k];
+            if (element.kind != template_argument::kind_t::pack &&
+                argument_unit_local(element))
                 return true;
+        }
         return false;
     }
     return false;
