@@ -691,6 +691,9 @@ struct entity {
     bool explicit_default_constructor = false;
     /* X& operator=(const X&) = default (defaulted_copy_assignment) */
     bool defaulted_copy_assignment = false;
+    /* ... and the access of one declared protected or private, which the
+       entity declared at the class's end takes */
+    uint8_t defaulted_copy_access = 0, defaulted_move_access = 0;
     /* X(X&&) = default and X& operator=(X&&) = default, trivial
        ([class.copy.ctor]/11, [class.copy.assign]/9): no entity; the move
        constructor copies the bytes (construct) */
@@ -738,6 +741,9 @@ struct entity {
        ([temp.friend]/4): clang does not check access to its members
        (-Wunsupported-friend, "turning off access control") */
     bool access_unchecked = false;
+    /* a class: the implicit assignment being defined assigns a subobject
+       of it, its operator= accessible as subobject_assignment decided */
+    bool assigned_by_implicit = false;
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
@@ -5190,6 +5196,7 @@ class semantic_analysis
     void declare_implicit_assignment(entity_index c, bool move, bool deleted,
                                      bool non_throwing, bool nonconst = false);
     analysis_result implicit_assignments(entity_index c);
+    analysis_result defaulted_assignment_access(entity_index c, SyntaxRef n);
     analysis_result implicit_assignment_definitions(entity_index c,
                                                     SyntaxRef n);
     analysis_result defaulted_assignment_definition(SyntaxRef n,

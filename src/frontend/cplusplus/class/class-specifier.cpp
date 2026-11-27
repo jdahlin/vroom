@@ -1519,6 +1519,12 @@ bool semantic_analysis::accessible_here(entity_index member,
     }
     if (!access)
         return true;
+    /* [class.copy.assign]/12: an implicit assignment operator's call of a
+       subobject's (checked where it was declared, subobject_assignment) */
+    if (entity_table[naming_class].assigned_by_implicit &&
+        x.kind == entity_kind::function && x.operator_function &&
+        x.implemented == preprocessing_op_or_punc::EQUAL)
+        return true;
     /* [impl.clang] a class whose access clang does not check (access_unchecked) */
     const entity &k = entity_table[naming_class];
     if (k.kind == entity_kind::class_type &&
