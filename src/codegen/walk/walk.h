@@ -36,6 +36,9 @@ typedef struct walk_argument {
     uint8_t eightbyte_count, classes[2];
     bool is_in_memory, is_x87, is_sse_up, is_vector, is_wide_record, is_unnamed;
     uint8_t bool_lane_count;
+    /* x86-64: a result both in memory and "up" comes back in vector registers
+       of this many bytes each (0: 16, xmm) */
+    uint8_t split_register_bytes;
     bool is_record; /* VIR's: only the record's own bytes are in the slot */
     uint32_t align;
     uint64_t size;
