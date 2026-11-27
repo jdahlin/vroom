@@ -201,7 +201,12 @@ semantic_analysis::list_array_sequence(SyntaxElement list, qualified_type array,
     if (t.bound_known && clauses.size() > t.bound)
         return bad;
     type_kind element = type_table[t.operand.unqualified()].kind;
-    bool scalar = element == type_kind::pointer ||
+    /* a class element ([dcl.init.aggr]/9: not followed for {} past the
+       list's elements, when N exceeds their number) */
+    bool of_class = element == type_kind::class_type;
+    if (of_class && t.bound_known && clauses.size() < t.bound)
+        return unknown;
+    bool scalar = of_class || element == type_kind::pointer ||
                   element == type_kind::enumeration ||
                   (element == type_kind::fundamental &&
                    fundamental_of(t.operand) != fundamental_type::void_);
@@ -210,10 +215,33 @@ semantic_analysis::list_array_sequence(SyntaxElement list, qualified_type array,
     conversion_sequence worst;
     worst.kind = conversion_sequence::form::standard;
     for (SyntaxElement clause : clauses) {
-        if (clause.is(syntax_kind::braced_init_list) ||
-            clause.is(syntax_kind::designated_initializer_clause))
+        if (clause.is(syntax_kind::designated_initializer_clause))
             return unknown;
         substitution_mark mark = mark_substitution();
+        if (clause.is(syntax_kind::braced_init_list)) {
+            if (!of_class)
+                return unknown;
+            /* [over.ics.list]: probe the element's list-initialization */
+            initialized_value value;
+            qualified_type to =
+                qualified_type::make(t.operand.unqualified(), cv_none);
+            substituting++;
+            analysis_result r = list_initialization(clause, to, false, value);
+            substituting--;
+            bool rolled_back = undo_substitution(mark);
+            if (r == analysis_result::ill_formed && rolled_back)
+                return bad;
+            if (r != analysis_result::well_formed)
+                return unknown;
+            if (!list_sequence_possible(clause, t.operand))
+                return bad;
+            conversion_sequence s;
+            s.kind = conversion_sequence::form::user_defined;
+            s.target = t.operand;
+            if (compare_conversions(s, worst) > 0)
+                worst = s;
+            continue;
+        }
         expression_meaning e;
         substituting++;
         analysis_result r = expression(clause, e);
@@ -401,11 +429,25 @@ analysis_result semantic_analysis::best_viable_function(
                                                     list_target)) {
                             a.kind = sequence::form::bad;
                         } else if (r == analysis_result::well_formed) {
-                            a.kind = sequence::form::user_defined;
-                            a.target = list_target;
-                            a.from_list = true;
-                            a.to_initializer_list =
-                                list_initializer_list(list_target);
+                            entity_index to_class =
+                                type_table[list_target.unqualified()].entity;
+                            if (list_is_identity((*written_arguments)[k],
+                                                 to_class)) {
+                                /* [over.ics.list]/2: "the one required to
+                                   initialize the parameter from that
+                                   element" */
+                                a = list_scalar_sequence(
+                                    (*written_arguments)[k], list_target);
+                            } else {
+                                a.kind = sequence::form::user_defined;
+                                a.target = list_target;
+                                a.from_list = true;
+                                a.to_initializer_list =
+                                    list_initializer_list(list_target);
+                                if (semantics[value.node].kind ==
+                                    semantic_kind::construct)
+                                    a.function = semantics[value.node].b;
+                            }
                             if (tr.kind == type_kind::lvalue_reference ||
                                 tr.kind == type_kind::rvalue_reference) {
                                 a.reference = true;
@@ -413,9 +455,6 @@ analysis_result semantic_analysis::best_viable_function(
                                 a.rvalue_reference =
                                     tr.kind == type_kind::rvalue_reference;
                             }
-                            if (semantics[value.node].kind ==
-                                semantic_kind::construct)
-                                a.function = semantics[value.node].b;
                         } else if (r != analysis_result::ill_formed ||
                                    !rolled_back) {
                             a.kind = sequence::form::unknown;
