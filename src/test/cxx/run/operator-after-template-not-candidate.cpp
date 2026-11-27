@@ -11,6 +11,8 @@ struct Tag {
 };
 enum E { e0, e1 };
 template <typename T> bool pointers(T *a, T *b) { return a != b; }
+template <typename T> T *address(T &t) { return &t; }
+inline Tag operator&(Tag, Tag) { return {}; }
 inline bool operator==(Tag, Tag) { return false; }
 inline bool operator!=(Tag, Tag) { return true; }
 } // namespace n
@@ -25,5 +27,8 @@ int main()
         r += 2;
     if (n::pointers(&a, &b))
         r += 4;
-    return r - 7;
+    n::Tag t;
+    if (n::address(t) == &t)
+        r += 8;
+    return r - 15;
 }
