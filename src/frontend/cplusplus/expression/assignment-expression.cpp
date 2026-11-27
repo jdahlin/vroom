@@ -321,10 +321,14 @@ analysis_result semantic_analysis::assignment_of(
             expression_meaning value = left, result;
             r = operand_value(n, value);
             if (r == analysis_result::well_formed &&
-                is_vector_kind(record.kind))
-                /* [ext:gnu_vector_size] E1 = E1 op E2 lane by lane */
+                is_vector_kind(record.kind)) {
+                /* [ext:gnu_vector_size] E1 = E1 op E2 lane by lane;
+                   [ext:clang_ext_vector_type] a compatible E2 counts as
+                   E1's type, which the result has */
+                if (vectors_compatible(value.type, right.type))
+                    right.type = value.type;
                 r = vector_binary(n, at, arithmetic_op, value, right, result);
-            else if (r == analysis_result::well_formed)
+            } else if (r == analysis_result::well_formed)
                 r = arithmetic(n, arithmetic_op, value, right, result);
             computation = result.type;
             if (r == analysis_result::well_formed)

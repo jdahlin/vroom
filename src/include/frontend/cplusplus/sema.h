@@ -3808,6 +3808,7 @@ class semantic_analysis
                                  const expression_meaning &left,
                                  const expression_meaning &right,
                                  expression_meaning &m);
+    bool vectors_compatible(qualified_type a, qualified_type b) const;
     bool vector_scalar_fits(const expression_meaning &scalar,
                             qualified_type element, bool &fits) const;
     analysis_result vector_binary(SyntaxRef n, token_index at,

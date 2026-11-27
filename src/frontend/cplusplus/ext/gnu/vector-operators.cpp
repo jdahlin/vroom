@@ -17,7 +17,11 @@
  * What is analysed: two operands of one vector type, or a vector and a
  * scalar the element type holds (vector_scalar_fits: clang's "implicit
  * conversion would cause truncation");
- * different vector types (clang's lax conversions) and && || <=> are not.
+ * a GCC vector with a Clang extended vector of the same element type and
+ * count ([ext:clang_ext_vector_type]; clang's "compatible" vector types),
+ * whose result is the extended vector's, or the left operand's in a
+ * compound assignment; other pairs of vector types (clang's lax
+ * conversions) and && || <=> are not.
  * The result is as C's front end builds it (frontend/c/expression.cpp):
  * the scalar converted to the element type, the node left to code
  * generation, which does the lanes.
@@ -124,6 +128,18 @@ bool semantic_analysis::vector_scalar_fits(const expression_meaning &scalar,
     return true;
 }
 
+/* [ext:clang_ext_vector_type] a GCC vector and an extended vector of the
+   same element type and number of elements: the same values */
+bool semantic_analysis::vectors_compatible(qualified_type a,
+                                           qualified_type b) const
+{
+    const struct type x = type_table[a.unqualified()],
+                      y = type_table[b.unqualified()];
+    return is_vector_kind(x.kind) && is_vector_kind(y.kind) &&
+           x.kind != y.kind && x.bound == y.bound &&
+           x.operand.unqualified() == y.operand.unqualified();
+}
+
 analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
                                                  preprocessing_op_or_punc op,
                                                  expression_meaning &left,
@@ -151,10 +167,15 @@ analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
         vector = right.type;
     vector = qualified_type::make(vector.unqualified(), cv_none);
     if (left_vector && right_vector &&
-        left.type.unqualified() != right.type.unqualified())
-        /* clang's lax vector conversions */
-        return not_supported_because(
-            n, "ext.gnu", "a binary operator on vectors of different types");
+        left.type.unqualified() != right.type.unqualified()) {
+        if (!vectors_compatible(left.type, right.type))
+            /* clang's lax vector conversions */
+            return not_supported_because(
+                n, "ext.gnu",
+                "a binary operator on vectors of different types");
+        if (type_table[right.type.unqualified()].kind == type_kind::ext_vector)
+            vector = qualified_type::make(right.type.unqualified(), cv_none);
+    }
     const struct type record = type_table[vector.unqualified()];
     qualified_type element = record.operand;
     if (integer_only && !is_integral(element))
