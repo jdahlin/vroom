@@ -503,11 +503,11 @@ analysis_result semantic_analysis::best_viable_function(
                     } else if (argument.node) {
                         a = implicit_conversion_sequence(argument, target,
                                                          user_defined);
-                    } else if (list_class) {
-                        /* (T{{0}} to T(int): the constructor that is left
-                           when T's copy constructors take no list) */
+                    } else {
+                        /* a scalar parameter's list: {} for an enumeration,
+                           T{{0}} to T(int) */
                         a = list_scalar_sequence((*written_arguments)[k],
-                                                 target);
+                                                 list_target);
                     }
                 } else if (argument.overload_name) {
                     a = overload_set_sequence(argument, target);
