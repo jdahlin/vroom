@@ -172,6 +172,10 @@ deleted in the commit that gives it a table row or a generic operation.
     slower.  The assembler derives the forms it has no row for from the SSE
     encodings.  Stockfish `-O3`: native 1386 k to 1460 k, AVX2 1239 k to
     1406 k.
+  - Load folding (done): a 32- or 64-byte load used once by the next
+    operation is its memory operand (`vpdpbusd` too).  Stockfish native
+    1560 k to 1594 k.  Next: registers `zmm16`-`zmm31` (VIR has 16; the
+    accumulator loops keep 16 vectors live and spill).
   - Left: mask registers as values (the `_mask` intrinsics), the other
     three-operand instructions, the 64-byte ABI in VIR, shift
     operators and shuffles, EVEX rounding and broadcast.  Without VNNI

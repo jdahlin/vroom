@@ -36,6 +36,10 @@ typedef struct x64_vir_context {
     bool
         ms; /* the Microsoft x64 convention (Windows): arguments by position, rcx rdx r8 r9 / xmm0-3, shadow space */
     uint32_t memory_value, memory_skip, scaled_value, scaled_skip;
+    /* a 256- or 512-bit load the next instruction takes as its memory
+     * operand: the value, and its address in AT&T form */
+    uint32_t vector_load;
+    char vector_address[64];
     int memory_base, memory_index, scaled_index;
     uint8_t memory_shift, scaled_shift;
     bool memory_is_indexed;
@@ -105,7 +109,8 @@ VPRIV void x64_vir_x86_emit(x64_vir_context *L, uint32_t code, int d, int a,
                             int b);
 /* the same on 256-bit values: the VEX form of the instruction */
 VPRIV void x64_vir_x86_wide_emit(x64_vir_context *L, uint32_t code, int d,
-                                 int a, int b, uint32_t type);
+                                 int a, int b, uint32_t type,
+                                 const char *memory);
 VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst,
                                         uint32_t v);
 VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg,
@@ -124,6 +129,8 @@ VPRIV void x64_vir_switch_lower(x64_vir_context *L, uint32_t block,
                                 const vir_insn *in, int selector);
 VPRIV bool x64_vir_fold_edits_check(x64_vir_context *L, uint32_t b,
                                     uint32_t pos, int keep);
+VPRIV bool x64_vir_vector_load_fold(x64_vir_context *L, uint32_t b, uint32_t v,
+                                    int base, int index);
 VPRIV bool x64_vir_memory_next_fold(x64_vir_context *L, uint32_t b, uint32_t v);
 VPRIV bool x64_vir_value_fits_unsigned(const vir_function *f, uint32_t v,
                                        unsigned width);

@@ -125,7 +125,8 @@ VPRIV void x64_vir_x86_emit(x64_vir_context *L, uint32_t code, int d, int a,
 }
 
 VPRIV void x64_vir_x86_wide_emit(x64_vir_context *L, uint32_t code, int d,
-                                 int a, int b, uint32_t type)
+                                 int a, int b, uint32_t type,
+                                 const char *memory)
 {
     const char *mnemonic = x64_x86_code_mnemonic(code);
     char text[128];
@@ -173,6 +174,9 @@ VPRIV void x64_vir_x86_wide_emit(x64_vir_context *L, uint32_t code, int d,
         snprintf(text, sizeof text,
                  "\tv%s\t$%u, %%%cmm%d, %%%cmm%d, %%%cmm%d\n", mnemonic,
                  code >> 16 & 0xff, r, b - XMM0, r, a - XMM0, r, d - XMM0);
+    } else if (memory) {
+        snprintf(text, sizeof text, "\tv%s\t%s, %%%cmm%d, %%%cmm%d\n", mnemonic,
+                 memory, r, a - XMM0, r, d - XMM0);
     } else {
         snprintf(text, sizeof text, "\tv%s\t%%%cmm%d, %%%cmm%d, %%%cmm%d\n",
                  mnemonic, r, b - XMM0, r, a - XMM0, r, d - XMM0);
