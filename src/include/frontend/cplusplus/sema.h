@@ -4613,6 +4613,12 @@ class semantic_analysis
        be, an indeterminate member, a pointer) */
     uint32_t value_tree(const constant_evaluation &state, qualified_type t,
                         const constant_value &v, token_index at);
+    analysis_result default_initialize_variable(SyntaxRef declaration,
+                                                entity_index e,
+                                                qualified_type type,
+                                                bool constexpr_variable,
+                                                bool &constructed);
+    uint32_t repeated_value(qualified_type t, uint32_t element, token_index at);
     /* the case or default label of switch body a jump with the kept value
        goes to, or 0 ([stmt.switch]/5) */
     uint32_t switch_target(uint32_t body, uint64_t value, bool &found) const;

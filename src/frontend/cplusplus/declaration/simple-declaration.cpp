@@ -1365,6 +1365,94 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     return result;
 }
 
+/* [dcl.init]/12: variable e of type type, defined without an initializer
+   (a static data member's declaration in its class too):
+   default-initialized; constructed is set when a constructor does it */
+analysis_result semantic_analysis::default_initialize_variable(
+    SyntaxRef declaration, entity_index e, qualified_type type,
+    bool constexpr_variable, bool &constructed)
+{
+    /* [dcl.init]/12: "If no initializer is specified for an object,
+       the object is default-initialized"; [dcl.init]/7.1: "If T is a
+       (possibly cv-qualified) class type, constructors are considered.
+       The applicable constructors are enumerated ([over.match.ctor]),
+       and the best one for the initializer () is chosen through
+       overload resolution" */
+    qualified_type object = element_type(type);
+    entity_index record = element_class(object);
+    /* [temp.inst]/2: the object's class is instantiated, an array's
+       elements' too, before its constructors are asked for */
+    require_complete(record);
+    if (is_class_entity(record) && default_constructor_deleted(record)) {
+        /* C++03 has no deleted functions: the implicit default
+           constructor's definition is ill-formed ([class.ctor]/7 there),
+           reported at the class */
+        if (!tokens.files.behavior.has(language_feature::rvalue_references))
+            return not_supported_because(
+                declaration, "class.default.ctor",
+                "a deleted default constructor before C++11");
+        return ill_formed(declaration,
+                          "the defaulted default constructor is defined "
+                          "as deleted",
+                          "class.default.ctor");
+    }
+    if (is_class_entity(record) && entity_table[record].first_constructor &&
+        !trivial_defaulted_default_constructor(record)) {
+        /* [dcl.init]/7.2: "If T is an array type, each element is
+           default-initialized": one element's construction, which the
+           lowering repeats for each, first to last, in an automatic
+           array of one dimension */
+        /* (one of static storage duration of any dimension) */
+        const struct type array = type_table[type.unqualified()];
+        if (!(object == type) &&
+            (!array.bound_known || !array.bound ||
+             (entity_table[e].automatic && !(array.operand == object))))
+            return not_supported_because(declaration, "dcl.init",
+                                         "default construction of this array");
+        owned_array<expression_meaning> none;
+        initialized_value value;
+        VTRY(r, construct(declaration, object, none, 0, value));
+        if (constexpr_variable && entity_table[e].automatic)
+            return not_supported_because(
+                declaration, "dcl.init",
+                "a constexpr local default-initialized by a constructor");
+        /* [basic.start.static]/2: constant initialization for a static
+           variable default-initialized by a constexpr constructor */
+        if (!entity_table[e].automatic && value.node) {
+            uint32_t data = 0;
+            constness c = constness::unknown;
+            /* [class.default.ctor]/4: a constructor of a class with
+               virtual bases is not constexpr */
+            if (!entity_table[record].virtual_base_count)
+                c = evaluate_variable(object, value.node,
+                                      semantics[value.node].at, data);
+            /* each element's value, an array's elements alike */
+            if (c == constness::constant && data && !(object == type))
+                data = repeated_value(type, data, semantics[value.node].at);
+            if (c == constness::constant && data)
+                value.node = data;
+            if (c != constness::constant && constexpr_variable) {
+                /* (a constexpr variable whose initialization is not
+                   followed is not known to be unusable) */
+                entity_table[e].usable = constness::unknown;
+                return not_supported_because(
+                    declaration, "dcl.init",
+                    "a constexpr initialization that is not followed");
+            }
+            /* [expr.const]/3: a constexpr variable is usable in constant
+               expressions; the evaluator reads the object's value from
+               its definition, as for an initialized class object */
+            if (constexpr_variable) {
+                entity_table[e].usable = constness::unknown;
+                entity_table[e].constexpr_ = true;
+            }
+        }
+        entity_table[e].definition = value.node;
+        constructed = true;
+    }
+    return analysis_result::well_formed;
+}
+
 /*
  * One init-declarator: its declarator, the name it declares, and the
  * initializer.  [basic.scope.pdecl]/1: "The point of declaration for a name
@@ -1758,7 +1846,7 @@ analysis_result semantic_analysis::declare_with_initializer(
                default-initialized below, and its evaluation must be a
                constant ([dcl.constexpr]/10) */
             bool by_constructor =
-                c.first_constructor && !c.dynamic && element == type &&
+                c.first_constructor &&
                 !trivial_defaulted_default_constructor(record.entity);
             if (!by_constructor &&
                 (c.dynamic || c.member_count ||
@@ -2054,78 +2142,9 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r == analysis_result::well_formed && !initialized &&
         kind == entity_kind::variable &&
         entity_table[declared_entity].defined && !s.extern_) {
-        /* [dcl.init]/12: "If no initializer is specified for an object,
-           the object is default-initialized"; [dcl.init]/7.1: "If T is a
-           (possibly cv-qualified) class type, constructors are considered.
-           The applicable constructors are enumerated ([over.match.ctor]),
-           and the best one for the initializer () is chosen through
-           overload resolution" */
-        qualified_type object = element_type(type);
-        entity_index record = element_class(object);
-        /* [temp.inst]/2: the object's class is instantiated, an array's
-           elements' too, before its constructors are asked for */
-        require_complete(record);
-        if (is_class_entity(record) && default_constructor_deleted(record)) {
-            /* C++03 has no deleted functions: the implicit default
-               constructor's definition is ill-formed ([class.ctor]/7 there),
-               reported at the class */
-            if (!tokens.files.behavior.has(language_feature::rvalue_references))
-                return not_supported_because(
-                    declaration, "class.default.ctor",
-                    "a deleted default constructor before C++11");
-            return ill_formed(declaration,
-                              "the defaulted default constructor is defined "
-                              "as deleted",
-                              "class.default.ctor");
-        }
-        if (is_class_entity(record) && entity_table[record].first_constructor &&
-            !trivial_defaulted_default_constructor(record)) {
-            /* [dcl.init]/7.2: "If T is an array type, each element is
-               default-initialized": one element's construction, which the
-               lowering repeats for each, first to last, in an automatic
-               array of one dimension */
-            const struct type &array = type_table[type.unqualified()];
-            if (!(object == type) &&
-                (!entity_table[declared_entity].automatic ||
-                 !(array.operand == object) || !array.bound_known ||
-                 !array.bound))
-                return not_supported_because(
-                    declaration, "dcl.init",
-                    "default construction of this array");
-            owned_array<expression_meaning> none;
-            initialized_value value;
-            VTRY_SET(r, construct(declaration, object, none, 0, value));
-            if (s.constexpr_ && entity_table[declared_entity].automatic)
-                return not_supported_because(
-                    declaration, "dcl.init",
-                    "a constexpr local default-initialized by a constructor");
-            /* [basic.start.static]/2: constant initialization for a static
-               variable default-initialized by a constexpr constructor */
-            if (!entity_table[declared_entity].automatic && value.node) {
-                uint32_t data = 0;
-                constness c = evaluate_variable(type, value.node,
-                                                semantics[value.node].at, data);
-                if (c == constness::constant && data)
-                    value.node = data;
-                if (c != constness::constant && s.constexpr_) {
-                    /* (a constexpr variable whose initialization is not
-                       followed is not known to be unusable) */
-                    entity_table[declared_entity].usable = constness::unknown;
-                    return not_supported_because(
-                        declaration, "dcl.init",
-                        "a constexpr initialization that is not followed");
-                }
-                /* [expr.const]/3: a constexpr variable is usable in constant
-                   expressions; the evaluator reads the object's value from
-                   its definition, as for an initialized class object */
-                if (s.constexpr_) {
-                    entity_table[declared_entity].usable = constness::unknown;
-                    entity_table[declared_entity].constexpr_ = true;
-                }
-            }
-            entity_table[declared_entity].definition = value.node;
-            default_constructed = true;
-        }
+        VTRY(r2,
+             default_initialize_variable(declaration, declared_entity, type,
+                                         s.constexpr_, default_constructed));
     }
     if (r == analysis_result::well_formed && !initialized &&
         entity_table[declared_entity].automatic && function_state.active &&

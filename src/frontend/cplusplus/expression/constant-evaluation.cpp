@@ -4725,6 +4725,32 @@ uint32_t semantic_analysis::pointer_tree(const constant_evaluation &state,
     return 0;
 }
 
+/* [dcl.init]/7.2: the initializer list of array type t whose every element
+   is the constant element, 0 if too long to write out */
+uint32_t semantic_analysis::repeated_value(qualified_type t, uint32_t element,
+                                           token_index at)
+{
+    constexpr uint64_t longest = 4096;
+    const struct type array = type_table[t.unqualified()];
+    if (array.kind != type_kind::array)
+        return element;
+    if (array.bound > longest)
+        return 0;
+    uint32_t one = repeated_value(array.operand, element, at);
+    if (!one)
+        return 0;
+    owned_array<uint32_t> elements;
+    for (uint64_t i = 0; i < array.bound; i++)
+        elements.append(one);
+    expression_meaning m;
+    m.type = qualified_type::make(t.unqualified(), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::constant;
+    uint32_t node = expression_node(semantic_kind::initializer_list, m, at);
+    semantics.set_list(node, elements.data(), elements.size());
+    return node;
+}
+
 uint32_t semantic_analysis::value_tree(const constant_evaluation &state,
                                        qualified_type t,
                                        const constant_value &v, token_index at)

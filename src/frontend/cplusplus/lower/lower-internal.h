@@ -631,6 +631,11 @@ class c_lowering
        being initialized (a declared variable, a returned value, an
        argument's temporary), and whether expression() is at it now */
     uint32_t result_object = 0;
+    /* [class.cdtor]: while a constant's base subobject is lowered, the
+       class of the complete object, whose virtual table its virtual
+       table pointer addresses, and the subobject's offset in it */
+    entity_index vptr_class = 0;
+    uint64_t vptr_offset = 0;
     bool at_result_object = false;
     /* [class.copy.elision]/1.1: the automatic variable every return
        statement of the function lowered returns, constructed in the
