@@ -834,6 +834,24 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                 ->immediate = count;
             return;
         }
+        if (L->bmi2) {
+            const char *name = "shlx";
+            const char *const *names = x64_register_names_32;
+            char suffix = 'l', text[96];
+
+            if (i->op == VIR_OP_LSHR)
+                name = "shrx";
+            else if (i->op == VIR_OP_ASHR)
+                name = "sarx";
+            if (sz == 8) {
+                names = x64_register_names_64;
+                suffix = 'q';
+            }
+            snprintf(text, sizeof text, "\t%s%c\t%%%s, %%%s, %%%s\n", name,
+                     suffix, names[c], names[a], names[d]);
+            x64_vir_text_append(L, text);
+            return;
+        }
         /* The result may be rcx: moving the first operand there would destroy cl.
 		 * Shift in the reserved scratch, then publish the allocated result. */
         x64_mov(e, L->general_temporary, a);

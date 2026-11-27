@@ -144,6 +144,8 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         cs |= (1u << RSI) | (1u << RDI);
     x64_vir_context L = {
         .context = e, .function = f, .allocation = &V->allocation, .ms = ms};
+    L.bmi2 = x86_feature_has(cc_x86_features_get(e->compile_context, sym),
+                             X86_FEATURE_BMI2);
     vir_target_registers regs = {
         .alloc = {(X64_TEMPORARIES & ~(1u << R10)) | cs, (1u << 14) - 1},
         .callee = {cs, ms ? ((1u << 14) - 1) & ~((1u << 6) - 1) : 0},
