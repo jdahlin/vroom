@@ -1591,12 +1591,20 @@ analysis_result semantic_analysis::member_explicit_instantiation(
             n, "temp.explicit",
             "a non-function member instantiation without specifiers");
     const entity c = entity_table[m.qualifier];
+    /* [temp.explicit]: "shall appear in an enclosing namespace of its
+       template" (a qualified name's) */
+    bool enclosed = false;
+    for (entity_index in = c.enclosing;; in = entity_table[in].enclosing) {
+        enclosed = enclosed || in == current_scope;
+        if (!in)
+            break;
+    }
     if (c.kind != entity_kind::class_type || !c.instantiation ||
-        entity_table[c.enclosing].kind == entity_kind::class_type ||
-        c.enclosing != current_scope)
+        entity_table[c.enclosing].kind == entity_kind::class_type || !enclosed)
         return not_supported_because(
             n, "temp.explicit",
-            "a member instantiation not of a specialization in this namespace");
+            "a member instantiation not of a specialization in an enclosed "
+            "namespace");
     const instantiation_record record = instantiations[c.instantiation - 1];
     if (record.pattern &&
         !function_templates[record.pattern - 1].parameter_count)
