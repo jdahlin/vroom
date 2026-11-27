@@ -118,7 +118,9 @@ constness fold_binary(const implementation_defined_behavior &b,
                       uint64_t y, uint64_t &out)
 {
     bool comparison = folded_comparison(op);
-    if (t == fundamental_type::long_double)
+    /* a long double's values are exact in a double, its results need not
+       be: comparisons only */
+    if (t == fundamental_type::long_double && !comparison)
         return constness::unknown;
     if (fundamental_type_is_floating(t)) {
         double p = floating_value(x), q = floating_value(y);
@@ -247,8 +249,6 @@ constness fold_unary(const implementation_defined_behavior &b,
         out = !x;
         return constness::constant;
     }
-    if (t == fundamental_type::long_double)
-        return constness::unknown;
     if (fundamental_type_is_floating(t)) {
         if (op != preprocessing_op_or_punc::MINUS)
             return constness::unknown;
