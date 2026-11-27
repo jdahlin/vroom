@@ -69,7 +69,8 @@ safely.  This plan restructures it without changing a single symbol.
    applies to an entity, a type or an expression (everything that looks at
    the semantic analysis, including clang's choices), and an *encoder* that
    turns the chosen productions into bytes and owns compression.  The
-   builder never writes a byte; the encoder never looks at the analysis.
+   builder never writes a byte; the encoder never looks at the analysis.  One pass and no
+   intermediate tree: nothing allocated that is not allocated today (3.2).
 3. Each encoding letter written once, in a table that quotes its
    production; a check keeps it that way.
 4. Function, type and enumerator names are the grammar's nonterminals;
@@ -95,7 +96,7 @@ named by its label in `docs/itanium-abi-index.tsv`:
 
 | file | ABI sections | today's functions |
 |---|---|---|
-| `mangling-internal.h` | | the node model, the builder and encoder classes |
+| `mangling-internal.h` | | the builder and encoder classes |
 | `productions.inc` | the grammar's terminals | every letter (3.3) |
 | `operators.inc` | `mangling-operator` | `<operator-name>`: code, arity, token, ABI name |
 | `builtin-types.inc` | `mangling-builtin` | `<builtin-type>` per `fundamental_type` |
@@ -114,39 +115,43 @@ named by its label in `docs/itanium-abi-index.tsv`:
 The helpers `enclosing_function`, `next_enclosing_function`,
 `visible_local_class` (used by sema too) go to `scopes.cpp`.
 
-### 3.2 Builder and encoder
+### 3.2 Builder and encoder, without a tree
 
-The builder produces a small tree of *mangling nodes*, one per production
-instance:
+Itanium compression is defined left to right: a component is a candidate
+once it has been written, and a later one refers back to it.  So the
+encoding can be produced in one pass, as it is today, and the separation is
+an interface, not an intermediate form: no node tree, no allocation beyond
+the output buffer and the candidate array that exist today.
 
-```cpp
-enum class production : uint8_t {   /* names from the grammar */
-    mangled_name, encoding, nested_name, unscoped_name, local_name,
-    source_name, operator_name, ctor_dtor_name, abi_tag, discriminator,
-    builtin_type, qualified_type, pointer, lvalue_reference, ...,
-    template_args, template_param, expression, expr_primary,
-    unresolved_name, ...
-};
-struct mangling_node {
-    production kind;
-    uint8_t alternative;      /* which right-hand side, from productions.inc */
-    uint32_t first_child, child_count;
-    uint64_t payload;         /* number, identifier, operator, fundamental */
-    uint32_t candidate_key;   /* what substitution compares (3.4) */
-};
-```
+- The *builder* decides; the *encoder* writes.  Each builder function for a
+  production first *resolves* (a pure function of the analysis returning a
+  small value on the stack: which alternative, its operands, the
+  substitution key) and then *emits* by calling the encoder with that
+  value.  Nothing is written before the alternative is known.
+- The *encoder* (`itanium_encoder`, one method per production or
+  terminal group: `nested_name_begin(cv, ref)`, `nested_name_end()`,
+  `source_name(id)`, `builtin_type(t)`, `template_param(position)`,
+  `operator_code(op)`, `substitution_or_candidate(key)`, ...) owns the
+  output buffer, the candidate array, `<seq-id>`, `<number>` and the `St`,
+  `Sa`, `Ss`... abbreviations.  It reads only the tables (3.3), never the
+  analysis.
 
-Nodes live in a per-thread array reset for each symbol (no heap call per
-node, as VIR's arrays).  A builder function returns a node index or 0 for
-"no rule"; a refusal records the reason as today.  A trial (today's
-`alias_value_trial`, the ten rewinds) becomes "build, and drop the nodes if
-it fails": nothing has been written, and no candidate has been registered,
-because candidates are registered by the encoder.
+The ten rewinds of today (origin/main) and what replaces each:
 
-The encoder walks the finished tree once, writes each node's terminals from
-`productions.inc`, and does compression: before writing a node that is a
-substitution candidate ([abi:mangling-compression]) it looks the node up and
-writes `S_`/`S <seq-id> _` instead, else it records it after writing it.
+| where | today | instead |
+|---|---|---|
+| `constraint_template_args`, `class_enum_type` (2) | write `N`, try `substitution(template)`, rewind if it is no candidate | look the candidate up first (`encoder.find_candidate(key)`, pure), then write |
+| `specialization_encoding`, `constraint_template_args` (2) | `out->n--`: take back the `E` that `name()` wrote, to put arguments or `Q...E` before it | the caller resolves `<template-prefix> <template-args>` and asks for the nested-name to stay open; `E` is written once, at the end |
+| `dependent_expression_of`: `cv`/`tl` + `type_operand` (3) | write `cv` or `tl`, try the operand, rewind if it is not a type | resolve the operand's type first (`operand_type` already does it, without writing), then write |
+| `dependent_expression_of`: `sr` qualifier (1) | write `sr` and source names, classify the last qualifier while writing, rewind bytes and candidates | classify the qualifier levels first (pure), then write |
+| `parameter_type`: the alias-value trial (2) | copy the whole candidate array to an `owned_array`, mangle the type, on one refusal mangle it again with `alias_value_trial`, rewind, restore the copy | a pure query "does this type name an alias template's specialization in a value-dependent argument" decides the mode before writing; if that query cannot be written, `encoder.mark()`/`rewind(mark)` (a byte count and a candidate count: candidates are only appended, so no copy) |
+
+Three of today's rewinds do not restore the candidates with the bytes
+(`cv`, `tl`, `cv ... _E`); that is harmless only while `type_operand` fails
+before it registers a candidate.  Resolving first removes the question.
+
+`mark`/`rewind` stays in the encoder for a case that cannot be decided
+first, but a use of it needs a comment saying why; the goal is none.
 
 ### 3.3 One table of terminals
 
@@ -178,9 +183,10 @@ tables (so a letter cannot come back inline).
 
 Today a candidate is a `type_index` (one record per type), an entity (a
 namespace or template prefix), a member function type with its class, or a
-pack expansion.  The node keeps that identity as `candidate_key` (an index
-into a small key table of those four kinds), so compression is unchanged by
-construction: the encoder compares keys, not bytes.  Comparing the encoded
+pack expansion.  The builder passes that identity to the encoder as a
+`candidate_key` (one of those four kinds, a value, not an allocation), so
+compression is unchanged by construction: the encoder compares keys, not
+bytes.  Comparing the encoded
 bytes would be simpler and is what the demangler sees, but it differs from
 today (and from clang) for dependent types that are spelled alike and are
 not the same type; that is a decision for later, not for this plan.
@@ -211,7 +217,8 @@ not the same type; that is a decision for later, not for this plan.
 ## 4. Steps
 
 Every step keeps every symbol and refusal identical (M0's gate) and
-passes `cxx-fe-bench.py --against` within +0.5%.  One PR per step.
+passes `cxx-fe-bench.py --against` within +0.5%; no step adds an
+allocation.  One PR per step.
 
 ### M0: the identity gate
 `bench/cxx-mangle-same.py --save F | --against F`: `vpp -fcxx-dump=symbols`
@@ -246,21 +253,18 @@ reported before and after.
 Status: not started.
 
 ### M4: the encoder interface
-All bytes go through an `itanium_encoder` with one method per production
-(`encoder.nested_name_begin(cv, ref)`, `encoder.source_name(id)`,
-`encoder.builtin_type(t)`, ...), reading `productions.inc`; it owns `out`,
-the candidates, `<seq-id>`, `<number>` and the abbreviations.  The builder
-still calls it as it goes (no tree yet), so the rewinds still exist, now as
-`encoder.mark()`/`encoder.rewind(mark)` that also rewind the candidates.
-The literal check of 3.3 turns on here.
+All bytes go through `itanium_encoder` (3.2), reading `productions.inc`; it
+owns `out`, the candidates, `<seq-id>`, `<number>` and the abbreviations.
+The rewinds still exist at first, as `encoder.mark()`/`rewind(mark)`, which
+rewind the candidates too (fixing the three sites that do not).  The literal
+check of 3.3 turns on here.
 Status: not started.
 
-### M5: the deferred tree
-The encoder's methods append nodes instead of bytes; the encoder walk of
-3.2 writes them at the end.  `mark`/`rewind` become dropping nodes;
-`alias_value_trial` and `out->n--` disappear.  Measure: nodes per symbol,
-instructions (cxx-fe-bench), and the time of `-fcxx-dump=symbols` on
-json's largest TU.
+### M5: resolve before emit
+Each rewind of 3.2's table replaced by resolving first; the alias-value
+trial by a pure query, which also removes `alias_value_trial`,
+`alias_value_refused` and the copy of the candidate array.  Done when
+`mark`/`rewind` has no caller, or each remaining one says why.
 Status: not started.
 
 ### M6: one expression builder
@@ -272,20 +276,18 @@ state that belongs to one source (`written_first`, `pack_element`,
 `dependent_value_depth`, ...) moves into that source's walker object.
 Status: not started.
 
-### M7 (optional): a tree dump and the C mangler
-`-fcxx-dump=mangling` prints the node tree with production and alternative
-names (for tests and bug reports); `frontend/c/mangle.cpp` uses the encoder
-for its types and substitutions.
+### M7 (optional): the C mangler
+`frontend/c/mangle.cpp` uses the encoder for its types and substitutions.
 Status: not started.
 
 ## 5. Decisions needed
 
-1. **M5 at all?**  M4 alone gives the encoder boundary and one place for
-   the letters; M5 is what removes the rewinds and trials.  Recommended: do
-   it, the rewinds are where the mangler's subtle bugs live, but decide
-   after M4 with its numbers.
-2. **Directory or prefix.**  `abi/itanium/mangling/` (one Makefile wildcard
+1. **Directory or prefix.**  `abi/itanium/mangling/` (one Makefile wildcard
    change) or `abi/itanium/mangling-*.cpp`.  Recommended: the directory.
-3. **Order of M1 and M2.**  M1 first keeps the diff of the split purely
+2. **Order of M1 and M2.**  M1 first keeps the diff of the split purely
    mechanical; M2 first makes M1's diff smaller per file.  Recommended: M1
    first.
+
+A node tree built per symbol and encoded afterwards was considered and
+left out: compression is left to right, so a tree buys nothing the
+resolve-then-emit split does not, and costs an array and a second walk.
