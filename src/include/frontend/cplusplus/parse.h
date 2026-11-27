@@ -1307,6 +1307,8 @@ class parser
         unknown,
     };
     reading reading_at(unsigned ahead);
+    /* a statement f(x, y); of an undeclared f and declared objects */
+    bool call_of_undeclared_name(unsigned ahead);
     /* parse the tokens as declaration() or expression() by [stmt.ambig] */
     template <class Declaration, class Expression>
     node_index declaration_or_expression(reading r, Declaration declaration,

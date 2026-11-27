@@ -95,11 +95,42 @@ parser::reading parser::reading_at(unsigned ahead)
         case name_class::none:
             return reading::expression;
         case name_class::unknown:
+            if (call_of_undeclared_name(ahead))
+                return reading::expression;
+            return reading::unknown;
         case name_class::constructor:
             return reading::unknown;
         }
     }
     return reading::expression;
+}
+
+/*
+ * [basic.lookup.argdep]: a call whose name only argument-dependent lookup
+ * finds, a hidden friend's among them.  As a declaration, T(x); would need
+ * T declared and would declare x anew, hiding the object x: not read so.
+ */
+bool parser::call_of_undeclared_name(unsigned ahead)
+{
+    if (!at_identifier(ahead) ||
+        !at(preprocessing_op_or_punc::LEFT_PARENTHESIS, ahead + 1))
+        return false;
+    scope_index found = 0;
+    bool dependent = false;
+    if (names.lookup_unqualified(tokens.identifier(position + ahead), &found,
+                                 &dependent) != name_kind::not_declared)
+        return false;
+    for (unsigned i = ahead + 2;; i += 2) {
+        unsigned length = 0;
+        if (!at_identifier(i) ||
+            classify_name(i, &length, false) != name_class::not_a_type ||
+            length != 1)
+            return false;
+        if (at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, i + 1))
+            return at(preprocessing_op_or_punc::SEMICOLON, i + 2);
+        if (!at(preprocessing_op_or_punc::COMMA, i + 1))
+            return false;
+    }
 }
 
 } // namespace cplusplus
