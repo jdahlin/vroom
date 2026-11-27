@@ -589,7 +589,7 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
     if (pr.kind == type_kind::dependent &&
         (ar.kind == type_kind::array || ar.kind == type_kind::function ||
          ar.kind == type_kind::fundamental ||
-         ar.kind == type_kind::enumeration))
+         ar.kind == type_kind::enumeration || is_vector_kind(ar.kind)))
         return false;
     if (ar.kind == type_kind::pointer) {
         type_kind k = table[ar.operand.unqualified()].kind;
@@ -682,12 +682,12 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
     if (pr.kind != type_kind::dependent ||
         !entity_table[pr.entity].instantiation)
         return -1;
-    /* (an arithmetic, enumeration, pointer or pointer-to-member A is no
-       class, nor derived from one. The one pointer level allowed by /4.3
+    /* (an arithmetic, vector, enumeration, pointer or pointer-to-member A
+       is no class, nor derived from one. The one pointer level allowed by /4.3
        has already been removed. */
     if (ar.kind == type_kind::fundamental ||
         ar.kind == type_kind::enumeration || ar.kind == type_kind::pointer ||
-        ar.kind == type_kind::pointer_to_member)
+        ar.kind == type_kind::pointer_to_member || is_vector_kind(ar.kind))
         return 0;
     if (ar.kind != type_kind::class_type ||
         template_template_parameter(specialized_template(pr.entity)))
