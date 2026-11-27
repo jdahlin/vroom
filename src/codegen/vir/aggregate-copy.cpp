@@ -203,6 +203,14 @@ VPRIV bool virbuild_aggregate_copies_forward(codegen_context *e)
                 continue;
             vir_insn in = V->insns[q].insn;
             int64_t k;
+            if (in.op == VIR_OP_MEMCPY && !in.flags &&
+                virbuild_value_resolve(V, in.a) ==
+                    virbuild_value_resolve(V, in.b)) { /* onto itself */
+                V->insns[q].insn = VCC_LITERAL(vir_insn, VIR_OP_NOP,
+                                               VIR_TYPE_VOID, 0, 0, 0, 0);
+                changed = true;
+                continue;
+            }
             if (call && in.op == VIR_OP_MEMCPY && !in.flags &&
                 virbuild_record_call_forward(e, call, q, &slot_uses)) {
                 changed = true;
