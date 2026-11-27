@@ -42,6 +42,8 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
             {"vpmuludq", 1, 1, 0xf4, 0, 0, 0, 0},
             {"vpmulld", 1, 2, 0x40, 0, 0, 0, 0},
             {"vpshufb", 1, 2, 0x00, 0, 0, 0, 0},
+            {"vpermd", 1, 2, 0x36, 0, 0, 0, 0},
+            {"vpermps", 1, 2, 0x16, 0, 0, 0, 0},
             {"vpunpcklqdq", 1, 1, 0x6c, 0, 0, 0, 0},
             {"vpunpckhqdq", 1, 1, 0x6d, 0, 0, 0, 0},
             {"vpunpckldq", 1, 1, 0x62, 0, 0, 0, 0},
