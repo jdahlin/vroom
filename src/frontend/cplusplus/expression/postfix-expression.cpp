@@ -1937,6 +1937,12 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
         }
         function_type = f.type;
+        if (!member && f.node &&
+            semantics[f.node].kind == semantic_kind::bound_member_function) {
+            /* (resolve_call's implied (*this)) */
+            object = semantics[f.node].a;
+            member = semantics[f.node].b;
+        }
         if (member) {
             if (semantics[f.node].kind ==
                 semantic_kind::bound_member_function) {
