@@ -411,27 +411,23 @@ bool itanium_mangler::type_constraint(entity_index t, SyntaxElement q)
        nested-name's) */
     entity_index scope = analysis.entity_table[found].enclosing;
     bool wrapped = scope && !is_std(scope);
-    itanium_encoder::mark before = enc.position();
+    /* [abi:mangle.name] <name> ::= <unscoped-template-name> <template-args>
+       or <nested-name> ::= N <template-prefix> <template-args> E, the
+       template-prefix the concept's prefix and name, or its substitution */
     if (wrapped)
         enc.write(terminal::nested_name);
-    if (substitution(found)) {
-        if (!template_args_of_constraint(t, q))
+    if (!substitution(found)) {
+        if (wrapped) {
+            if (!prefix(scope) || !unqualified_name(found))
+                return false;
+        } else if (!unscoped_name(found)) {
             return false;
-        if (wrapped)
-            enc.write(terminal::end);
-        return true;
+        }
+        add_candidate(found);
     }
-    enc.rewind(before);
-    if (!name(found))
-        return false;
-    /* (a nested-name's E closes after the arguments) */
-    bool nested = enc.last_was(terminal::end);
-    if (nested)
-        enc.take_back(terminal::end);
-    add_candidate(found);
     if (!template_args_of_constraint(t, q))
         return false;
-    if (nested)
+    if (wrapped)
         enc.write(terminal::end);
     return true;
 }

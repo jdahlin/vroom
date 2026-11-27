@@ -34,28 +34,35 @@ bool itanium_mangler::class_template_args(entity_index c)
  * the parameter's type in the specialization (enable_if_t<that, int>: i).
  * Told apart by a second mangling with each such alias as its type: where
  * that names no <template-param>, nothing else made the type dependent.
+ *
+ * The one place the mangler writes what it then takes back (doc/
+ * PLAN-mangling.md M5): which alias specialization is in a value-dependent
+ * argument, and whether its type is the only dependent part, is what
+ * mangling the type finds out; a query apart from it would walk every
+ * form type() and the expressions do.  The second mangling sees none of
+ * the candidates before it (a <template-param> it writes is not one
+ * substituted), and both are taken back.
  */
 bool itanium_mangler::non_type_parameter_type(entity_index c, uint32_t i,
                                               qualified_type declared)
 {
-    itanium_encoder::mark length = enc.position();
-    owned_array<candidate> saved;
-    const char *before = refused;
+    itanium_encoder::mark before = enc.position();
+    const char *refused_before = refused;
     alias_value_refused = false;
     if (type(declared))
         return true;
-    if (before || !alias_value_refused)
+    if (refused_before || !alias_value_refused)
         return false;
     const char *why = refused, *where = refused_in;
     refused = nullptr;
-    enc.rewind(length);
-    enc.take_candidates(saved);
+    enc.rewind(before);
+    size_t shown = enc.hide_candidates();
     uint64_t written = template_params_written;
     alias_value_trial = true;
     bool resolved = type(declared) && written == template_params_written;
     alias_value_trial = false;
-    enc.rewind({length.bytes, 0});
-    enc.give_back_candidates(saved);
+    enc.rewind(before);
+    enc.show_candidates(shown);
     if (!resolved) {
         refused = why;
         refused_in = where;
@@ -78,7 +85,8 @@ bool itanium_mangler::non_type_parameter_type(entity_index c, uint32_t i,
  * magnitude; a bool's 0 or 1.
  */
 bool itanium_mangler::template_args(entity_index c, entity_index function,
-                                    bool pack_brackets, uint32_t limit)
+                                    bool pack_brackets, uint32_t limit,
+                                    bool close)
 {
     enc.write(terminal::template_args);
     uint32_t count = analysis.specialization_argument_count(c);
@@ -230,7 +238,8 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
         if (pack_brackets)
             enc.write(terminal::end);
     }
-    enc.write(terminal::end);
+    if (close)
+        enc.write(terminal::end);
     return true;
 }
 

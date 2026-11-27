@@ -46,9 +46,8 @@ itanium_mangler::written_binding(SyntaxElement name) const
 /* the <type> of a type-id written in a dependent expression: a name an
    alias template bound, one of the template's type parameters, or another
    type-id the analysis recorded with its node (collect_written_casts) */
-bool itanium_mangler::type_of_written_operand(SyntaxElement a,
-                                              qualified_type &t,
-                                              fundamental_type &keyword_type)
+bool itanium_mangler::type_of_written_operand(
+    SyntaxElement a, qualified_type &t, fundamental_type &keyword_type) const
 {
     t = qualified_type();
     keyword_type = fundamental_type::none;
@@ -248,13 +247,16 @@ bool itanium_mangler::template_args_of_written(SyntaxElement id,
 
 /* the qualifier Q of Q::name written in a dependent expression, a name (a
    template parameter, one an alias template bound) or a template-id
-   (collect_written_casts gave its type): [abi:expressions]' <unresolved-type>
-   for a template parameter (1), or the <unresolved-qualifier-level> of a
-   class template's dependent specialization, its <source-name> and
-   <template-args>, which E closes (2); 0 not mangled */
-int itanium_mangler::unresolved_qualifier_level(SyntaxElement q)
+   (collect_written_casts gave its type): [abi:expressions]'
+   <unresolved-type> for a template parameter, or the
+   <unresolved-qualifier-level> of a class template's dependent
+   specialization, or of an alias template's as written ([impl.clang]
+   libc++'s _CheckOptionalArgsCtor<_Up>::), its <source-name> and
+   <template-args>, which E closes; none not mangled.  t its type */
+itanium_mangler::qualifier_level
+itanium_mangler::unresolved_qualifier_form(SyntaxElement q,
+                                           qualified_type &t) const
 {
-    qualified_type t;
     fundamental_type keyword_type = fundamental_type::none;
     if (q.is(syntax_kind::simple_template_id)) {
         SyntaxRef qr = q;
@@ -267,41 +269,43 @@ int itanium_mangler::unresolved_qualifier_level(SyntaxElement q)
             }
         }
         if (!found)
-            return 0;
+            return qualifier_level::none;
     } else if (!q.is_token() || !q.is_identifier() ||
                !type_of_written_operand(q, t, keyword_type)) {
-        return 0;
+        return qualifier_level::none;
     }
     const struct type &r = record(t);
     /* (an alias template's template-id naming a parameter is mangled as
        written, below, as clang does) */
     if (r.kind == type_kind::template_parameter && !t.cv() &&
-        !q.is(syntax_kind::simple_template_id)) {
-        if (!type(t))
-            return 0;
-        return 1;
-    }
+        !q.is(syntax_kind::simple_template_id))
+        return qualifier_level::template_param;
     if (r.kind == type_kind::dependent && !t.cv() &&
         analysis.entity_table[r.entity].kind ==
             entity_kind::template_specialization &&
-        analysis.entity_table[r.entity].instantiation) {
-        if (!source_name(analysis.entity_table[r.entity].name) ||
-            !template_args(r.entity, 0, false)) {
-            return 0;
-        }
-        return 2;
-    }
-    /* [impl.clang] an alias template's dependent specialization
-       (libc++'s _CheckOptionalArgsCtor<_Up>::): its name and arguments as
-       written */
+        analysis.entity_table[r.entity].instantiation)
+        return qualifier_level::specialization;
     if (q.is(syntax_kind::simple_template_id) && q.size() >= 3 &&
-        q[0].is_identifier()) {
-        bool dependent = false;
-        if (source_name(analysis.token_identifier(q[0].token())) &&
-            template_args_of_written(q, dependent))
-            return 2;
+        q[0].is_identifier())
+        return qualifier_level::alias_template_id;
+    return qualifier_level::none;
+}
+
+/* and writes it */
+bool itanium_mangler::unresolved_qualifier_level(SyntaxElement q,
+                                                 qualifier_level level,
+                                                 qualified_type t)
+{
+    if (level == qualifier_level::template_param)
+        return type(t);
+    if (level == qualifier_level::specialization) {
+        entity_index s = record(t).entity;
+        return source_name(analysis.entity_table[s].name) &&
+               template_args(s, 0, false);
     }
-    return 0;
+    bool dependent = false;
+    return source_name(analysis.token_identifier(q[0].token())) &&
+           template_args_of_written(q, dependent);
 }
 
 /* [abi:expressions] <expression> ::= sp <expression>, a pack expansion */
@@ -592,9 +596,12 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
          expression[0].is(syntax_kind::simple_type_specifier)) &&
         expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         expression[3].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-        itanium_encoder::mark before = enc.position();
-        enc.write(terminal::cast);
-        if (type_operand_of_written(expression[0])) {
+        qualified_type operand;
+        fundamental_type keyword_type = fundamental_type::none;
+        if (type_of_written_operand(expression[0], operand, keyword_type)) {
+            enc.write(terminal::cast);
+            if (!type_operand_of_written(expression[0]))
+                return written_form(false);
             owned_array<SyntaxElement> arguments;
             for (auto argument :
                  expression[2].items(syntax_kind::initializer_list))
@@ -607,7 +614,6 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
                 enc.write(terminal::end);
             return written_form(true);
         }
-        enc.rewind(before);
     }
     /* [abi:expressions] T{}, T a class the analysis recorded:
 
@@ -618,13 +624,15 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
         expression[0].is_identifier() &&
         expression[1].is(syntax_kind::braced_init_list) &&
         expression[1].size() == 2) {
-        itanium_encoder::mark before = enc.position();
-        enc.write(terminal::braced_cast);
-        if (type_operand_of_written(expression)) {
+        qualified_type operand;
+        fundamental_type keyword_type = fundamental_type::none;
+        if (type_of_written_operand(expression, operand, keyword_type)) {
+            enc.write(terminal::braced_cast);
+            if (!type_operand_of_written(expression))
+                return written_form(false);
             enc.write(terminal::end);
             return written_form(true);
         }
-        enc.rewind(before);
     }
     /* T(), T an alias template's parameter or the template's own type
        parameter: cv <type> _ E */
@@ -637,14 +645,16 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
                           syntax_kind::simple_type_specifier)) &&
         expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         expression[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-        itanium_encoder::mark before = enc.position();
-        enc.write(terminal::cast);
-        if (type_operand_of_written(expression[0])) {
+        qualified_type operand;
+        fundamental_type keyword_type = fundamental_type::none;
+        if (type_of_written_operand(expression[0], operand, keyword_type)) {
+            enc.write(terminal::cast);
+            if (!type_operand_of_written(expression[0]))
+                return written_form(false);
             enc.write(terminal::underscore);
             enc.write(terminal::end);
             return written_form(true);
         }
-        enc.rewind(before);
     }
     if (expression.is(syntax_kind::postfix_expression) &&
         expression.size() == 3 && expression[0].is_token() &&
@@ -779,19 +789,22 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
               member.size() >= 3 && member[0].is_identifier())) &&
             ((qual[last].is_identifier() && !last) ||
              qual[last].is(syntax_kind::simple_template_id))) {
-            itanium_encoder::mark before = enc.position();
-            enc.write(terminal::unresolved_scope);
             bool named = true;
             for (uint32_t i = 0; i < last; i += 2)
-                named = named &&
-                        source_name(analysis.token_identifier(qual[i].token()));
-            int form = 0;
+                named = named && analysis.token_identifier(qual[i].token());
+            qualified_type level_type;
+            qualifier_level level = qualifier_level::none;
             if (named)
-                form = unresolved_qualifier_level(qual[last]);
-            if (form == 1 && last)
-                form = 0;
-            if (form) {
-                if (form == 2)
+                level = unresolved_qualifier_form(qual[last], level_type);
+            if (level == qualifier_level::template_param && last)
+                level = qualifier_level::none;
+            if (level != qualifier_level::none) {
+                enc.write(terminal::unresolved_scope);
+                for (uint32_t i = 0; i < last; i += 2)
+                    source_name(analysis.token_identifier(qual[i].token()));
+                if (!unresolved_qualifier_level(qual[last], level, level_type))
+                    return written_form(false);
+                if (level != qualifier_level::template_param)
                     enc.write(terminal::end);
                 if (member.is_identifier())
                     return written_form(
@@ -801,7 +814,6 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
                     source_name(analysis.token_identifier(member[0].token())) &&
                     template_args_of_written(member, dependent));
             }
-            enc.rewind(before);
         }
         /* [abi:expressions] T::name, T a template type parameter, its
            type a <template-param>:

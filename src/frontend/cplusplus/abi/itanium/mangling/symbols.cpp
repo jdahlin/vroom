@@ -193,19 +193,20 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
         typed_parameters = 0;
     /* (the parameters' types name the template's parameters, which
        their expressions resolve through it) */
-    entity_index outer_encoding_template = encoding_template;
-    if (typed_parameters)
-        encoding_template = pattern_of;
-    bool arguments = template_args(e, typed_parameters);
-    encoding_template = outer_encoding_template;
-    if (!arguments)
-        return false;
     /* [abi:mangle.template-arg]'s template-args, with [impl.clang]'s
        requires-clause: I, the template-args, Q and the requires-clause's
        expression, E; the requires-clause of the template-head */
     SyntaxElement constraint = analysis.template_constraint(pattern_of);
-    if (constraint && !table[scope].lambda) {
-        enc.take_back(terminal::end);
+    bool head_constraint = constraint && !table[scope].lambda;
+    entity_index outer_encoding_template = encoding_template;
+    if (typed_parameters)
+        encoding_template = pattern_of;
+    bool arguments =
+        template_args(e, typed_parameters, true, UINT32_MAX, !head_constraint);
+    encoding_template = outer_encoding_template;
+    if (!arguments)
+        return false;
+    if (head_constraint) {
         enc.write(terminal::requires_clause);
         if (!expression_of_constraint(pattern_of, constraint))
             return false;

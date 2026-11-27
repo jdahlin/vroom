@@ -141,12 +141,21 @@ bool itanium_mangler::same_candidate(qualified_type a, qualified_type b) const
 /* a namespace seen as a prefix before */
 bool itanium_mangler::substitution(entity_index scope)
 {
+    size_t i = candidate_of(scope);
+    if (i == no_candidate)
+        return false;
+    enc.substitution(i);
+    return true;
+}
+
+/* the candidate a namespace or template seen as a prefix before is;
+   no_candidate for one not seen */
+size_t itanium_mangler::candidate_of(entity_index scope) const
+{
     for (size_t i = 0; i < enc.candidate_count(); i++)
-        if (enc.candidate_at(i).scope == scope) {
-            enc.substitution(i);
-            return true;
-        }
-    return false;
+        if (enc.candidate_at(i).scope == scope)
+            return i;
+    return no_candidate;
 }
 
 } // namespace cplusplus

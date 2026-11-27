@@ -153,22 +153,6 @@ void itanium_encoder::seq_id(size_t n)
         vbuffer_append(out, &digits[--count], 1);
 }
 
-void itanium_encoder::take_candidates(owned_array<mangling_candidate> &into)
-{
-    into.clear();
-    for (const mangling_candidate &c : candidates)
-        into.append(c);
-    candidates.clear();
-}
-
-void itanium_encoder::give_back_candidates(
-    const owned_array<mangling_candidate> &from)
-{
-    candidates.clear();
-    for (const mangling_candidate &c : from)
-        candidates.append(c);
-}
-
 itanium_encoder::mark itanium_encoder::position() const
 {
     return {out->n, candidates.size()};
@@ -178,19 +162,6 @@ void itanium_encoder::rewind(mark m)
 {
     out->n = m.bytes;
     candidates.resize(m.candidates);
-}
-
-bool itanium_encoder::last_was(terminal t) const
-{
-    size_t length = strlen(terminal_codes[static_cast<size_t>(t)]);
-    return out->n >= length &&
-           !memcmp(out->p + out->n - length,
-                   terminal_codes[static_cast<size_t>(t)], length);
-}
-
-void itanium_encoder::take_back(terminal t)
-{
-    out->n -= strlen(terminal_codes[static_cast<size_t>(t)]);
 }
 
 } // namespace cplusplus

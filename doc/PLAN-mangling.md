@@ -320,7 +320,19 @@ Each rewind of 3.2's table replaced by resolving first; the alias-value
 trial by a pure query, which also removes `alias_value_trial`,
 `alias_value_refused` and the copy of the candidate array.  Done when
 `mark`/`rewind` has no caller, or each remaining one says why.
-Status: not started.
+Status: done (2026-11-27).  Nine of the ten rewinds decide first: the
+candidate of a template prefix is looked up (`candidate_of`) before `N` is
+written; a constraint's concept writes its `<template-prefix>` itself
+instead of taking back the `E` of a `<name>`; `template_args` can leave
+its `E` to a caller that writes `Q <requires-clause>` before it; the casts
+resolve their operand's type (`type_of_written_operand`, const) before
+`cv`/`tl`; `Q::name`'s qualifier is classified
+(`unresolved_qualifier_form`) before `sr`.  The alias-value trial of
+`non_type_parameter_type` keeps one `mark`/`rewind`, with the comment why
+(what it asks is what mangling the type finds out); its copy of the
+candidate array is gone (`hide_candidates`), and with it the encoder's
+`take_back`/`last_was`.  `alias_value_trial` stays: the trial is still a
+mangling.  Identity gate: no difference.  Speed: +0.01% instructions.
 
 ### M6: one expression builder
 The four sources call one set of `<expression>` builders

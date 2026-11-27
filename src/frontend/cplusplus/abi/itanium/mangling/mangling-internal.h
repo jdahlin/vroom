@@ -182,13 +182,14 @@ class itanium_encoder
     /* a symbol that is not mangled: its identifier as it is */
     void unmangled(const char *bytes, size_t length);
 
+    /* the candidates seen, but those hidden */
     size_t candidate_count() const
     {
-        return candidates.size();
+        return candidates.size() - hidden;
     }
     const mangling_candidate &candidate_at(size_t i) const
     {
-        return candidates[i];
+        return candidates[hidden + i];
     }
     void add_candidate(const mangling_candidate &c)
     {
@@ -196,9 +197,18 @@ class itanium_encoder
     }
     /* <substitution> of candidate i: S_, then S <seq-id> _ */
     void substitution(size_t i);
-    /* the candidates set aside (and none left), and given back */
-    void take_candidates(owned_array<mangling_candidate> &into);
-    void give_back_candidates(const owned_array<mangling_candidate> &from);
+    /* the candidates seen so far hidden from the ones after (the number
+       hidden before, to show them again with) */
+    size_t hide_candidates()
+    {
+        size_t before = hidden;
+        hidden = candidates.size();
+        return before;
+    }
+    void show_candidates(size_t before)
+    {
+        hidden = before;
+    }
 
     /* what was written and seen so far, to take back to (rewind) */
     struct mark {
@@ -207,13 +217,11 @@ class itanium_encoder
     };
     mark position() const;
     void rewind(mark m);
-    /* whether the last terminal written was t, and taking it back */
-    bool last_was(terminal t) const;
-    void take_back(terminal t);
 
   private:
     vbuffer *out;
     owned_array<mangling_candidate> candidates;
+    size_t hidden = 0;
 };
 
 class itanium_mangler
@@ -412,9 +420,18 @@ class itanium_mangler
     bool type_operand_of_written(SyntaxElement a);
     bool template_args_of_written(SyntaxElement id, bool &dependent);
     bool expansion_of_written(SyntaxElement a, bool &expanded);
-    int unresolved_qualifier_level(SyntaxElement q);
+    enum class qualifier_level : uint8_t {
+        none,
+        template_param,
+        specialization,
+        alias_template_id
+    };
+    qualifier_level unresolved_qualifier_form(SyntaxElement q,
+                                              qualified_type &t) const;
+    bool unresolved_qualifier_level(SyntaxElement q, qualifier_level level,
+                                    qualified_type t);
     bool type_of_written_operand(SyntaxElement a, qualified_type &t,
-                                 fundamental_type &keyword_type);
+                                 fundamental_type &keyword_type) const;
     /* (set by type_operand_of_written when a type it mangled is dependent) */
     bool operand_dependent = false;
     /* the part of the symbol being mangled, for refuse */
@@ -451,8 +468,11 @@ class itanium_mangler
         return c.is(op);
     }
     bool class_template_args(entity_index c);
+    /* (close false: the E left to the caller, which writes a
+       requires-clause before it) */
     bool template_args(entity_index c, entity_index function = 0,
-                       bool pack_brackets = true, uint32_t limit = UINT32_MAX);
+                       bool pack_brackets = true, uint32_t limit = UINT32_MAX,
+                       bool close = true);
     bool template_arg_of_dependent_value(entity_index d);
     bool expression_of_dependent_value(entity_index d);
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
@@ -520,6 +540,8 @@ class itanium_mangler
     bool substitution(qualified_type t, entity_index member_class = 0);
     bool same_candidate(qualified_type a, qualified_type b) const;
     bool substitution(entity_index scope);
+    static constexpr size_t no_candidate = SIZE_MAX;
+    size_t candidate_of(entity_index scope) const;
     bool is_std(entity_index scope) const;
     bool in_inline_namespace(entity_index e) const;
     bool in_unnamed_namespace(entity_index e) const;

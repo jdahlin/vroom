@@ -119,15 +119,15 @@ bool itanium_mangler::class_enum_type(qualified_type t)
                <nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] <template-prefix> <template-args> E
 
            with the <template-prefix> a <substitution> */
-        itanium_encoder::mark before = enc.position();
-        enc.write(terminal::nested_name);
-        if (substitution(analysis.specialized_template(c))) {
+        size_t seen = candidate_of(analysis.specialized_template(c));
+        if (seen != no_candidate) {
+            enc.write(terminal::nested_name);
+            enc.substitution(seen);
             if (!template_args(c))
                 return false;
             enc.write(terminal::end);
             return true;
         }
-        enc.rewind(before);
     } else if (x.instantiation &&
                substitution(analysis.specialized_template(c))) {
         return template_args(c);
