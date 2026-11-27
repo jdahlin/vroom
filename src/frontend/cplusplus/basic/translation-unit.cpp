@@ -167,9 +167,15 @@ bool semantic_analysis::unit_local(entity_index e) const
                 !visible_local_class(entity_table, k))
                 return true;
         }
-        if (x.kind == entity_kind::function && k != e && !x.instantiation &&
-            x.linkage_of_name == linkage::internal)
-            return true;
+        /* (a specialization of a static function template is internal as
+           its template is; its own linkage may be its arguments') */
+        if (x.kind == entity_kind::function && k != e) {
+            entity_index declared = k;
+            if (x.instantiation)
+                declared = specialized_template(k);
+            if (entity_table[declared].linkage_of_name == linkage::internal)
+                return true;
+        }
         if (!x.instantiation)
             continue;
         const instantiation_record &made = instantiations[x.instantiation - 1];

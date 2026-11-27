@@ -19,6 +19,12 @@ int Worker::work(int n)
     return erased([n] { return n + 1; }) + Counter<L>::next();
 }
 #endif
+template <class T> static int in_static_template()
+{
+    auto l = [] { static int seen = apply(Anon()) * 43; return seen++; };
+    int a = erased(l);
+    return a * 1000 + l();
+}
 int NAME()
 {
 #if UNIT == 1
@@ -33,6 +39,7 @@ int NAME()
     printf("%d %d\n", Counter<Anon>::next(), tt<Box>());
     printf("%d %d %d\n", local_user(), apply(glambda), autov<sfn>() + autov<&afn>());
     printf("%d\n", of_enum<E>());
+    printf("%d\n", in_static_template<int>());
     printf("%d %d\n", erased(Anon()), erased([] { return UNIT * 41; }));
     return r;
 }

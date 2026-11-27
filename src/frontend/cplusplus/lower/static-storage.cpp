@@ -251,7 +251,8 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     }
     bool weak_guard =
         analysis.entity_table[function].inline_ &&
-        analysis.entity_table[function].linkage_of_name != linkage::internal;
+        analysis.entity_table[function].linkage_of_name != linkage::internal &&
+        !analysis.unit_local(function);
     bool constant = !n.b || constant_initializer(n.b);
     uint32_t s = symbol(e, n.at);
     if (!s)
@@ -401,7 +402,8 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
     in_function = false;
     if (failure.what || statements.empty())
         return false;
-    if (x.inline_ && x.linkage_of_name != linkage::internal) {
+    if (x.inline_ && x.linkage_of_name != linkage::internal &&
+        !analysis.unit_local(e)) {
         /* [basic.start.dynamic]/1, [abi:guards]: guard an inline variable's
            dynamic initialization with weak _ZGV<mangled without _Z> */
         owned_buffer name;
