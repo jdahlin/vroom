@@ -482,6 +482,8 @@ bench/stockfish/vccd.py             # ... concurrently through the vcc shim and 
 bench/stockfish/prefix.py [--fork]  # ... -fcxx-prefix= (the system headers; PLAN-cxx-snapshot.md): symbols and sizes = -include's and own includes'; --fork: one process forks a child per TU
 bench/cxx-prefix.py -j 6            # -fcxx-prefix=P = -include P over src/test/cxx/run: status, diagnostics, object (~1 min)
 bench/stockfish/vccd-prefix.py [--bin-dir DIR]   # vccd's -fcxx-prefix= workers: objects, depfiles, diagnostics as one vpp's, through header edits, shadowing, errors, killed workers (~1 min)
+bench/skia/prefix.py [--stride N]  # -fcxx-prefix= (Skia's standard headers) on the 529 files of work/skia-src's out/vcc: failures, instructions, CPU, defined symbols
+bench/skia/dm.py                   # ... Skia's dm rebuilt with it in build/skia-dm (needs out/vcc-test); then run its tests and GMs
 bench/stockfish/cache.py            # ... a result cache keyed on command, compiler and inputs: cold, unchanged, one header edited
 bench/highway/run.py [-O 0123] [-j N] [--bless] [-v] [PAT]   # Google Highway (work/highway, pinned commit in the file's header; x86-64 host, static SSE2 target, libc++): each TU by vpp -x c++ -c, the tests linked by clang++ (library objects vcc's where it compiles them) and run; a test lost from bench/highway/passing-O2 is an error, refusals grouped by first error (~1 min cold)
 ```
