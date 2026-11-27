@@ -74,7 +74,9 @@ What a function gets, in order (the rows of `codegen/vir/pass-table.c`):
 
 1. **The walk**, with inlining per call site: a static function called once
    is inlined up to 4000 AST nodes, other callees up to 150 nodes counting
-   what they inline themselves (600 when constant arguments fold them).
+   what they inline themselves (600 when constant arguments fold them). An external
+   function of the unit is a candidate too, as in clang, unless it is `weak`
+   or `noinline` (`-O1` inlines only `static` and `inline` ones).
 2. **CFG clean-up** (`thread`, `rpo`, `preds`, `seal`; `cfg.c`): jumps to
    jumps threaded, unreachable blocks dropped, SSA construction completed.
 3. **Promotion** (`promote`; `promote.c`): frame slots whose address does

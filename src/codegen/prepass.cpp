@@ -397,9 +397,9 @@ VPRIV bool codegen_inline_is_candidate(codegen_unit *E, cc *c, uint32_t s)
         return false;
     if (y->flags & AST_SYMBOL_FLAG_ALWAYS_INLINE)
         return true;
-    return !(y->flags & AST_SYMBOL_FLAG_NOINLINE) &&
-           ((y->flags & (AST_SYMBOL_FLAG_INLINE | AST_SYMBOL_FLAG_LINKONCE)) ||
-            y->sc == AST_STORAGE_STATIC);
+    /* an external function too, as clang: this unit's definition is the one
+     * called unless it is weak */
+    return !(y->flags & (AST_SYMBOL_FLAG_NOINLINE | AST_SYMBOL_FLAG_WEAK));
 }
 
 /*
