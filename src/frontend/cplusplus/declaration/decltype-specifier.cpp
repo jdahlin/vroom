@@ -249,6 +249,82 @@ bool semantic_analysis::names_nothing_dependent(SyntaxRef x)
     return true;
 }
 
+bool semantic_analysis::ends_in_ellipsis(SyntaxElement a) const
+{
+    return a.is_node() && is_operator(tokens[a.end_token() - 1],
+                                      preprocessing_op_or_punc::ELLIPSIS);
+}
+
+/* a pack expansion among a template-id's written arguments whose pattern
+   names a pack an enclosing instantiation bound (libc++'s
+   _And<_IsDefault<_Tp>...> in tuple's constructors): the pattern's type for
+   each element, which the mangler spells one after another as clang does
+   (cast the type-id's node).  False when no such pack, or a type does not
+   analyse */
+bool semantic_analysis::collect_written_expansion(
+    SyntaxElement a, owned_array<written_binding> &found)
+{
+    owned_array<entity_index> packs;
+    for (token_index k = a.first_token(); k < a.end_token(); k++) {
+        if (tokens[k].kind != token_kind::identifier)
+            continue;
+        entity_index pack = find_pack(tokens.identifier(k));
+        if (!pack || pack_depends(pack))
+            continue;
+        bool seen = false;
+        for (entity_index p : packs)
+            seen = seen || p == pack;
+        if (!seen)
+            packs.append(pack);
+    }
+    if (packs.empty())
+        return false;
+    uint32_t count = entity_table[packs[0]].member_count;
+    for (entity_index p : packs)
+        if (entity_table[p].member_count != count)
+            return false;
+    if (!count)
+        return false;
+    owned_array<entity> saved;
+    for (entity_index p : packs)
+        saved.append(entity_table[p]);
+    owned_array<written_binding> made;
+    bool ok = true;
+    for (uint32_t i = 0; i < count && ok; i++) {
+        for (size_t k = 0; k < packs.size(); k++) {
+            entity_index element = pack_elements[saved[k].value + i];
+            ok = ok && element &&
+                 entity_table[element].kind == entity_kind::typedef_name;
+            if (!ok)
+                break;
+            entity_table[packs[k]].kind = entity_kind::typedef_name;
+            entity_table[packs[k]].type = entity_table[element].type;
+        }
+        if (!ok)
+            break;
+        size_t unsupported_before = unsupported.size();
+        qualified_type t;
+        {
+            expansion_scope expanding_pattern(*this, true, 0, true);
+            ok = type_id(a, t) == analysis_result::well_formed;
+        }
+        unsupported.resize(unsupported_before);
+        written_binding b;
+        SyntaxRef ar = a;
+        b.cast = ar.index().index();
+        b.element = i;
+        b.type = t;
+        made.append(b);
+    }
+    for (size_t k = 0; k < packs.size(); k++)
+        entity_table[packs[k]] = saved[k];
+    if (!ok)
+        return false;
+    for (const written_binding &b : made)
+        found.append(b);
+    return true;
+}
+
 /* the types of the casts written in x, analysed with the alias template's
    names bound ([expr.cast]: ( type-id ) cast-expression); a type that does
    not analyse is left out (the mangler then has no encoding) */
@@ -575,6 +651,8 @@ void semantic_analysis::collect_written_casts(
         }
         for (SyntaxElement a : written) {
             if (!a.is(syntax_kind::type_id))
+                continue;
+            if (ends_in_ellipsis(a) && collect_written_expansion(a, found))
                 continue;
             SyntaxElement inner = a;
             while (

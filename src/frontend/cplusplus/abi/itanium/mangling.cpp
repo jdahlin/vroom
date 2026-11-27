@@ -211,6 +211,7 @@ class itanium_mangler
     const semantic_analysis::written_binding *bound(SyntaxElement name) const;
     bool type_operand(SyntaxElement a);
     bool written_template_args(SyntaxElement id, bool &dependent);
+    bool written_expansion(SyntaxElement a, bool &expanded);
     int unresolved_qualifier(SyntaxElement q);
     bool operand_type(SyntaxElement a, qualified_type &t,
                       fundamental_type &keyword_type);
@@ -1283,6 +1284,26 @@ bool itanium_mangler::dependent_fold(SyntaxElement fold)
     return ok;
 }
 
+/* the types of an expanded pattern (collect_written_expansion), one after
+   another; expanded false when none were recorded */
+bool itanium_mangler::written_expansion(SyntaxElement a, bool &expanded)
+{
+    SyntaxRef ar = a;
+    for (uint32_t i = 0; i < written_count; i++) {
+        const auto &w = analysis.written_bindings[written_first + i];
+        if (w.identifier || w.specialization || w.element == UINT32_MAX ||
+            w.cast != ar.index().index())
+            continue;
+        expanded = true;
+        qualified_type t = w.type;
+        if (analysis.type_depends_on_template_parameter(t))
+            operand_dependent = true;
+        if (!type(t))
+            return false;
+    }
+    return true;
+}
+
 /* the <template-args> of template-id id written in a dependent expression:
    I, each argument a type (type_operand), a literal or X <expression> E,
    E; dependent whether one depends on a template parameter */
@@ -1300,10 +1321,16 @@ bool itanium_mangler::written_template_args(SyntaxElement id, bool &dependent)
         else
             written.append(id[i]);
     }
-    for (SyntaxElement a : written) {
+    for (size_t k = 0; k < written.size(); k++) {
+        SyntaxElement a = written[k];
         if (a.is(preprocessing_op_or_punc::COMMA))
             continue;
         if (a.is(syntax_kind::type_id)) {
+            bool expanded = false;
+            if (!written_expansion(a, expanded))
+                return false;
+            if (expanded)
+                continue;
             if (!type_operand(a))
                 return false;
             continue;
@@ -1364,8 +1391,9 @@ int itanium_mangler::unresolved_qualifier(SyntaxElement q)
             entity_kind::template_specialization &&
         analysis.entity_table[r.entity].instantiation) {
         if (!source_name(analysis.entity_table[r.entity].name) ||
-            !template_args(r.entity, 0, false))
+            !template_args(r.entity, 0, false)) {
             return 0;
+        }
         return 2;
     }
     /* [impl.clang] an alias template's dependent specialization
@@ -2860,6 +2888,30 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
             text("Tk");
             if (!type_constraint_concept(function, q))
                 return false;
+        }
+        bool inner_pack = false;
+        if (function && i < analysis.template_parameter_count(function) &&
+            analysis.template_parameter_kind(function, i, inner_pack,
+                                             value_type) ==
+                semantic_analysis::template_parameter_form_kind::template_) {
+            entity_index named = 0;
+            uint32_t own_parameter = 0;
+            uint32_t element = 0;
+            if (pack)
+                element = 1;
+            if ((!pack || pack > 1) &&
+                analysis.specialization_template_name(c, i, named,
+                                                      own_parameter, element)) {
+                owned_buffer decl;
+                if (own_parameter || !analysis.template_argument_declaration(
+                                         function, i, named, decl.get()))
+                    return refuse("a template template argument that may need "
+                                  "a template-param-decl");
+                if (pack && decl.size())
+                    return refuse("a pack of template template arguments with "
+                                  "template-param-decls");
+                vbuffer_append(out, decl.data(), decl.size());
+            }
         }
         if (!pack) {
             if (!template_arg(c, i, 0))

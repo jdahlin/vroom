@@ -174,6 +174,56 @@ semantic_analysis::template_parameter_kind(entity_index t, uint32_t i,
     return template_parameter_form_kind::value;
 }
 
+bool semantic_analysis::template_argument_declaration(entity_index t,
+                                                      uint32_t i,
+                                                      entity_index named,
+                                                      vbuffer *decl) const
+{
+    entity_index parameter = template_parameter_entities
+        [function_templates[entity_table[t].instantiation - 1].first_parameter +
+         i];
+    const entity &p = entity_table[parameter];
+    const entity &a = entity_table[named];
+    if (p.kind != entity_kind::template_entity || !p.instantiation ||
+        a.kind != entity_kind::template_entity || !a.instantiation)
+        return false;
+    uint32_t count = template_parameter_count(parameter);
+    bool same = count == template_parameter_count(named);
+    bool types_only = true;
+    for (uint32_t k = 0; k < count; k++) {
+        bool pack = false;
+        qualified_type value_type;
+        template_parameter_form_kind kind =
+            template_parameter_kind(parameter, k, pack, value_type);
+        types_only = types_only && kind == template_parameter_form_kind::type;
+        if (!same || k >= template_parameter_count(named))
+            continue;
+        bool other_pack = false;
+        qualified_type other_type;
+        template_parameter_form_kind other =
+            template_parameter_kind(named, k, other_pack, other_type);
+        same = kind == other && pack == other_pack &&
+               (kind == template_parameter_form_kind::type ||
+                (kind == template_parameter_form_kind::value &&
+                 value_type == other_type));
+    }
+    if (same)
+        return true;
+    if (!types_only)
+        return false;
+    vbuffer_string_append(decl, "Tt");
+    for (uint32_t k = 0; k < count; k++) {
+        bool pack = false;
+        qualified_type value_type;
+        template_parameter_kind(parameter, k, pack, value_type);
+        if (pack)
+            vbuffer_string_append(decl, "Tp");
+        vbuffer_string_append(decl, "Ty");
+    }
+    vbuffer_string_append(decl, "E");
+    return true;
+}
+
 /* whether t is the name of a template parameter pack */
 bool semantic_analysis::names_template_parameter_pack(qualified_type t) const
 {

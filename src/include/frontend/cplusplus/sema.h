@@ -3097,6 +3097,9 @@ class semantic_analysis
     bool names_nothing_dependent(SyntaxRef x);
     void collect_written_casts(SyntaxElement x,
                                owned_array<written_binding> &found);
+    bool ends_in_ellipsis(SyntaxElement a) const;
+    bool collect_written_expansion(SyntaxElement a,
+                                   owned_array<written_binding> &found);
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(SyntaxRef op, qualified_type &type,
@@ -6935,6 +6938,12 @@ class semantic_analysis
     entity_index constraint_own_type_parameter(entity_index t,
                                                uint64_t position) const;
     bool constraint_parameter_is_own(entity_index t, entity_index p) const;
+    /* [abi:mangle.template-arg] the template-param-decl clang writes
+       before a template argument whose template-parameter-list is not its
+       template template-parameter's (parameter i of function template t):
+       in decl; empty when they agree.  False when it has none to give */
+    bool template_argument_declaration(entity_index t, uint32_t i,
+                                       entity_index named, vbuffer *decl) const;
     /* the type a type-id written in t's requires-clause names, analysed in
        t's template-parameter scope (what [abi:mangle.template-args] spells) */
     bool constraint_type(entity_index t, SyntaxElement written,
