@@ -458,16 +458,23 @@ bool itanium_mangler::specialization_encoding(entity_index e)
         text("N");
         if (member && x.nonstatic_member)
             member_qualifiers(x);
-        if (!prefix(scope))
-            return false;
-    } else if (scope) {
-        text("St");
     }
-    if (!unqualified_name(e))
-        return false;
-    candidate c;
-    c.scope = pattern_of;
-    candidates.append(c);
+    /* [abi:mangling-compression]: a template named before (a local type's
+       function, itself the specialization being named, in a parameter of
+       its lambda) is its substitution, its prefix with it */
+    if (!substitution(pattern_of)) {
+        if (nested) {
+            if (!prefix(scope))
+                return false;
+        } else if (scope) {
+            text("St");
+        }
+        if (!unqualified_name(e))
+            return false;
+        candidate c;
+        c.scope = pattern_of;
+        candidates.append(c);
+    }
     /* [impl.clang]: only a function template's specialization has the
        parameters' types ("Tn") before its arguments; a variable's has not */
     entity_index typed_parameters = pattern_of;
