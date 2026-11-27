@@ -180,9 +180,13 @@ VPRIV void ld_dynamic_sections_build(struct ld_context *ctx)
     if (ctx->options.soname)
         ctx->dynamic.soname_offset =
             ld_dynamic_string_add(ctx, ctx->options.soname);
+    if (ctx->options.rpath)
+        ctx->dynamic.rpath_offset =
+            ld_dynamic_string_add(ctx, ctx->options.rpath);
     ctx->dynamic.entry_count =
-        (ctx->options.soname ? 1 : 0) + (ctx->options.bsymbolic ? 1 : 0) + 4 +
-        2 + (ctx->script.version_definition_count ? 3 : 0) + 1;
+        (ctx->options.rpath != NULL) + (ctx->options.soname ? 1 : 0) +
+        (ctx->options.bsymbolic ? 1 : 0) + 4 + 2 +
+        (ctx->script.version_definition_count ? 3 : 0) + 1;
 
     ctx->inputs.sections.v[ctx->output.dynsym_section].size =
         (uint64_t)(n + 1) * sizeof(elf_symbol);
@@ -373,6 +377,8 @@ VPRIV void ld_dynamic_sections_write(struct ld_context *ctx)
     } while (0)
     if (ctx->options.soname)
         LD_DYNAMIC_ENTRY_APPEND(DT_SONAME, ctx->dynamic.soname_offset);
+    if (ctx->options.rpath)
+        LD_DYNAMIC_ENTRY_APPEND(29 /* DT_RUNPATH */, ctx->dynamic.rpath_offset);
     if (ctx->options.bsymbolic)
         LD_DYNAMIC_ENTRY_APPEND(DT_FLAGS, DF_SYMBOLIC);
     LD_DYNAMIC_ENTRY_APPEND(DT_SYMTAB, ld_input_section_address(

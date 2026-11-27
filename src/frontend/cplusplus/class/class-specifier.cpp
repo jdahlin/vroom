@@ -2375,8 +2375,7 @@ analysis_result semantic_analysis::member_declarator(
     entity_index templates = 0;
     if (prior && is_function && entity_table[prior].kind == entity_kind::none &&
         entity_table[prior].enclosing == c &&
-        member_function_template_of(prior) && !m.conversion_function &&
-        !m.destructor) {
+        member_function_template_of(prior) && !m.destructor) {
         templates = prior;
         prior = 0;
     }

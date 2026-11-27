@@ -267,6 +267,19 @@ VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
             ctx->options.entry = a + 2;
             continue;
         }
+        if ((v = LD_ARGUMENT_VALUE("-rpath")) ||
+            (v = LD_ARGUMENT_VALUE("--rpath"))) {
+            if (ctx->options.rpath) {
+                size_t had = strlen(ctx->options.rpath), more = strlen(v);
+                char *joined = (char *)ld_region_alloc(had + more + 2);
+                memcpy(joined, ctx->options.rpath, had);
+                joined[had] = ':';
+                memcpy(joined + had + 1, v, more + 1);
+                v = joined;
+            }
+            ctx->options.rpath = v;
+            continue;
+        }
         if ((v = LD_ARGUMENT_VALUE("-soname")) ||
             (v = LD_ARGUMENT_VALUE("--soname")) ||
             (v = LD_ARGUMENT_VALUE("-h"))) {
