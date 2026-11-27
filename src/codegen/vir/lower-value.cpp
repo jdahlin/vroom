@@ -1145,6 +1145,47 @@ static codegen_value virbuild_wide_divrem(codegen_context *e, int op, bool sgn,
     return virbuild_wide_helper_call(e, helper, ty, ty, 2, words);
 }
 
+/* a 128-bit value (its words x) shifted by the constant count, 0 to 127 */
+static codegen_value virbuild_wide_shift_constant(codegen_context *e, bool left,
+                                                  bool sgn, const uint32_t x[2],
+                                                  unsigned count)
+{
+    uint32_t zero = virbuild_constant_integer(e, VIR_TYPE_I64, 0);
+    uint32_t right = VIR_OP_LSHR;
+
+    if (sgn)
+        right = VIR_OP_ASHR;
+    auto shifted = [e](uint32_t op, uint32_t v, unsigned by) {
+        if (!by)
+            return v;
+        return virbuild_insn_append(
+            e, op, VIR_TYPE_I64, 0, v,
+            virbuild_constant_integer(e, VIR_TYPE_I64, by), 0);
+    };
+    uint32_t lo = x[0], hi = x[1];
+
+    if (count >= 64 && left) {
+        hi = shifted(VIR_OP_SHL, x[0], count - 64);
+        lo = zero;
+    } else if (count >= 64) {
+        lo = shifted(right, x[1], count - 64);
+        hi = zero;
+        if (sgn)
+            hi = shifted(VIR_OP_ASHR, x[1], 63);
+    } else if (count && left) {
+        lo = shifted(VIR_OP_SHL, x[0], count);
+        hi = virbuild_insn_append(e, VIR_OP_OR, VIR_TYPE_I64, 0,
+                                  shifted(VIR_OP_SHL, x[1], count),
+                                  shifted(VIR_OP_LSHR, x[0], 64 - count), 0);
+    } else if (count) {
+        lo = virbuild_insn_append(e, VIR_OP_OR, VIR_TYPE_I64, 0,
+                                  shifted(VIR_OP_LSHR, x[0], count),
+                                  shifted(VIR_OP_SHL, x[1], 64 - count), 0);
+        hi = shifted(right, x[1], count);
+    }
+    return virbuild_wide_pack(e, lo, hi);
+}
+
 VPRIV codegen_value virbuild_wbin(codegen_context *e, int op, bool sgn,
                                   codegen_value a, codegen_value b)
 {
@@ -1153,6 +1194,10 @@ VPRIV codegen_value virbuild_wbin(codegen_context *e, int op, bool sgn,
     virbuild_wide_unpack(e, a, x);
     if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) {
         bool left = op == LEX_TOKEN_LESS_LESS;
+
+        if (b.kind == CODEGEN_VALUE_CONSTANT && (uint64_t)b.integer < 128)
+            return virbuild_wide_shift_constant(e, left, sgn, x,
+                                                (unsigned)b.integer);
         uint32_t count = virbuild_walker_value_get(e, &b, VIR_TYPE_I64);
         if (b.kind == CODEGEN_VALUE_REGISTER)
             virbuild_tfree(e, b.register_number);
