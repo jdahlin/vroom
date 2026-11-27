@@ -979,7 +979,12 @@ analysis_result semantic_analysis::deduce_from_call(
     for (uint32_t i = pack + 1; i < ft.parameter_count; i++)
         later_pack =
             later_pack || template_parameter_is_pack(ft.first_parameter + i);
-    if (specified > pack && (fixed == f.parameter_count || later_pack))
+    /* ... or its elements number the call's arguments: the pack is
+       the specified ones, and none is left to extend it by */
+    bool pack_covered = fixed != f.parameter_count && !f.variadic &&
+                        count >= fixed && count - fixed == specified - pack;
+    if (specified > pack &&
+        (fixed == f.parameter_count || later_pack || pack_covered))
         given = pack;
     if (given > ft.parameter_count || given > pack)
         return not_supported_because(
