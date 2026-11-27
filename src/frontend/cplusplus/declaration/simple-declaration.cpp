@@ -1411,6 +1411,10 @@ analysis_result semantic_analysis::default_initialize_variable(
                                          "default construction of this array");
         owned_array<expression_meaning> none;
         initialized_value value;
+        /* a constructor body instantiated here leaves the claims of what
+           follows their place */
+        token_index place = claim_place;
+        entity_index claims = claim_scope;
         VTRY(r, construct(declaration, object, none, 0, value));
         if (constexpr_variable && entity_table[e].automatic)
             return not_supported_because(
@@ -1431,6 +1435,14 @@ analysis_result semantic_analysis::default_initialize_variable(
                 data = repeated_value(type, data, semantics[value.node].at);
             if (c == constness::constant && data)
                 value.node = data;
+            /* an array of a class that is not dynamic, constructed at
+               start-up or on first use: refused, its lowering not
+               followed (clang's symbols differ where one is) */
+            else if (!(object == type) && !entity_table[record].dynamic &&
+                     !is_class_entity(entity_table[e].enclosing))
+                return not_supported_because(declaration, "dcl.init",
+                                             "default construction of this "
+                                             "array");
             if (c != constness::constant && constexpr_variable) {
                 /* (a constexpr variable whose initialization is not
                    followed is not known to be unusable) */
@@ -1447,6 +1459,8 @@ analysis_result semantic_analysis::default_initialize_variable(
                 entity_table[e].constexpr_ = true;
             }
         }
+        claim_place = place;
+        claim_scope = claims;
         entity_table[e].definition = value.node;
         constructed = true;
     }
