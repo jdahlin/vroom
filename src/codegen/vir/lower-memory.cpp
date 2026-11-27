@@ -341,7 +341,7 @@ static void virbuild_vector_result(codegen_context *e, uint32_t op,
     uint32_t value = virbuild_insn_append(e, op, vt, 0, x, y, code);
     uint32_t slot;
     int64_t rel;
-    uint32_t at = virbuild_address_make(e, d, 16, &slot, &rel);
+    uint32_t at = virbuild_address_make(e, d, vir_type_size(vt), &slot, &rel);
 
     /* what was known of the slot's bytes is forgotten */
     if (slot != VIRBUILD_BLOCK_NONE)
@@ -576,18 +576,35 @@ VPRIV uint32_t virbuild_vector_type(codegen_context *e, ast_qualified_type vt,
     return VIR_TYPE_I64X2;
 }
 
+/* whether the function being built may hold 256-bit values (AVX2) */
+VPRIV bool virbuild_wide_vectors(codegen_context *e)
+{
+    cc *c = e->compile_context;
+
+    return CODEGEN_IS_X64(c) &&
+           x86_feature_has(
+               cc_x86_features_get(c, e->walk_state->function_symbol),
+               X86_FEATURE_AVX2);
+}
+
 VPRIV void virbuild_copy(codegen_context *e, int rdst, int rsrc, uint64_t n)
 {
     uint32_t d = virbuild_register_read(e, rdst, VIR_TYPE_PTR),
              s = virbuild_register_read(e, rsrc, VIR_TYPE_PTR);
 
-    if (n == 16 && e->copied_vector && !e->volatile_untag_depth &&
+    if ((n == 16 || (n == 32 && virbuild_wide_vectors(e))) &&
+        e->copied_vector && !e->volatile_untag_depth &&
         CODEGEN_IS_X64(e->compile_context) &&
-        codegen_type_size(e->compile_context, e->copied_vector) == 16 &&
+        codegen_type_size(e->compile_context, e->copied_vector) == n &&
         !codegen_type_is_bool_vector(e->compile_context, e->copied_vector)) {
         /* a vector: one value, which slot promotion can keep in a register */
         int lane = 0;
         uint32_t type = virbuild_vector_type(e, e->copied_vector, &lane);
+
+        if (n == 32) {
+            type = VIR_TYPE_I64X4;
+            lane = 8;
+        }
         uint32_t fl = virbuild_memory_flags_make(lane, (uint32_t)lane, false);
 
         virbuild_insn_append(

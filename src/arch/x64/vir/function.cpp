@@ -364,12 +364,17 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
                              .offset = L.result_pointer_slot};
         x64_record_emit_memory(e, X64_OP_ST, 8, RDI, &at, false);
     }
+    L.uses_ymm = false;
+    for (uint32_t k = 0; k < f->insn_count; k++)
+        L.uses_ymm |= f->insns[k].type == VIR_TYPE_I64X4;
     for (uint32_t k = 0; k < f->slot_count; k++)
         L.slot[k] =
             walk_slot_temporary(e, f->slot[k].size ?: 1, f->slot[k].align);
     for (uint32_t k = 0; k < V->allocation.spill_count; k++)
         L.spill[k] = walk_slot_temporary(e, V->allocation.slot_sizes[k],
-                                         V->allocation.slot_sizes[k]);
+                                         V->allocation.slot_sizes[k] > 16
+                                             ? 16
+                                             : V->allocation.slot_sizes[k]);
     for (uint32_t b = 0; b < f->block_count; b++)
         L.label[b] = walk_label_new(e);
     L.ret = walk_label_new(e);

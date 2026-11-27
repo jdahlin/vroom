@@ -35,7 +35,8 @@ const vir_opcode_info vir_opcode_table[256] = {
     R(VIR_OP_LABELADDR, "labeladdr", VIR_FORM_CONST, VIR_TYPE_MASK_PTR, BLK,
       NONE, NONE, 0, VIR_EFFECT_P),
     R(VIR_OP_BPARAM, "bparam", VIR_FORM_BPARAM,
-      VIR_TYPE_MASK_ANY | VIR_TYPE_MASK_VEC, NONE, NONE, NONE, 0, VIR_EFFECT_P),
+      VIR_TYPE_MASK_ANY | VIR_TYPE_MASK_VEC | VIR_TYPE_MASK_I64X4, NONE, NONE,
+      NONE, 0, VIR_EFFECT_P),
     R(VIR_OP_PARAM, "param", VIR_FORM_PARAM,
       VIR_TYPE_MASK_I64 | VIR_TYPE_MASK_F | VIR_TYPE_MASK_PTR, IMM, IMM, NONE,
       0, VIR_EFFECT_P),
@@ -142,8 +143,9 @@ const vir_opcode_info vir_opcode_table[256] = {
     R(VIR_OP_I2P, "i2p", VIR_FORM_STD, VIR_TYPE_MASK_PTR, I64, NONE, NONE, 0,
       VIR_EFFECT_P),
     R(VIR_OP_LOAD, "load", VIR_FORM_LOAD,
-      VIR_TYPE_MASK_ANY | VIR_TYPE_MASK_VEC | VIR_TYPE_MASK_I16X8, PTR, IMM,
-      NONE, 0x1f7, VIR_EFFECT_R | VIR_EFFECT_U),
+      VIR_TYPE_MASK_ANY | VIR_TYPE_MASK_VEC | VIR_TYPE_MASK_I16X8 |
+          VIR_TYPE_MASK_I64X4,
+      PTR, IMM, NONE, 0x1f7, VIR_EFFECT_R | VIR_EFFECT_U),
     R(VIR_OP_STORE, "store", VIR_FORM_STORE, VIR_TYPE_MASK_V, PTR, ANY, IMM,
       0x1f3, VIR_EFFECT_W | VIR_EFFECT_U),
     R(VIR_OP_MEMCPY, "memcpy", VIR_FORM_MEMCPY, VIR_TYPE_MASK_V, PTR, PTR,
@@ -181,8 +183,8 @@ const vir_opcode_info vir_opcode_table[256] = {
     R(VIR_OP_RETADDR, "retaddr", VIR_FORM_STD, VIR_TYPE_MASK_PTR, IMM, NONE,
       NONE, 0, VIR_EFFECT_R),
     R(VIR_OP_VSPLAT, "vsplat", VIR_FORM_STD,
-      VIR_TYPE_MASK_VEC | VIR_TYPE_MASK_I16X8, ELEM, NONE, NONE, 0,
-      VIR_EFFECT_P),
+      VIR_TYPE_MASK_VEC | VIR_TYPE_MASK_I16X8 | VIR_TYPE_MASK_I64X4, ELEM, NONE,
+      NONE, 0, VIR_EFFECT_P),
     R(VIR_OP_VSERIES, "vseries", VIR_FORM_NONE, VIR_TYPE_MASK_VI, NONE, NONE,
       NONE, 0, VIR_EFFECT_P),
     R(VIR_OP_VICMP, "vicmp", VIR_FORM_CC, VIR_TYPE_MASK_VI, T, T, NONE, 15,
@@ -199,8 +201,9 @@ const vir_opcode_info vir_opcode_table[256] = {
       0, VIR_EFFECT_P),
     R(VIR_OP_VEXTRACT, "vextract", VIR_FORM_STD,
       VIR_TYPE_MASK_I | VIR_TYPE_MASK_F, VLANES, IMM, NONE, 0, VIR_EFFECT_P),
-    R(VIR_OP_X86, "x86", VIR_FORM_STD, VIR_TYPE_MASK_VEC | VIR_TYPE_MASK_I32,
-      ANY, ANY, IMM, 0, VIR_EFFECT_P),
+    R(VIR_OP_X86, "x86", VIR_FORM_STD,
+      VIR_TYPE_MASK_VEC | VIR_TYPE_MASK_I | VIR_TYPE_MASK_I64X4, ANY, ANY, IMM,
+      0, VIR_EFFECT_P),
     R(VIR_OP_VREDUCE, "vreduce", VIR_FORM_STD, VIR_TYPE_MASK_I, VRED, NONE,
       NONE, 0, VIR_EFFECT_P),
     R(VIR_OP_BR, "br", VIR_FORM_BR, VIR_TYPE_MASK_V, BLK, NONE, EXT, 0,
@@ -233,8 +236,8 @@ const vir_opcode_info vir_opcode_table[256] = {
 };
 
 const char *const vir_type_names[VIR_TYPE_COUNT] = {
-    "void",  "i32",   "i64",   "f32",   "f64",   "ptr",
-    "multi", "f32x4", "i32x4", "f64x2", "i64x2", "i16x8"};
+    "void",  "i32",   "i64",   "f32",   "f64",   "ptr",  "multi",
+    "f32x4", "i32x4", "f64x2", "i64x2", "i16x8", "i64x4"};
 const char *const vir_integer_condition_names[10] = {
     "eq", "ne", "slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge"};
 const char *const vir_float_condition_names[8] = {"oeq", "une", "olt", "ole",
@@ -266,6 +269,7 @@ uint32_t vir_type_size(uint32_t ty)
 {
     return ty == VIR_TYPE_I32 || ty == VIR_TYPE_F32                         ? 4
            : ty == VIR_TYPE_I64 || ty == VIR_TYPE_F64 || ty == VIR_TYPE_PTR ? 8
+           : ty == VIR_TYPE_I64X4                                           ? 32
            : vir_type_is_vector(ty)                                         ? 16
                                                                             : 0;
 }

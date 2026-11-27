@@ -1072,7 +1072,8 @@ static const char *const x64_x86_operators[] = {
     "pshufd",     "shufps",    "pshuflw",   "pshufhw",   "psrldq",
     "pslldq",     "packuswb",  "packssdw",  "packsswb",  "packusdw",
     "pmaddubsw",  "pmaddwd",   "pmulhw",    "pmulhuw",   "pmulhrsw",
-    "pshufb",     "pminsw",    "pmaxsw"};
+    "pshufb",     "pminsw",    "pmaxsw",    "movmskps",  "pext",
+    "pdep"};
 
 VPRIV const char *x64_x86_code_mnemonic(uint32_t code)
 {
@@ -1362,6 +1363,15 @@ VPRIV int x64_x86_crossing_builtin(codegen_context *e, uint32_t n)
     uint32_t fn = e->walk_state->function_symbol;
     if (e->walk_state->inline_call)
         fn = e->walk_state->inline_call->function;
+    if (x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_BMI2)) {
+        /* bit gather and scatter: on general registers */
+        static const char *const bits[] = {"ia32_pext_si", "ia32_pext_di",
+                                           "ia32_pdep_si", "ia32_pdep_di"};
+
+        for (int i = 0; i < 4; i++)
+            if (!strcmp(name, bits[i]))
+                return 4 + i;
+    }
     if (!x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX2))
         return 0;
     if (!strcmp(name, "ia32_movmskps256"))

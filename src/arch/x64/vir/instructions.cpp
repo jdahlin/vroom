@@ -485,16 +485,41 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         x64_record_emit_three_registers(e, X64_OP_CRC32, 8, d, a, c);
         return;
     case VIR_OP_X86:
-        if (!vir_type_is_vector(i->type)) { /* movmsk: to a general register */
-            char text[64];
+        if (!vir_type_is_vector(i->type) &&
+            !vir_type_is_vector(L->function->insns[i->a].type)) {
+            /* pext, pdep: three general registers */
+            char text[96];
+            const char *const *names = x64_register_names_32;
+            char suffix = 'l';
 
-            snprintf(text, sizeof text, "\t%s\t%%xmm%d, %%%s\n",
-                     x64_x86_code_mnemonic(i->c), a - XMM0,
-                     x64_register_names_32[d]);
+            if (i->type == VIR_TYPE_I64) {
+                names = x64_register_names_64;
+                suffix = 'q';
+            }
+            snprintf(text, sizeof text, "\t%s%c\t%%%s, %%%s, %%%s\n",
+                     x64_x86_code_mnemonic(i->c), suffix, names[c], names[a],
+                     names[d]);
             x64_vir_text_append(L, text);
             return;
         }
-        x64_vir_x86_emit(L, i->c, d, a, c);
+        if (!vir_type_is_vector(i->type)) { /* movmsk: to a general register */
+            char text[64];
+
+            if (L->function->insns[i->a].type == VIR_TYPE_I64X4)
+                snprintf(text, sizeof text, "\tv%s\t%%ymm%d, %%%s\n",
+                         x64_x86_code_mnemonic(i->c), a - XMM0,
+                         x64_register_names_32[d]);
+            else
+                snprintf(text, sizeof text, "\t%s\t%%xmm%d, %%%s\n",
+                         x64_x86_code_mnemonic(i->c), a - XMM0,
+                         x64_register_names_32[d]);
+            x64_vir_text_append(L, text);
+            return;
+        }
+        if (i->type == VIR_TYPE_I64X4)
+            x64_vir_x86_wide_emit(L, i->c, d, a, c);
+        else
+            x64_vir_x86_emit(L, i->c, d, a, c);
         return;
     case VIR_OP_EHTYPEID: /* the type's index in the function's type table */
         x64_record_emit_three_registers(e, X64_OP_MOVI, 4, d, X64_REGISTER_NONE,
@@ -547,6 +572,8 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
     }
     case VIR_OP_CALL:
     case VIR_OP_INVOKE: {
+        if (L->uses_ymm) /* no 256-bit value is passed yet */
+            x64_vir_text_append(L, "\tvzeroupper\n");
         uint32_t ng = L->function->extra[i->c];
         int total = 0, nf = 0;
         for (uint32_t k = 0; k < ng; k++) {
@@ -680,7 +707,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         bool load = i->op != VIR_OP_STORE;
         int ty = load ? i->type : L->function->insns[i->b].type;
         int width = vir_type_is_vector((uint32_t)ty)
-                        ? 16
+                        ? (int)vir_type_size((uint32_t)ty)
                         : 1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags);
         if (folded && L->memory_is_indexed) {
             record *r = x64_record_emit_three_registers(
@@ -1053,6 +1080,14 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         int lane = x64_vir_type_size(vir_type_element(i->type));
         int64_t k;
 
+        if (i->type == VIR_TYPE_I64X4) { /* the 64 bits to all four lanes */
+            x64_record_emit_three_registers(e, X64_OP_MOV, 8, d, a,
+                                            X64_REGISTER_NONE);
+            snprintf(s, sizeof s, "\tvpbroadcastq\t%%xmm%d, %%ymm%d\n",
+                     d - XMM0, d - XMM0);
+            x64_vir_text_append(L, s);
+            return;
+        }
         if (x64_vir_value_immediate(L->function, i->a, &k) && !k) {
             snprintf(s, sizeof s, "\tpxor\t%%xmm%d, %%xmm%d\n", d - XMM0,
                      d - XMM0);
@@ -1281,6 +1316,8 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         return;
     }
     case VIR_OP_RET:
+        if (L->uses_ymm)
+            x64_vir_text_append(L, "\tvzeroupper\n");
         x64_jump(e, L->ret);
         return;
     case VIR_OP_TRAP:

@@ -92,6 +92,35 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
             {"vpmovzxwd", 1, 2, 0x33, 1, 0, 0, 0},
             {"vpminub", 1, 1, 0xda, 0, 0, 0, 0},
             {"vptest", 1, 2, 0x17, 1, 0, 0, 0},
+            {"vpmaddubsw", 1, 2, 0x04, 0, 0, 0, 0},
+            {"vpmaddwd", 1, 1, 0xf5, 0, 0, 0, 0},
+            {"vpmaxsw", 1, 1, 0xee, 0, 0, 0, 0},
+            {"vpminsw", 1, 1, 0xea, 0, 0, 0, 0},
+            {"vpmulhw", 1, 1, 0xe5, 0, 0, 0, 0},
+            {"vpmulhuw", 1, 1, 0xe4, 0, 0, 0, 0},
+            {"vpmulhrsw", 1, 2, 0x0b, 0, 0, 0, 0},
+            {"vpmullw", 1, 1, 0xd5, 0, 0, 0, 0},
+            {"vpacksswb", 1, 1, 0x63, 0, 0, 0, 0},
+            {"vpackssdw", 1, 1, 0x6b, 0, 0, 0, 0},
+            {"vpackuswb", 1, 1, 0x67, 0, 0, 0, 0},
+            {"vpackusdw", 1, 2, 0x2b, 0, 0, 0, 0},
+            {"vpcmpeqw", 1, 1, 0x75, 0, 0, 0, 0},
+            {"vpcmpgtb", 1, 1, 0x64, 0, 0, 0, 0},
+            {"vpcmpgtw", 1, 1, 0x65, 0, 0, 0, 0},
+            {"vpunpcklwd", 1, 1, 0x61, 0, 0, 0, 0},
+            {"vpunpckhwd", 1, 1, 0x69, 0, 0, 0, 0},
+            {"vpsraw", 1, 1, 0xe1, 0, 0, 0, 0},
+            {"vpsrlw", 1, 1, 0xd1, 0, 0, 0, 0},
+            {"vpsllw", 1, 1, 0xf1, 0, 0, 0, 0},
+            {"vaddps", 0, 1, 0x58, 0, 0, 0, 0},
+            {"vaddpd", 1, 1, 0x58, 0, 0, 0, 0},
+            {"vsubps", 0, 1, 0x5c, 0, 0, 0, 0},
+            {"vsubpd", 1, 1, 0x5c, 0, 0, 0, 0},
+            {"vmulps", 0, 1, 0x59, 0, 0, 0, 0},
+            {"vmulpd", 1, 1, 0x59, 0, 0, 0, 0},
+            {"vdivps", 0, 1, 0x5e, 0, 0, 0, 0},
+            {"vdivpd", 1, 1, 0x5e, 0, 0, 0, 0},
+            {"vpsraw", 1, 1, 0x71, 2, 0, 1, 4},
             {"vpsrld", 1, 1, 0x72, 2, 0, 1, 2},
             {"vpslld", 1, 1, 0x72, 2, 0, 1, 6},
             {"vpsrad", 1, 1, 0x72, 2, 0, 1, 4},
@@ -160,6 +189,12 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
             return x64_emit_form(a, F(.opsz16 = 1, .op = OPB("\x0f\xd7"),
                                       .nop = 2, .reg = dst->reg, .rm = o,
                                       .vex = 1, .vl = o[0].size == 32));
+        if (!strcmp(mn, "vmovmskps") && nops == 2 && o[0].kind == XK_REG &&
+            o[0].cls == XR_XMM && dst->kind == XK_REG && dst->cls == XR_GPR &&
+            dst->size == 4)
+            return x64_emit_form(a, F(.op = OPB("\x0f\x50"), .nop = 2,
+                                      .reg = dst->reg, .rm = o, .vex = 1,
+                                      .vl = o[0].size == 32));
         /* moves: vmovdqa/vmovdqu/vmovaps/vmovups (load 6f/28/10, store 7f/29/11), vmovd/vmovq */
         if (nops == 2 && (!strcmp(mn, "vmovdqa") || !strcmp(mn, "vmovdqu") ||
                           !strcmp(mn, "vmovaps") || !strcmp(mn, "vmovups") ||
@@ -283,6 +318,21 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
         x64_imm(a, &o[0], &f, &c);
         f.imm = c;
         return x64_emit(a, &f);
+    }
+    /* pext/pdep mask, src, dst (BMI2: VEX f3/f2 0f38 f5; vvvv the source) */
+    if (nops == 3 && (!strncmp(mn, "pext", 4) || !strncmp(mn, "pdep", 4)) &&
+        (mn[4] == 'l' || mn[4] == 'q' || !mn[4]) && o[1].kind == XK_REG &&
+        o[1].cls == XR_GPR && o[2].kind == XK_REG && o[2].cls == XR_GPR) {
+        uint8_t ops[3] = {0x0f, 0x38, 0xf5};
+        uint8_t prefix = 0xf2;
+
+        if (mn[1] == 'e')
+            prefix = 0xf3;
+        if (o[0].kind == XK_EXPR)
+            o[0].kind = XK_MEM;
+        return x64_emit_form(a, F(.w = o[2].size == 8, .rep = prefix, .op = ops,
+                                  .nop = 3, .reg = o[2].reg, .rm = &o[0],
+                                  .vvvv = o[1].reg, .vex = 1));
     }
     return X64_NEXT;
 }
