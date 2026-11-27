@@ -860,6 +860,14 @@ analysis_result semantic_analysis::substituted_parameter_type(
     if (r != analysis_result::well_formed)
         return r;
     type = qualified_type::make(t.unqualified(), cv_none);
+    /* [temp.param]/8: "A non-type template-parameter of type 'array of T'
+       or 'function type T' is adjusted to be of type 'pointer to T'." */
+    const struct type &adjusted = type_table[type.unqualified()];
+    if (adjusted.kind == type_kind::array)
+        type = qualified_type::make(type_table.pointer_to(adjusted.operand),
+                                    cv_none);
+    else if (adjusted.kind == type_kind::function)
+        type = qualified_type::make(type_table.pointer_to(type), cv_none);
     return analysis_result::well_formed;
 }
 
