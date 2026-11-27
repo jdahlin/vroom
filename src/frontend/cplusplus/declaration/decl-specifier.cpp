@@ -265,6 +265,7 @@ bool is_non_type_decl_specifier(standard_keyword k)
     case standard_keyword::thread_local_:
     case standard_keyword::extern_:
     case standard_keyword::mutable_:
+    case standard_keyword::register_:
     case standard_keyword::typedef_:
     case standard_keyword::constexpr_:
     case standard_keyword::consteval_:
@@ -1213,7 +1214,9 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
              mutable_ = 0, inline_ = 0, constexpr_ = 0, virtual_ = 0,
              friend_ = 0, explicit_ = 0, consteval_ = 0, c11_thread_local = 0,
-             atomic_qualifier = 0, constinit_ = 0, thread_local_ = 0;
+             atomic_qualifier = 0, constinit_ = 0, thread_local_ = 0,
+             register_ = 0;
+    token_index register_at = 0;
     type_index named = 0;
     bool declares_class = false, declares_enumeration = false;
     token_index named_at = 0, duplicate = 0;
@@ -1577,6 +1580,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             kw != standard_keyword::static_ &&
             kw != standard_keyword::extern_ &&
             kw != standard_keyword::mutable_ &&
+            kw != standard_keyword::register_ &&
             kw != standard_keyword::inline_ &&
             kw != standard_keyword::virtual_ &&
             kw != standard_keyword::explicit_ &&
@@ -1659,6 +1663,10 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                     seq, specifier_subclause(kw),
                     "mutable outside a member declaration");
             count(mutable_, t, "mutable");
+            break;
+        case standard_keyword::register_:
+            count(register_, t, "register");
+            register_at = t;
             break;
         case standard_keyword::inline_:
             count(inline_, t, "inline");
@@ -1786,6 +1794,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
        given decl-specifier-seq, except that thread_local may appear with
        static or extern." */
     if ((static_ && extern_) ||
+        (register_ && (static_ || extern_ || mutable_ || c11_thread_local ||
+                       thread_local_)) ||
         (mutable_ &&
          (static_ || extern_ || c11_thread_local || thread_local_)) ||
         (c11_thread_local && thread_local_))
@@ -1802,8 +1812,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     /* [dcl.stc]/1: "If a storage-class-specifier appears in a
        decl-specifier-seq, there can be no typedef specifier in the same
        decl-specifier-seq" */
-    if (typedef_ &&
-        (static_ || extern_ || mutable_ || c11_thread_local || thread_local_))
+    if (typedef_ && (static_ || extern_ || mutable_ || register_ ||
+                     c11_thread_local || thread_local_))
         return ill_formed(seq,
                           "if a storage-class-specifier appears in a "
                           "decl-specifier-seq, there can be no typedef "
@@ -1827,6 +1837,21 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                           "the definition of a variable or the declaration "
                           "of a function",
                           "dcl.constexpr");
+    /* [diff.cpp14.dcl.dcl]/1: register was a storage class of block variables
+       and parameters, deprecated; C++17 removed it ([impl.clang] an error by
+       default, a warning before) */
+    if (register_) {
+        if (!parameter &&
+            entity_table[current_scope].kind == entity_kind::class_type)
+            return ill_formed_at_token(
+                register_at,
+                "register shall not appear in the declaration of a member",
+                "dcl.stc");
+        diagnostic_id id = diagnostic_id::sema_removed_register;
+        if (tokens.files.behavior.has(language_feature::register_storage_class))
+            id = diagnostic_id::sema_deprecated_register;
+        VTRY(r, extension_used(id, register_at, "register"));
+    }
     type_index type = 0;
     bool keywords = k.signed_ || k.unsigned_ || k.short_ || k.long_ ||
                     k.char_ || k.int_ || k.double_ || k.int128 || k.float128 ||
@@ -1863,6 +1888,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     s.declares_enumeration = declares_enumeration;
     s.typedef_ = typedef_;
     s.static_ = static_;
+    s.register_ = register_ != 0;
     s.extern_ = extern_;
     /* [basic.stc.thread]: thread_local's thread storage duration is
        _Thread_local's (the entity's c11_thread_local) */

@@ -1966,6 +1966,20 @@ analysis_result semantic_analysis::declare_with_initializer(
                 "thread_local in a constexpr function");
         x.c11_thread_local = true;
     }
+    /* [dcl.stc]: register only on a variable of block scope.
+       [ext:gnu_asm_labels] GNU's register variables, which name a machine
+       register, have no rules */
+    if (r == analysis_result::well_formed && s.register_) {
+        if (m.asm_label)
+            return not_supported_because(declaration, "ext.gnu",
+                                         "a register variable in a register");
+        if (!at_block_scope() ||
+            entity_table[declared_entity].kind != entity_kind::variable)
+            return ill_formed(declaration,
+                              "register applies only to variables of block "
+                              "scope and function parameters",
+                              "dcl.stc");
+    }
     /* [ext:gnu_asm_labels] the symbol of a function or variable with
        static storage duration; a later declaration may leave it out, a
        different one is clang's error */

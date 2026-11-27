@@ -17,6 +17,10 @@ DIAGNOSTIC(sema_duplicate_specifier, EXTENSION_WARNING, WARNING, "duplicate-decl
            "'%0' appears more than once in the decl-specifier-seq ([dcl.spec]/2)")
 DIAGNOSTIC(sema_dynamic_exception_specification, EXTENSION_WARNING, ERROR, "dynamic-exception-spec",
            "ISO C++17 does not allow dynamic exception specifications ([except.spec])")
+DIAGNOSTIC(sema_removed_register, EXTENSION_WARNING, ERROR, "register",
+           "ISO C++17 does not allow the '%0' storage class specifier ([dcl.stc])")
+DIAGNOSTIC(sema_deprecated_register, EXTENSION_WARNING, WARNING, "deprecated-register",
+           "the '%0' storage class specifier is deprecated ([dcl.stc])")
 DIAGNOSTIC(sema_zero_length_array, EXTENSION, IGNORE, "zero-length-array",
            "an array bound shall be greater than zero ([dcl.array]/1)")
 /* [ext:clang_vla] clang's -Wvla-cxx-extension, off unless asked */
