@@ -356,14 +356,26 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
                 (size_t)cc_identifier_length(y->name), args.v, args.n, loc);
             if (made)
                 return made;
-            if (!c->o->no_builtin && !cc_library_builtin_is_disabled(
-                                         c->o, cc_identifier_string(y->name),
-                                         (size_t)cc_identifier_length(y->name)))
-                made = cc_library_forward_build(
-                    c, cc_identifier_string(y->name),
-                    (size_t)cc_identifier_length(y->name),
-                    AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, ft)->base),
-                    args.v, args.n, loc);
+        }
+    }
+    /* a standard name means the library's function, whether or not this unit
+       defines it, as clang (-fno-builtin-NAME: the program's own) */
+    if (!c->o->no_builtin && AST_NODE(callee)->op == AST_NODE_VARIABLE &&
+        !(aflags & AST_NODE_FLAG_ERROR)) {
+        const sym *y = &c->syms[AST_NODE(callee)->a];
+
+        if (y->kind == AST_SYMBOL_FUNCTION &&
+            (y->flags & AST_SYMBOL_FLAG_GLOBAL) &&
+            y->sc != AST_STORAGE_STATIC &&
+            !(y->attrs && c->attr[y->attrs].asmname) &&
+            !cc_library_builtin_is_disabled(
+                c->o, cc_identifier_string(y->name),
+                (size_t)cc_identifier_length(y->name))) {
+            uint32_t made = cc_library_forward_build(
+                c, cc_identifier_string(y->name),
+                (size_t)cc_identifier_length(y->name),
+                AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, ft)->base), args.v,
+                args.n, loc);
             if (made)
                 return made;
         }
@@ -380,7 +392,10 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
         AST_NODE(callee)->op == AST_NODE_VARIABLE) {
         const sym *y = &c->syms[AST_NODE(callee)->a];
 
-        if (y->kind == AST_SYMBOL_FUNCTION && !y->body &&
+        /* (a sqrt the unit defines is called, as clang: seen only when the
+           definition comes first) */
+        if (y->kind == AST_SYMBOL_FUNCTION &&
+            !(y->body && !strncmp(cc_identifier_string(y->name), "sqrt", 4)) &&
             (y->flags & AST_SYMBOL_FLAG_GLOBAL) &&
             y->sc != AST_STORAGE_STATIC &&
             !(y->attrs && c->attr[y->attrs].asmname) &&
