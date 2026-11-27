@@ -2100,7 +2100,11 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
     W->instance = ++W->instance_count;
     W->inline_call = &I;
     W->depth++;
+    /* (the body's branches decide nothing for a condition the call is in: a
+	   while (1) in it would make the caller's if drop its then branch) */
+    bool condition_jumped = W->condition_jumped;
     walk_statement_emit(e, c->syms[s].body);
+    W->condition_jumped = condition_jumped;
     W->depth--;
     W->inline_local_depth--;
     /* the copy's locals and parameters are dead: their slots free, the symbols unbound */
