@@ -757,6 +757,15 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
         if (one)
             found = one;
     }
+    /* [class.pre]/2: C's own injected-class-name is a declaration of the
+       name in C, so a base's of the same spelling is hidden (it is not
+       bound in C's table; without such a base the enclosing scope finds
+       the class) */
+    if (found && found != c && x.name == name &&
+        x.kind == entity_kind::class_type && !x.instantiation) {
+        ambiguous = false;
+        return c;
+    }
     return found;
 }
 
