@@ -103,7 +103,26 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
         return assignment_use::unknown;
     lookup_result found = lookup_qualified(
         k, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
-    if (found.unknown || found.ambiguous)
+    if (found.ambiguous)
+        return assignment_use::unknown;
+    /* [class.copy.assign]/2, /3: beside operator= templates and operators
+       taking another type, a trivial implicit one is no entity; an exact
+       match, it beats them ([over.match.best]/2.4, [over.ics.rank]/3.2).
+       Where no move one is implicit (/3.1, /3.4) a template may beat the
+       copy one for an xvalue */
+    const entity &kx = entity_table[k];
+    bool move_may_be_template =
+        move && !kx.defaulted_move_assignment &&
+        (declares_copy_constructor(k) ||
+         (kx.destructor && !entity_table[kx.destructor].implicit));
+    if ((found.entity || found.unknown) &&
+        kx.defaulted_copy_assignment == kx.defaulted_move_assignment &&
+        !move_may_be_template && assigned_bitwise(k)) {
+        if (copy_assignment_deleted(k) || bytewise_const_member(k))
+            return assignment_use::deleted;
+        return assignment_use::usable;
+    }
+    if (found.unknown)
         return assignment_use::unknown;
     if (!found.entity) {
         /* no operator= at all: the bytes are copied */
@@ -171,7 +190,6 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
     /* X& operator=(const X&) = default and X& operator=(X&&) = default
        are no entities (defaulted_copy_assignment): usable as a trivial
        one is, when the class's bytes are assigned */
-    const entity &kx = entity_table[k];
     if ((!move && !copies && kx.defaulted_copy_assignment) ||
         (move && !movings &&
          (kx.defaulted_move_assignment ||
@@ -365,6 +383,7 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
     bool copy_deleted = false, move_deleted = false;
     bool copy_non_throwing = true, move_non_throwing = true;
     bool nonconst_form = false;
+    bool copy_unknown = false;
     for (entity_index e : order) {
         qualified_type t = entity_table[e].type;
         const struct type &r = type_table[t.unqualified()];
@@ -379,15 +398,21 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
         entity_index k = element_class(t);
         if (!k)
             continue;
-        if (r.kind == type_kind::array && !assigned_bitwise(k))
-            /* element by element: not analysed */
+        if (r.kind == type_kind::array && !assigned_bitwise(k) &&
+            type_table[r.operand.unqualified()].kind != type_kind::class_type)
+            /* an array of arrays, element by element: not analysed */
             return analysis_result::well_formed;
         assignment_use copying =
             subobject_assignment(k, c, false, copy_non_throwing, nonconst_form);
         assignment_use moving =
             subobject_assignment(k, c, true, move_non_throwing, nonconst_form);
-        if (copying == assignment_use::unknown ||
-            moving == assignment_use::unknown) {
+        if (copying == assignment_use::unknown &&
+            moving != assignment_use::unknown && !user_copy) {
+            /* (a template may copy it, unique_ptr's: the move one is
+               declared without the copy one) */
+            copy_unknown = true;
+        } else if (copying == assignment_use::unknown ||
+                   moving == assignment_use::unknown) {
             /* (the defaulted move assignment beside a user-declared copy
                one is declared all the same: else the copy one, deleted,
                would be chosen; a body that cannot be formed leaves it
@@ -413,8 +438,9 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
             declare_implicit_assignment(c, true, false, move_non_throwing);
         return analysis_result::well_formed;
     }
-    declare_implicit_assignment(c, false, copy_deleted, copy_non_throwing,
-                                nonconst_form);
+    if (!copy_unknown || copy_deleted)
+        declare_implicit_assignment(c, false, copy_deleted, copy_non_throwing,
+                                    nonconst_form);
     /* /3: the move assignment operator; /7: "A defaulted move assignment
        operator that is defined as deleted is ignored by overload
        resolution" */
@@ -479,6 +505,40 @@ semantic_analysis::implicit_assignment_definitions(entity_index c, SyntaxRef n)
         unsupported.resize(before);
     }
     return analysis_result::well_formed;
+}
+
+/*
+ * [dcl.fct.def.default]/5: a copy or move assignment operator f defaulted
+ * after its first declaration (X& X::operator=(const X&) = default; outside
+ * the class) is user-provided; its definition n is the implicit one's
+ * ([class.copy.assign]/12).
+ */
+analysis_result
+semantic_analysis::defaulted_assignment_definition(SyntaxRef n, entity_index f)
+{
+    entity_index c = entity_table[f].enclosing;
+    if (entity_table[c].kind != entity_kind::class_type ||
+        (!copy_assignment_operator(f, c) && !move_assignment_operator(f, c)))
+        return not_supported_because(
+            n, "dcl.fct.def.default",
+            "an out-of-class default of a function that is no copy or move "
+            "assignment operator");
+    if (entity_table[c].union_ || entity_table[c].virtual_base_count)
+        return not_supported_because(
+            n, "class.copy.assign",
+            "a defaulted assignment of a union or a class with virtual bases");
+    qualified_type returns = qualified_type::make(
+        type_table.lvalue_reference_to(
+            qualified_type::make(entity_table[c].type.unqualified(), cv_none)),
+        cv_none);
+    qualified_type declared = qualified_type::make(
+        type_table[entity_table[f].type.unqualified()].operand.unqualified(),
+        cv_none);
+    if (!(declared == returns))
+        return not_supported_because(
+            n, "dcl.fct.def.default",
+            "a defaulted assignment whose return type is not X&");
+    return implicit_assignment_body(c, n, f, returns);
 }
 
 /* the body of implicit assignment operator f of class c: each subobject
@@ -558,6 +618,36 @@ semantic_analysis::implicit_assignment(entity_index c, SyntaxRef n,
                                       from, result));
             statements.append(statement_node(
                 semantic_kind::expression_statement, at, result.node));
+            continue;
+        }
+        if (record.kind == type_kind::array && record.bound_known &&
+            record.bound > 0 &&
+            type_table[record.operand.unqualified()].kind ==
+                type_kind::class_type &&
+            !assigned_bitwise(k)) {
+            /* [class.copy.assign]/13.2: "if the subobject is an array, each
+               element is assigned, in the manner appropriate to the element
+               type" (read before the pointer types add types, which may
+               move record) */
+            uint64_t bound = record.bound;
+            qualified_type et = record.operand;
+            qualified_type from_et = qualified_type::make(
+                et.unqualified(), et.cv() | from.type.cv());
+            value_category source_category = value_category::lvalue;
+            if (move)
+                source_category = value_category::xvalue;
+            expression_meaning to_element = array_element_at_index(
+                at, object.node, et, value_category::lvalue);
+            expression_meaning from_element =
+                array_element_at_index(at, from.node, from_et, source_category);
+            expression_meaning result;
+            VTRY_SET(r, assignment_of(n, at, preprocessing_op_or_punc::EQUAL,
+                                      SyntaxElement(), SyntaxElement(),
+                                      to_element, from_element, result));
+            statements.append(array_loop_statement(
+                at, bound, false,
+                statement_node(semantic_kind::expression_statement, at,
+                               result.node)));
             continue;
         }
         if (k && !assigned_bitwise(k))

@@ -638,10 +638,11 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
     uint32_t referred_cv = qualifiers_of(t1);
     bool binds_rvalues = rvalue_reference || ((referred_cv & cv_const) &&
                                               !(referred_cv & cv_volatile));
-    if (a.bit_field_width && lvalue)
+    if (a.bit_field_width && lvalue && !binds_rvalues)
         /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
-           to a bit-field"; a const one is bound to a temporary (not
-           analysed) */
+           to a bit-field" (not analysed); a const one is bound to a
+           temporary, which [over.ics.ref]/2 ranks as the conversion to the
+           referenced type, the same as below */
         return of_form(sequence::form::unknown);
     sequence s;
     if (x.kind == type_kind::class_type || y.kind == type_kind::class_type) {

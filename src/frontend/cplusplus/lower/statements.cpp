@@ -18,6 +18,8 @@ void c_lowering::block_items(uint32_t first, uint32_t count,
                              owned_array<uint32_t> &out)
 {
     const uint32_t *items = analysis.semantics.items(first);
+    /* after a return, up to a statement that may hold a label */
+    bool returned = false;
     for (uint32_t i = 0; i < count; i++) {
         uint32_t item = items[i];
         /* a labeled declaration-statement declares in the block
@@ -30,17 +32,42 @@ void c_lowering::block_items(uint32_t first, uint32_t count,
                 c_statement(c, 0)));
             item = node(item).a;
         }
+        if (item != items[i])
+            returned = false;
         const semantic_node &s = node(item);
         if (s.kind == semantic_kind::declarations) {
             block_items(s.first, s.count, out);
             continue;
         }
+        if (s.kind == semantic_kind::return_statement)
+            returned = true;
+        else if (s.kind != semantic_kind::declaration_statement &&
+                 s.kind != semantic_kind::expression_statement)
+            returned = false;
         if (s.kind == semantic_kind::declaration_statement) {
+            if (returned && unreached_static(s))
+                continue;
             declaration_items(s, out);
             continue;
         }
         out.append(statement(item));
     }
+}
+
+/* [stmt.dcl]/4: control never passes through this declaration, so a
+   dynamically initialized static is defined with no guard and no
+   initialization ([impl.clang] as clang's -O0) */
+bool c_lowering::unreached_static(const semantic_node &n)
+{
+    const entity &x = analysis.entity_table[n.a];
+    if (x.automatic || !n.b || constant_initializer(n.b))
+        return false;
+    uint32_t s = symbol(n.a, n.at);
+    if (s) {
+        ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+        ast_builder_symbol_keep(c, s);
+    }
+    return true;
 }
 
 /* a variable declared in a block, and its constructor's call; one with a

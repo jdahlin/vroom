@@ -496,6 +496,8 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
             entity_table[e].field = UINT32_MAX;
         } else {
             entity_table[e].field = entity_table[c].member_count;
+            /* (a class analysed since added its members after c's) */
+            make_members_contiguous(c);
             class_members.append(e);
             entity_table[c].member_count++;
         }

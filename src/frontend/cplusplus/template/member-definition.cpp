@@ -1069,6 +1069,9 @@ analysis_result semantic_analysis::define_member_template_of(
     owned_array<SyntaxRef> parameters;
     instantiation_context context;
     enter_instantiation(context, entity_table[c].enclosing, declaration);
+    /* [temp.mem]/1: the head of an out-of-class definition, also where a
+       class encloses c (A::B::f) */
+    template_member_scope = current_scope;
     if (template_head_parameters(inner, parameters, true, true, true, true) !=
             analysis_result::well_formed ||
         head_constraint(inner) || trailing_constraint(inner)) {

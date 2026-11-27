@@ -1410,7 +1410,9 @@ enum class semantic_kind : uint8_t {
     /* at: the string-literal; an lvalue of array type */
     string_literal,
     /* a: the variable or function named; a reference variable names the
-       object or function it refers to */
+       object or function it refers to.  op 1: an inheriting constructor's
+       parameter handed on as the inherited constructor's parameter object
+       itself ([class.inhctor.init]/1) */
     entity,
     /* op: a conversion_kind; a: the operand */
     conversion,
@@ -2105,6 +2107,9 @@ class semantic_analysis
     bool subobject_destructor_inaccessible(entity_index c,
                                            entity_index k) const;
     entity_index implicitly_movable(SyntaxElement operand);
+    /* [class.copy.elision]/3, a returned entity of another class */
+    analysis_result move_to_other_class(SyntaxRef n, expression_meaning &m,
+                                        qualified_type returns);
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;
     /* the type's size and alignment in bytes ([expr.sizeof],
@@ -2721,6 +2726,14 @@ class semantic_analysis
         entity_index template_entity = 0;
     };
     owned_array<friend_record> friends;
+    /* a member function that a using-declaration in class c made more
+       accessible than it is declared ([namespace.udecl]/19) */
+    struct using_access {
+        entity_index member = 0;
+        entity_index c = 0;
+        uint8_t access = 0;
+    };
+    owned_array<using_access> using_accesses;
     /* function_template_definition: the function_templates index plus one
        of the template its last declaration declared or redeclared */
     uint32_t last_function_template = 0;
@@ -3619,6 +3632,7 @@ class semantic_analysis
                                       expression_meaning &m);
     analysis_result lambda_expression_analysed(LambdaExpression n,
                                                expression_meaning &m);
+    bool names_init_capture(SyntaxElement part, const lambda_context &l) const;
     analysis_result
     lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                      qualified_type &type,
@@ -3742,6 +3756,11 @@ class semantic_analysis
     /* ... to a reference: the glvalue m through a pointer to it */
     analysis_result reference_cast(SyntaxRef at, qualified_type to,
                                    expression_meaning &m, uint8_t kinds);
+    /* ... of a class by its conversion function ([over.match.ref]) */
+    analysis_result reference_by_conversion_function(SyntaxRef at,
+                                                     qualified_type to,
+                                                     expression_meaning &m,
+                                                     bool &converted);
     /* ... to a pointer to member ([expr.static.cast]/12) */
     analysis_result member_pointer_cast(SyntaxRef at, qualified_type to,
                                         expression_meaning &m, uint8_t kinds);
@@ -4938,6 +4957,7 @@ class semantic_analysis
        member function: (*this).name */
     analysis_result implicit_member_access(token_index at, entity_index e,
                                            expression_meaning &m);
+    bool overload_set_called(token_index t, entity_index e) const;
     /* [class.access]: whether a member with this access can be named
        here */
     bool accessible(entity_index member, entity_index object_class = 0) const;
@@ -5095,6 +5115,8 @@ class semantic_analysis
     analysis_result implicit_assignments(entity_index c);
     analysis_result implicit_assignment_definitions(entity_index c,
                                                     SyntaxRef n);
+    analysis_result defaulted_assignment_definition(SyntaxRef n,
+                                                    entity_index f);
     analysis_result implicit_assignment_body(entity_index c, SyntaxRef n,
                                              entity_index f,
                                              qualified_type returns);

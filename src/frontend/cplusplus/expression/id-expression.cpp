@@ -798,9 +798,11 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     }
     if (x.nonstatic_member)
         return implicit_member_access(t, e, m);
+    /* [class.access]/4: of an overload set called, the function selected
+       is checked (call_function) */
     if (x.enclosing &&
         entity_table[x.enclosing].kind == entity_kind::class_type &&
-        !accessible(e))
+        !overload_set_called(t, e) && !accessible(e))
         return ill_formed_at_token(t,
                                    "a private or protected member's name can "
                                    "be used only by members and friends of "
@@ -1259,7 +1261,8 @@ analysis_result semantic_analysis::class_member_value(SyntaxRef n,
         return not_supported_because(
             n, "expr.prim.id.qual",
             "a qualified-id naming neither a function nor a variable");
-    if (!accessible(e))
+    /* [class.access]/4, as named_entity */
+    if (!overload_set_called(t, e) && !accessible(e))
         return ill_formed_at_token(t,
                                    "a private or protected member's name can "
                                    "be used only by members and friends of "

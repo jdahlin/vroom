@@ -854,6 +854,7 @@ class c_lowering
     void initialized_variable(const semantic_node &n,
                               owned_array<uint32_t> &out);
     void declaration_items(const semantic_node &n, owned_array<uint32_t> &out);
+    bool unreached_static(const semantic_node &n);
     uint32_t scoped_block(const semantic_node &n, uint32_t prefix);
     uint32_t loop_body(uint32_t n, bool is_switch);
     uint32_t loop(uint32_t cond_node, uint32_t step_node, uint32_t body_node,

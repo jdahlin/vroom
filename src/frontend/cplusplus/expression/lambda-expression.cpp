@@ -612,6 +612,28 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
     return closure_object(l, captures, m);
 }
 
+/* whether an identifier of part is the name of an init-capture of l */
+bool semantic_analysis::names_init_capture(SyntaxElement part,
+                                           const lambda_context &l) const
+{
+    for (token_index t = part.first_token(); t < part.end_token(); t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        uint32_t name = tokens.identifier(t);
+        for (size_t i = l.first_capture; i < lambda_captures.size(); i++) {
+            const capture_record &c = lambda_captures[i];
+            if (!c.init_capture)
+                continue;
+            uint32_t captured = c.pack_name;
+            if (c.variable)
+                captured = entity_table[c.variable].name;
+            if (captured == name)
+                return true;
+        }
+    }
+    return false;
+}
+
 /*
  * The function call operator's type and parameters from the
  * lambda-declarator d of lambda-expression n (0: none), in the current
@@ -698,13 +720,12 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                 /* an init-capture's name in the trailing-return-type:
                    [expr.prim.lambda.capture]/6 declares it in the
                    compound-statement, clang finds it in the declarator
-                   too */
-                for (size_t i2 = l.first_capture; i2 < lambda_captures.size();
-                     i2++)
-                    if (lambda_captures[i2].init_capture)
-                        r = not_supported_because(n, "expr.prim.lambda.capture",
-                                                  "an init-capture in a lambda "
-                                                  "of this declarator form");
+                   too.  A type that does not name one is the same either
+                   way. */
+                if (names_init_capture(part, l))
+                    r = not_supported_because(n, "expr.prim.lambda.capture",
+                                              "an init-capture named in the "
+                                              "trailing-return-type");
                 if (r != analysis_result::well_formed)
                     continue;
                 /* (names in it have the types of the members that would

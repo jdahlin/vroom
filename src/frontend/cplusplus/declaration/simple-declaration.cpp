@@ -1023,6 +1023,8 @@ semantic_analysis::function_definition(FunctionDefinition definition)
     auto body = definition.function_body();
     if (body.deleted())
         return deleted_definition(n, f);
+    if (body.defaulted())
+        return defaulted_assignment_definition(n, f);
     if (!body.plain())
         return not_supported_because(n, "dcl.fct.def.general",
                                      "this form of function body");
