@@ -1014,14 +1014,15 @@ analysis_result semantic_analysis::declare(
         }
         if (!overloads && !held_name)
             no_claims_after_hiding(name);
-        if (overloads && entity_table[overloads].named_by_using)
-            /* [namespace.udecl]/11: a using-declaration names the
-               declarations before it, so this overload is not one of the
-               set it introduced; the name is bound to the chain, not to a
-               copy of it */
-            return not_supported_because(
-                declaration, "namespace.udecl",
-                "an overload added to a name a using-declaration introduced");
+        /* [namespace.udecl]/11: a using-declaration names the
+           declarations before it, so this overload is not one of the set it
+           introduced.  The using-declaration's name is bound to that chain:
+           the new function goes in front of it, and this scope's name to
+           the new head */
+        bool shared = false;
+        for (entity_index o = overloads; o; o = entity_table[o].next_overload)
+            if (entity_table[o].named_by_using)
+                shared = true;
         entity_index e = entity_table.make(kind, name, scope);
         entity_table[e].hidden_type = hides;
         entity_table[e].unnamed_type_linkage = unnamed_type;
@@ -1031,7 +1032,11 @@ analysis_result semantic_analysis::declare(
         if (kind == entity_kind::function)
             entity_table[e].exceptions = exceptions;
         entity_table.add_declaration(e, declaration);
-        if (overloads) {
+        if (overloads && shared) {
+            entity_table[e].next_overload = overloads;
+            entity_table[e].hidden_type = entity_table[overloads].hidden_type;
+            entity_table.bind(scope, name, e);
+        } else if (overloads) {
             /* another function of the set: last in its chain, the name
                still bound to the first */
             entity_index last = overloads;
