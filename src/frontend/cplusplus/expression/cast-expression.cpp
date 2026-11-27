@@ -797,6 +797,51 @@ analysis_result semantic_analysis::class_pointer_cast(SyntaxRef at,
 }
 
 /*
+ * [expr.static.cast]/4: "T t(E);" for a reference T and an E of a class
+ * type that is not reference-related to the referenced type: a
+ * direct-initialization, so [over.match.ref]/1 has the explicit conversion
+ * functions that yield the type (or one a qualification conversion away)
+ * among its candidates.  converted: m is the function's result, still to be
+ * bound ([dcl.init.ref]/5); otherwise m is unchanged.
+ */
+analysis_result semantic_analysis::reference_by_conversion_function(
+    SyntaxRef at, qualified_type to, expression_meaning &m, bool &converted)
+{
+    converted = false;
+    const struct type target = type_table[to.unqualified()];
+    qualified_type referenced = target.operand;
+    const struct type &from = type_table[m.type.unqualified()];
+    const struct type &into = type_table[referenced.unqualified()];
+    if (from.kind != type_kind::class_type ||
+        referenced.unqualified() == m.type.unqualified())
+        return analysis_result::well_formed;
+    entity_index source = from.entity;
+    require_complete(source);
+    if (!has_conversion_functions(source))
+        return analysis_result::well_formed;
+    if (into.kind == type_kind::class_type) {
+        entity_index destination = into.entity;
+        require_complete(destination);
+        bool ambiguous = false;
+        if (base_step(source, destination, ambiguous) ||
+            base_step(destination, source, ambiguous))
+            return analysis_result::well_formed;
+    }
+    bool const_lvalue = target.kind == type_kind::lvalue_reference &&
+                        referenced.cv() == cv_const;
+    if (!const_lvalue) {
+        entity_index f = own_conversion_functions(source);
+        if (f && entity_table[f].next_overload)
+            return not_supported_because(
+                at, "over.match.ref",
+                "a non-const reference with several conversion functions");
+    }
+    return conversion_function_call(
+        at, m, qualified_type::make(referenced.unqualified(), cv_none), true,
+        converted);
+}
+
+/*
  * A cast to a reference ([expr.cast]/1: "The result is an lvalue if T is an
  * lvalue reference type or an rvalue reference to function type and an
  * xvalue if T is an rvalue reference to object type"):
@@ -867,6 +912,12 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
        materializes ([conv.rval]) */
     bool temporary = (kinds & cast_static) && scalars && may_bind_temporary &&
                      (m.category == value_category::prvalue || !same);
+    bool by_function = false;
+    if (!temporary && (kinds & cast_static) &&
+        (kinds == cast_static || may_bind_temporary)) {
+        VTRY(c, reference_by_conversion_function(at, to, m, by_function));
+        temporary = by_function;
+    }
     if (temporary) {
         VTRY(r, reference_binding(at, m, to));
     } else {

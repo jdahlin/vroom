@@ -3745,6 +3745,11 @@ class semantic_analysis
     /* ... to a reference: the glvalue m through a pointer to it */
     analysis_result reference_cast(SyntaxRef at, qualified_type to,
                                    expression_meaning &m, uint8_t kinds);
+    /* ... of a class by its conversion function ([over.match.ref]) */
+    analysis_result reference_by_conversion_function(SyntaxRef at,
+                                                     qualified_type to,
+                                                     expression_meaning &m,
+                                                     bool &converted);
     /* ... to a pointer to member ([expr.static.cast]/12) */
     analysis_result member_pointer_cast(SyntaxRef at, qualified_type to,
                                         expression_meaning &m, uint8_t kinds);
