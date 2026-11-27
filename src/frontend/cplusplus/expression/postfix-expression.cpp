@@ -848,22 +848,31 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
            definition) to *((E1)+(E2)), except that in the case of an array
            operand, the result is an lvalue if that operand is an lvalue and
            an xvalue otherwise." */
-        if (!sub.index() || sub.index().is(syntax_kind::braced_init_list,
-                                           syntax_kind::initializer_list))
+        if (!sub.index() || sub.index().is(syntax_kind::initializer_list))
             return not_supported_because(
                 n, "expr.sub", "a subscript without a single expression");
         expression_meaning a, i;
         analysis_result r = expression(sub.operand(), a);
-        if (r == analysis_result::well_formed)
+        bool listed = sub.index().is(syntax_kind::braced_init_list);
+        if (r == analysis_result::well_formed && !listed)
             VTRY_SET(r, expression(sub.index(), i));
         /* [over.sub]/1: "the operator function is selected by overload
            resolution ([over.match.oper])" */
         bool handled = false;
-        r = binary_operator_function(
-            n, sub.bracket().token(), preprocessing_op_or_punc::LEFT_BRACKET,
-            sub.operand(), a, sub.index(), i, handled, m);
+        if (r == analysis_result::well_formed)
+            r = binary_operator_function(n, sub.bracket().token(),
+                                         preprocessing_op_or_punc::LEFT_BRACKET,
+                                         sub.operand(), a, sub.index(), i,
+                                         handled, m);
         if (r != analysis_result::well_formed || handled)
             return r;
+        /* [over.match.oper]/2, [expr.sub]/1: a braced-init-list is the
+           argument of an operator function only */
+        if (listed)
+            return not_supported_because(
+                n, "expr.sub",
+                "a braced-init-list subscript with no handled operator "
+                "function");
         expression_meaning *base = &a, *index = &i;
         auto is_vector = [&](const expression_meaning &x) {
             return is_vector_kind(type_table[x.type.unqualified()].kind);
