@@ -231,7 +231,17 @@ VPRIV void virbuild_retrec(codegen_context *e, int raddr,
             at = VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_REGISTER,
                              .register_number = (uint8_t)(raddr),
                              .offset = 8 * j);
-            virbuild_load(e, q, &at, ty == VIR_TYPE_F32 ? 4 : 8, false);
+            int bytes = 8;
+            uint64_t left = r->size - 8 * (uint64_t)j;
+
+            /* a piece of 1, 2 or 4 bytes: its own, as for an argument.  A word
+             * would read past what was stored and stall */
+            if (ty == VIR_TYPE_F32)
+                bytes = 4;
+            else if (ty == VIR_TYPE_I64 &&
+                     (left == 1 || left == 2 || left == 4))
+                bytes = (int)left;
+            virbuild_load(e, q, &at, bytes, false);
             uint32_t v = virbuild_register_read(e, q, ty);
             virbuild_variable_write(e, (uint32_t)(VIRBUILD_RESULT_VARIABLE + j),
                                     e->vir_builder->current_block, v);
