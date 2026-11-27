@@ -208,17 +208,9 @@ bool itanium_mangler::template_args_of_written(SyntaxElement id,
     bool value_argument = false;
     enc.write(terminal::template_args);
     owned_array<SyntaxElement> written;
-    for (uint32_t i = 2; i + 1 < id.size(); i++) {
-        if (id[i].is(syntax_kind::template_argument_list))
-            for (auto x : id[i].elements())
-                written.append(x);
-        else
-            written.append(id[i]);
-    }
+    template_argument_elements(id, written);
     for (size_t k = 0; k < written.size(); k++) {
         SyntaxElement a = written[k];
-        if (a.is(preprocessing_op_or_punc::COMMA))
-            continue;
         if (a.is(syntax_kind::type_id)) {
             bool expanded = false;
             if (!expansion_of_written(a, expanded))
@@ -563,21 +555,28 @@ itanium_mangler::form itanium_mangler::cast_of_written(SyntaxElement expression)
         punctuator(expression[1], preprocessing_op_or_punc::LESS) &&
         expression[2].is(syntax_kind::type_id) &&
         expression[4].is(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
-        static const struct {
-            standard_keyword keyword;
-            terminal code;
-        } casts[] = {
-            {standard_keyword::dynamic_cast_, terminal::dynamic_cast_},
-            {standard_keyword::static_cast_, terminal::static_cast_},
-            {standard_keyword::const_cast_, terminal::const_cast_},
-            {standard_keyword::reinterpret_cast_, terminal::reinterpret_cast_},
-        };
-        for (const auto &k : casts)
-            if (expression[0].is(k.keyword)) {
-                enc.write(k.code);
-                return written_form(type_operand_of_written(expression[2]) &&
-                                    expression_of_written(expression[5]));
-            }
+        terminal named_cast = terminal::end;
+        switch (expression[0].keyword()) {
+        case standard_keyword::dynamic_cast_:
+            named_cast = terminal::dynamic_cast_;
+            break;
+        case standard_keyword::static_cast_:
+            named_cast = terminal::static_cast_;
+            break;
+        case standard_keyword::const_cast_:
+            named_cast = terminal::const_cast_;
+            break;
+        case standard_keyword::reinterpret_cast_:
+            named_cast = terminal::reinterpret_cast_;
+            break;
+        default:
+            break;
+        }
+        if (named_cast != terminal::end) {
+            enc.write(named_cast);
+            return written_form(type_operand_of_written(expression[2]) &&
+                                expression_of_written(expression[5]));
+        }
     }
     /* [abi:expressions] T(e), T(e, ...), T a type: a functional cast,
 
@@ -938,16 +937,8 @@ itanium_mangler::unresolved_name_of_written(SyntaxElement expression)
                 return written_form(false);
             enc.write(terminal::template_args);
             owned_array<SyntaxElement> written;
-            for (uint32_t i = 2; i + 1 < member.size(); i++) {
-                if (member[i].is(syntax_kind::template_argument_list))
-                    for (auto x : member[i].elements())
-                        written.append(x);
-                else
-                    written.append(member[i]);
-            }
+            template_argument_elements(member, written);
             for (SyntaxElement a : written) {
-                if (a.is(preprocessing_op_or_punc::COMMA))
-                    continue;
                 if (a.is(syntax_kind::type_id)) {
                     if (!type_operand_of_written(a))
                         return written_form(false);

@@ -208,6 +208,32 @@ bool itanium_mangler::compound_requirement(entity_index t, SyntaxElement req)
     return true;
 }
 
+/* the namespace a nested-name-specifier written in t's requires-clause
+   names, one or more namespaces (the first found from t's scope, as
+   written: std, not its inline namespace); false for another */
+bool itanium_mangler::constraint_namespace(entity_index t,
+                                           SyntaxElement qualifier,
+                                           entity_index &scope) const
+{
+    scope = 0;
+    for (uint32_t i = 0; i + 1 < qualifier.size(); i += 2) {
+        if (!qualifier[i].is_identifier())
+            return false;
+        entity_index next = 0;
+        if (i == 0)
+            next = analysis.constraint_name(analysis.entity_table[t].enclosing,
+                                            qualifier[i].token());
+        else
+            next = analysis.entity_table.find(
+                scope, analysis.token_identifier(qualifier[i].token()));
+        if (!next ||
+            analysis.entity_table[next].kind != entity_kind::namespace_entity)
+            return false;
+        scope = next;
+    }
+    return true;
+}
+
 /* ns::v<args> in t's requires-clause, v a concept or variable template of
    namespace ns (one or more levels, as written): [abi:expressions]'
    <unresolved-name>,
@@ -223,22 +249,8 @@ bool itanium_mangler::unresolved_name_of_constraint_member(
         qualifier[0].is(preprocessing_op_or_punc::COLON_COLON))
         return false;
     entity_index scope = 0;
-    for (uint32_t i = 0; i + 1 < qualifier.size(); i += 2) {
-        if (!qualifier[i].is_identifier())
-            return false;
-        uint32_t name = analysis.token_identifier(qualifier[i].token());
-        entity_index next = 0;
-        if (i == 0)
-            next = analysis.constraint_name(analysis.entity_table[t].enclosing,
-                                            qualifier[i].token());
-        else
-            next = analysis.entity_table.find(scope, name);
-        if (!next ||
-            analysis.entity_table[next].kind != entity_kind::namespace_entity)
-            return false;
-        scope = next;
-    }
-    if (!analysis.constraint_namespace_template(scope, id[0].token()))
+    if (!constraint_namespace(t, qualifier, scope) ||
+        !analysis.constraint_namespace_template(scope, id[0].token()))
         return false;
     enc.write(terminal::unresolved_scope);
     for (uint32_t i = 0; i + 1 < qualifier.size(); i += 2)
@@ -259,17 +271,9 @@ bool itanium_mangler::template_args_of_constraint(entity_index t,
     enc.write(terminal::template_args);
     /* (more than one argument: a template-argument-list) */
     owned_array<SyntaxElement> written;
-    for (uint32_t i = 2; i + 1 < c.size(); i++) {
-        if (c[i].is(syntax_kind::template_argument_list))
-            for (auto x : c[i].elements())
-                written.append(x);
-        else
-            written.append(c[i]);
-    }
+    template_argument_elements(c, written);
     for (size_t wi = 0; wi < written.size(); wi++) {
         SyntaxElement a = written[wi];
-        if (a.is(preprocessing_op_or_punc::COMMA))
-            continue;
         /* (a pack expansion: the type-id's '...') */
         bool expansion = a.is_node() && a.is(syntax_kind::type_id) &&
                          a.size() == 2 &&
@@ -367,23 +371,9 @@ bool itanium_mangler::type_constraint(entity_index t, SyntaxElement q)
 {
     /* N::C, N a chain of namespaces: the concept's name */
     if (q.size() == 2 && q[0].is(syntax_kind::nested_name_specifier)) {
-        SyntaxElement qualifier = q[0];
         entity_index scope = 0;
-        for (uint32_t i = 0; i + 1 < qualifier.size(); i += 2) {
-            if (!qualifier[i].is_identifier())
-                return false;
-            uint32_t part = analysis.token_identifier(qualifier[i].token());
-            entity_index next = 0;
-            if (i == 0)
-                next = analysis.constraint_name(
-                    analysis.entity_table[t].enclosing, qualifier[i].token());
-            else
-                next = analysis.entity_table.find(scope, part);
-            if (!next || analysis.entity_table[next].kind !=
-                             entity_kind::namespace_entity)
-                return false;
-            scope = next;
-        }
+        if (!constraint_namespace(t, q[0], scope))
+            return false;
         entity_index member = analysis.entity_table.find(
             scope, analysis.token_identifier(q[1].token()));
         return member && name(member);

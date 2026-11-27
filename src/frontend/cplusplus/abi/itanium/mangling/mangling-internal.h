@@ -487,6 +487,9 @@ class itanium_mangler
     bool expr_primary_value(fundamental_type t, bool negative,
                             uint64_t magnitude);
     void expr_primary_nullptr();
+    bool expr_primary_end(bool negative, uint64_t magnitude);
+    static void template_argument_elements(SyntaxElement id,
+                                           owned_array<SyntaxElement> &out);
     void function_param(uint32_t position);
     void sizeof_pack(uint64_t position);
     bool expr_primary_of_variable(entity_index t, SyntaxElement name);
@@ -500,6 +503,8 @@ class itanium_mangler
                                               SyntaxElement qualifier,
                                               SyntaxElement id);
     bool template_args_of_constraint(entity_index t, SyntaxElement c);
+    bool constraint_namespace(entity_index t, SyntaxElement qualifier,
+                              entity_index &scope) const;
     uint64_t constraint_level(entity_index t) const;
     bool type_constraint(entity_index t, SyntaxElement q);
     bool template_param_of_constraint(entity_index t, entity_index parameter);
@@ -552,6 +557,8 @@ class itanium_mangler
 
     /* ---- expressions-dependent-value.cpp, expressions-structure.cpp ---- */
     bool expression_of_dependent_value(entity_index d);
+    bool namespace_levels(entity_index s, uint64_t value);
+    bool namespace_levels_of(entity_index s, uint32_t depth);
     bool expression_of_structure(uint32_t s);
 
     /* ---- compression.cpp: [abi:mangling-compression], the builder's side ---- */

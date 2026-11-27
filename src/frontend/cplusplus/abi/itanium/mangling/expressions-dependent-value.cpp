@@ -8,6 +8,25 @@ namespace cplusplus
 {
 
 /* argument i of c's (its element - 1 if element) */
+/* the <unresolved-qualifier-level>s of the namespaces written before a
+   qualifier, s the innermost and dependent_value_namespaces of value their
+   number (at least one): their <source-name>s, the outermost first */
+bool itanium_mangler::namespace_levels(entity_index s, uint64_t value)
+{
+    uint32_t depth = dependent_value_namespaces(value);
+    if (!depth)
+        depth = 1;
+    return namespace_levels_of(s, depth);
+}
+
+bool itanium_mangler::namespace_levels_of(entity_index s, uint32_t depth)
+{
+    if (!depth || !s)
+        return true;
+    return namespace_levels_of(analysis.entity_table[s].enclosing, depth - 1) &&
+           source_name(analysis.entity_table[s].name);
+}
+
 /*
  * [abi:mangle.template-arg] a value-dependent argument:
  *
@@ -99,20 +118,8 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
         if (negated)
             enc.write(itanium_operator::logical_not);
         enc.write(terminal::unresolved_scope);
-        if (x.enclosing) {
-            uint32_t depth = dependent_value_namespaces(x.value);
-            if (!depth)
-                depth = 1;
-            owned_array<entity_index> chain;
-            entity_index s = x.enclosing;
-            for (uint32_t i = 0; i < depth && s; i++) {
-                chain.append(s);
-                s = analysis.entity_table[s].enclosing;
-            }
-            for (size_t i = chain.size(); i-- > 0;)
-                if (!source_name(analysis.entity_table[chain[i]].name))
-                    return false;
-        }
+        if (x.enclosing && !namespace_levels(x.enclosing, x.value))
+            return false;
         if (!source_name(dependent_value_identifier(x.value) - 1) ||
             !written_arguments())
             return false;
@@ -150,20 +157,8 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
     if (negated)
         enc.write(itanium_operator::logical_not);
     enc.write(terminal::unresolved_scope);
-    if (x.enclosing) {
-        uint32_t depth = dependent_value_namespaces(x.value);
-        if (!depth)
-            depth = 1;
-        owned_array<entity_index> chain;
-        entity_index s = x.enclosing;
-        for (uint32_t i = 0; i < depth && s; i++) {
-            chain.append(s);
-            s = analysis.entity_table[s].enclosing;
-        }
-        for (size_t i = chain.size(); i-- > 0;)
-            if (!source_name(analysis.entity_table[chain[i]].name))
-                return false;
-    }
+    if (x.enclosing && !namespace_levels(x.enclosing, x.value))
+        return false;
     /* (clang flattens a pack expansion written among the arguments: the
        substituted elements, no J ... E) */
     uint32_t written = UINT32_MAX;

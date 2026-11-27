@@ -1,6 +1,8 @@
 # PLAN-mangling: restructuring the Itanium mangler
 
-Status: proposal (2026-11-27), steps M0-M7.  No step started.
+Status: M0-M6 done (2026-11-27); M7 not done (see its status).  Every
+step kept every symbol and refusal of the identity gate (M0); one bug was
+fixed on the way (M2's guard variable).
 
 The C++ front end's Itanium mangler (`src/frontend/cplusplus/abi/itanium/
 mangling.cpp`) grew one construct at a time while the front end learned to
@@ -353,15 +355,17 @@ Speed: +0.01% instructions.
 
 ### M7 (optional): the C mangler
 `frontend/c/mangle.cpp` uses the encoder for its types and substitutions.
-Status: not started.
+Status: not done, and not to do as written: the C front end builds as C11
+too (`make VCC_LANG=c`, which has no C++ front end), and the encoder is
+the C++ front end's C++.  Sharing would need the tables (`operators.inc`,
+`builtin-types.inc`, `productions.inc`, already plain X-macro lists) moved
+to `include/` and a C encoder; a step of its own if `overloadable` grows.
 
-## 5. Decisions needed
+## 5. Decisions
 
-1. **Directory or prefix.**  `abi/itanium/mangling/` (one Makefile wildcard
-   change) or `abi/itanium/mangling-*.cpp`.  Recommended: the directory.
-2. **Order of M1 and M2.**  M1 first keeps the diff of the split purely
-   mechanical; M2 first makes M1's diff smaller per file.  Recommended: M1
-   first.
+1. **Directory or prefix.**  The directory, `abi/itanium/mangling/` (the
+   Makefile's `cplusplus_SRC` wildcard gained `abi/*/*/*.cpp`).
+2. **Order of M1 and M2.**  M1 first, so the split was purely mechanical.
 
 A node tree built per symbol and encoded afterwards was considered and
 left out: compression is left to right, so a tree buys nothing the

@@ -189,6 +189,22 @@ bool itanium_mangler::expr_primary_of_integer_literal(token_index token)
     return false;
 }
 
+/* the template-arguments written in template-id id, one after another
+   (one argument, or a template-argument-list's, without the commas) */
+void itanium_mangler::template_argument_elements(
+    SyntaxElement id, owned_array<SyntaxElement> &out)
+{
+    for (uint32_t i = 2; i + 1 < id.size(); i++) {
+        if (id[i].is(syntax_kind::template_argument_list)) {
+            for (auto x : id[i].elements())
+                if (!x.is(preprocessing_op_or_punc::COMMA))
+                    out.append(x);
+        } else if (!id[i].is(preprocessing_op_or_punc::COMMA)) {
+            out.append(id[i]);
+        }
+    }
+}
+
 /*
  * The shapes the four sources of expressions (expressions-*.cpp) share.
  * [abi:expressions]:
@@ -218,19 +234,19 @@ bool itanium_mangler::expr_primary_value(qualified_type t, bool negative,
                                          uint64_t magnitude)
 {
     enc.write(terminal::expr_primary);
-    if (!type(t))
-        return false;
-    enc.value_number(negative, magnitude);
-    enc.write(terminal::end);
-    return true;
+    return type(t) && expr_primary_end(negative, magnitude);
 }
 
 bool itanium_mangler::expr_primary_value(fundamental_type t, bool negative,
                                          uint64_t magnitude)
 {
     enc.write(terminal::expr_primary);
-    if (!builtin_type(t))
-        return false;
+    return builtin_type(t) && expr_primary_end(negative, magnitude);
+}
+
+/* (the value and E after the type) */
+bool itanium_mangler::expr_primary_end(bool negative, uint64_t magnitude)
+{
     enc.value_number(negative, magnitude);
     enc.write(terminal::end);
     return true;
