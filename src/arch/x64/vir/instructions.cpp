@@ -488,9 +488,14 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         if (!vir_type_is_vector(i->type)) { /* movmsk: to a general register */
             char text[64];
 
-            snprintf(text, sizeof text, "\t%s\t%%xmm%d, %%%s\n",
-                     x64_x86_code_mnemonic(i->c), a - XMM0,
-                     x64_register_names_32[d]);
+            if (L->function->insns[i->a].type == VIR_TYPE_I64X4)
+                snprintf(text, sizeof text, "\tv%s\t%%ymm%d, %%%s\n",
+                         x64_x86_code_mnemonic(i->c), a - XMM0,
+                         x64_register_names_32[d]);
+            else
+                snprintf(text, sizeof text, "\t%s\t%%xmm%d, %%%s\n",
+                         x64_x86_code_mnemonic(i->c), a - XMM0,
+                         x64_register_names_32[d]);
             x64_vir_text_append(L, text);
             return;
         }
@@ -1058,6 +1063,14 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         int lane = x64_vir_type_size(vir_type_element(i->type));
         int64_t k;
 
+        if (i->type == VIR_TYPE_I64X4) { /* the 64 bits to all four lanes */
+            x64_record_emit_three_registers(e, X64_OP_MOV, 8, d, a,
+                                            X64_REGISTER_NONE);
+            snprintf(s, sizeof s, "\tvpbroadcastq\t%%xmm%d, %%ymm%d\n",
+                     d - XMM0, d - XMM0);
+            x64_vir_text_append(L, s);
+            return;
+        }
         if (x64_vir_value_immediate(L->function, i->a, &k) && !k) {
             snprintf(s, sizeof s, "\tpxor\t%%xmm%d, %%xmm%d\n", d - XMM0,
                      d - XMM0);

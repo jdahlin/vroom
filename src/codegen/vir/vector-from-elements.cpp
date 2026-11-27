@@ -1,8 +1,8 @@
 /*
  * A vector read from a slot that stores of its elements have just filled (_mm_set1_epi16 and
  * the other set intrinsics: a vector initializer) is built from the values instead: vsplat when
- * its 32-bit words are one value, else vsplat and vinsert.  The element stores are then of a
- * slot nothing reads.
+ * its 32-bit words are one value, else vsplat and vinsert.  A 256-bit one (AVX2) is built when
+ * every element is one value.  The element stores are then of a slot nothing reads.
  */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
@@ -14,9 +14,9 @@
 
 typedef struct virbuild_elements {
     uint32_t slot;      /* + 1; 0: none */
-    uint32_t value[16]; /* at each byte where a store begins */
-    uint8_t width[16];  /* ... its bytes; 0: none begins here */
-    uint16_t covered;   /* a bit per byte stored */
+    uint32_t value[32]; /* at each byte where a store begins */
+    uint8_t width[32];  /* ... its bytes; 0: none begins here */
+    uint32_t covered;   /* a bit per byte stored */
 } virbuild_elements;
 
 /* a slot a memset has zeroed: the 8-byte half no store has touched holds 0 */
@@ -27,7 +27,7 @@ static void virbuild_elements_zero_half(codegen_context *e,
         if (!(E->covered & 0xffu << at)) {
             E->value[at] = virbuild_constant_integer(e, VIR_TYPE_I64, 0);
             E->width[at] = 8;
-            E->covered = (uint16_t)(E->covered | 0xffu << at);
+            E->covered |= 0xffu << at;
         }
 }
 
@@ -62,7 +62,12 @@ static uint32_t virbuild_elements_insn(const virbuild_elements_at *W,
                                        uint32_t op, uint32_t ty, uint32_t a,
                                        uint32_t b, uint32_t c)
 {
-    vir_insn in = VCC_LITERAL(vir_insn, (uint8_t)op, (uint8_t)ty, 0, a, b, c);
+    uint16_t flags = 0;
+
+    if (op == VIR_OP_EXT) /* (from 32 bits, zero-extended) */
+        flags = 2;
+    vir_insn in =
+        VCC_LITERAL(vir_insn, (uint8_t)op, (uint8_t)ty, flags, a, b, c);
 
     return virbuild_preir_insn_insert(W->context, W->block, W->prev, in);
 }
@@ -107,6 +112,47 @@ static uint32_t virbuild_elements_word(const virbuild_elements_at *W,
     return word;
 }
 
+/* the 256-bit vector of one value in every element: that value repeated to 64
+ * bits, then to every lane; 0 when E's stores are not that */
+static uint32_t virbuild_elements_wide(const virbuild_elements_at *W,
+                                       const virbuild_elements *E)
+{
+    codegen_context *e = W->context;
+    virbuild_context *V = e->vir_builder;
+    uint32_t width = E->width[0];
+
+    if (E->covered != 0xffffffffu ||
+        (width != 1 && width != 2 && width != 4 && width != 8))
+        return 0;
+    for (uint32_t i = 0; i < 32; i += width)
+        if (E->width[i] != width || E->value[i] != E->value[0])
+            return 0;
+    uint32_t type = V->insns[E->value[0]].insn.type;
+
+    if (type != VIR_TYPE_I32 && type != VIR_TYPE_I64)
+        return 0;
+    uint32_t word = E->value[0];
+
+    if (width < 8) {
+        uint64_t mask = (1ull << 8 * width) - 1, pattern = 1;
+
+        for (uint32_t i = width; i < 8; i += width)
+            pattern |= 1ull << 8 * i;
+        if (type == VIR_TYPE_I32)
+            word =
+                virbuild_elements_insn(W, VIR_OP_EXT, VIR_TYPE_I64, word, 0, 0);
+        word = virbuild_elements_insn(
+            W, VIR_OP_AND, VIR_TYPE_I64, word,
+            virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)mask), 0);
+        word = virbuild_elements_insn(
+            W, VIR_OP_MUL, VIR_TYPE_I64, word,
+            virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)pattern), 0);
+    } else if (type != VIR_TYPE_I64) {
+        return 0;
+    }
+    return virbuild_elements_insn(W, VIR_OP_VSPLAT, VIR_TYPE_I64X4, word, 0, 0);
+}
+
 /* the vector of type ty that E's stores make; 0 when they do not make one */
 static uint32_t virbuild_elements_vector(const virbuild_elements_at *W,
                                          const virbuild_elements *E,
@@ -117,6 +163,8 @@ static uint32_t virbuild_elements_vector(const virbuild_elements_at *W,
     uint32_t built = 0;
     uint32_t made = 0;
 
+    if (ty == VIR_TYPE_I64X4)
+        return virbuild_elements_wide(W, E);
     if (E->covered != 0xffff)
         return 0;
     if (E->width[0] == 8) {
@@ -203,7 +251,7 @@ VPRIV bool virbuild_vectors_from_elements(codegen_context *e)
                 uint32_t slot = virbuild_elements_slot(V, in.a, &offset);
                 uint32_t size = virbuild_access_bytes(V, &in);
 
-                if (!slot || size > 8 || offset + size > 16) {
+                if (!slot || size > 8 || offset + size > 32) {
                     /* a vector store, or one that may write any slot */
                     E.slot = 0;
                     zeroed = 0;
@@ -220,7 +268,7 @@ VPRIV bool virbuild_vectors_from_elements(codegen_context *e)
                     E = {};
                     E.slot = slot;
                 }
-                E.covered = (uint16_t)(E.covered | bytes << offset);
+                E.covered |= bytes << offset;
                 E.value[offset] = virbuild_value_resolve(V, in.b);
                 E.width[offset] = (uint8_t)size;
             } else if (in.op == VIR_OP_LOAD && vir_type_is_vector(in.type)) {

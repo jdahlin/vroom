@@ -189,6 +189,12 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
             return x64_emit_form(a, F(.opsz16 = 1, .op = OPB("\x0f\xd7"),
                                       .nop = 2, .reg = dst->reg, .rm = o,
                                       .vex = 1, .vl = o[0].size == 32));
+        if (!strcmp(mn, "vmovmskps") && nops == 2 && o[0].kind == XK_REG &&
+            o[0].cls == XR_XMM && dst->kind == XK_REG && dst->cls == XR_GPR &&
+            dst->size == 4)
+            return x64_emit_form(a, F(.op = OPB("\x0f\x50"), .nop = 2,
+                                      .reg = dst->reg, .rm = o, .vex = 1,
+                                      .vl = o[0].size == 32));
         /* moves: vmovdqa/vmovdqu/vmovaps/vmovups (load 6f/28/10, store 7f/29/11), vmovd/vmovq */
         if (nops == 2 && (!strcmp(mn, "vmovdqa") || !strcmp(mn, "vmovdqu") ||
                           !strcmp(mn, "vmovaps") || !strcmp(mn, "vmovups") ||

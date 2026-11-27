@@ -44,6 +44,23 @@ __attribute__((noinline, target("avx2"))) static void builtins(__m256i *o, const
     o[1] = t;
     o[2] = u;
 }
+/* the set1 intrinsics: one value in every lane, of every width, from values
+   with high bits set */
+__attribute__((noinline, target("avx2"))) static void splats(__m256i *o, int x,
+                                                             long long y)
+{
+    o[0] = _mm256_set1_epi8((char)x);
+    o[1] = _mm256_set1_epi16((short)x);
+    o[2] = _mm256_set1_epi32(x);
+    o[3] = _mm256_set1_epi64x(y);
+    o[4] = _mm256_add_epi32(_mm256_set1_epi32(-1), _mm256_set1_epi16(1));
+}
+__attribute__((noinline, target("avx2"))) static int signs(const __m256i *a)
+{
+    return _mm256_movemask_ps(_mm256_castsi256_ps(a[0])) * 256 +
+           _mm256_movemask_ps(_mm256_castsi256_ps(
+               _mm256_cmpgt_epi32(a[1], _mm256_setzero_si256())));
+}
 #endif
 int main(void)
 {
@@ -54,6 +71,12 @@ int main(void)
         in[i / 8][i % 8] = i * 0x1234567 ^ (i << 27);
     for (int n = 1; n <= 8; n += 7) {
         lanes(out, (const v8s *)in, n);
+        for (int i = 0; i < 40; i++)
+            printf("%08x ", out[i / 8][i % 8]);
+        printf("\n");
+        for (int i = 0; i + 1 < 8; i++)
+            printf("%x ", signs((const __m256i *)in + i));
+        splats((__m256i *)out, n * 0x12345 - 0x80000, -0x123456789LL * n);
         for (int i = 0; i < 40; i++)
             printf("%08x ", out[i / 8][i % 8]);
         printf("\n");

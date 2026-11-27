@@ -928,8 +928,20 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
         int ra = walk_value_to_register(e, &v);
         if (crossing == 1) {
             int result = WALK_LOWER(treg)(e);
-            virbuild_register_write(e, result,
-                                    virbuild_vector_sign_bits(e, ra));
+
+            if (virbuild_wide_vectors(e)) { /* vmovmskps on the whole vector */
+                uint32_t value =
+                    virbuild_vector_load(e, VIR_TYPE_I64X4, 8, ra, 0);
+
+                virbuild_register_write(
+                    e, result,
+                    virbuild_insn_append(e, VIR_OP_X86, VIR_TYPE_I32, 0, value,
+                                         value,
+                                         x64_x86_operator_code("movmskps")));
+            } else {
+                virbuild_register_write(e, result,
+                                        virbuild_vector_sign_bits(e, ra));
+            }
             WALK_LOWER(tfree)(e, ra);
             return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
                                .register_number = (uint8_t)result);

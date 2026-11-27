@@ -1072,7 +1072,7 @@ static const char *const x64_x86_operators[] = {
     "pshufd",     "shufps",    "pshuflw",   "pshufhw",   "psrldq",
     "pslldq",     "packuswb",  "packssdw",  "packsswb",  "packusdw",
     "pmaddubsw",  "pmaddwd",   "pmulhw",    "pmulhuw",   "pmulhrsw",
-    "pshufb",     "pminsw",    "pmaxsw"};
+    "pshufb",     "pminsw",    "pmaxsw",    "movmskps"};
 
 VPRIV const char *x64_x86_code_mnemonic(uint32_t code)
 {
