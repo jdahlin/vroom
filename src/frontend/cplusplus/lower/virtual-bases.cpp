@@ -361,10 +361,8 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
     entity_index f = r.f;
     const entity &x = analysis.entity_table[f];
     const struct type &ft = record(x.type);
-    if (ft.variadic || passed_indirectly(ft.operand))
-        return fail("a thunk of a variadic function or one returning "
-                    "a class by address",
-                    at);
+    if (ft.variadic)
+        return fail("a thunk of a variadic function", at);
     ast_qualified_type function = entity_type(f, at);
     const qualified_type *types =
         analysis.type_table.parameters(x.type.unqualified());
@@ -406,8 +404,23 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
         make(AST_NODE_CALL, result, callee,
              ast_builder_list(c, arguments.data(), count), count, 0, 0);
     uint32_t statement_node = 0;
-    if (record(ft.operand).kind == type_kind::fundamental &&
-        AST_QUALIFIED_TYPE_UNQUALIFIED(result) == void_type)
+    if (built_in_place(ft.operand)) {
+        /* [class.copy.elision]/1, [abi:calls]: the function builds its
+           result where the thunk's caller wants it */
+        uint32_t into = store(result, ft.operand, result_node(result), call);
+        if (!into)
+            return false;
+        uint32_t held[2] = {c_statement(c, into),
+                            ast_builder_node(c, AST_NODE_EXPRESSION, result,
+                                             result_node(result), 0, 0, 0, 0)};
+        uint32_t value = statement_expression(result, block(held, 2));
+        if (!value)
+            return false;
+        statement_node =
+            ast_builder_node(c, AST_NODE_RETURN, void_type, value, 0, 0, 0, 0);
+        ast_builder_symbol_flags_add(c, r.symbol, AST_SYMBOL_FLAG_NOINLINE);
+    } else if (record(ft.operand).kind == type_kind::fundamental &&
+               AST_QUALIFIED_TYPE_UNQUALIFIED(result) == void_type)
         statement_node = c_statement(c, call);
     else
         statement_node =
