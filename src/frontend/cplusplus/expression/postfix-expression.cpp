@@ -1543,6 +1543,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
        lookup's */
     owned_array<entity_index> found_by_adl;
     bool looked_up = false;
+    /* the namespace whose functions declared after the template are no
+       candidates ([temp.dep.candidate]/1) */
+    entity_index hides_late = 0;
     token_index adl_token = 0;
     uint32_t adl_name = 0;
     if (callee.is_token() && callee.is_identifier()) {
@@ -1672,6 +1675,37 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 return not_supported_because(
                     n, "basic.lookup.argdep",
                     "argument-dependent lookup that could not be completed");
+            /* [temp.dep.candidate]/1: of the functions declared after the
+               template, only argument-dependent lookup's are candidates,
+               and only for a dependent call: which of the two an
+               associated namespace that unqualified lookup also searched
+               is for is not told apart */
+            entity_index first_early = 0;
+            if (x.past_horizon) {
+                owned_array<entity_index> associated_classes, associated_spaces;
+                if (!associated_namespaces(types, associated_classes,
+                                           associated_spaces))
+                    return not_supported_because(
+                        n, "basic.lookup.argdep",
+                        "a call whose associated namespaces could not be "
+                        "determined");
+                for (entity_index space : associated_spaces)
+                    if (space == x.found_in)
+                        return not_supported_because(
+                            n, "temp.dep.candidate",
+                            "a function declared after the template in an "
+                            "associated namespace");
+                if (!held.empty() || several)
+                    return not_supported_because(
+                        n, "temp.dep.candidate",
+                        "functions declared after the template beside "
+                        "function templates or other namespaces' functions");
+                hides_late = x.found_in;
+                for (entity_index o = x.entity; o && !first_early;
+                     o = entity_table[o].next_overload)
+                    if (!declared_past_horizon(o, hides_late))
+                        first_early = o;
+            }
             if (!held.empty()) {
                 /* (the other templates and non-template functions ADL found
                    join the first's, the candidates of template_call) */
@@ -1696,7 +1730,16 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                candidate functions */
             for (entity_index e : set)
                 overload_set(e, found_by_adl);
-            if (!x.entity && !set.empty()) {
+            if (first_early) {
+                /* the callee named here: its own lookup would not tell
+                   the later declarations apart */
+                overloaded_callee = t;
+                r = named_entity(t, first_early, f);
+                overloaded_callee = 0;
+                if (r != analysis_result::well_formed)
+                    return r;
+                looked_up = true;
+            } else if (!x.entity && !set.empty()) {
                 /* found by argument-dependent lookup alone: no claim is
                    made about the name, which names nothing elsewhere */
                 overloaded_callee = t;
@@ -1870,7 +1913,14 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         overload_set(named, set);
     for (entity_index e : found_by_adl)
         overload_set(e, set);
-    if (set.size() > 1) {
+    if (hides_late) {
+        size_t kept = 0;
+        for (entity_index e : set)
+            if (!declared_past_horizon(e, hides_late))
+                set[kept++] = e;
+        set.resize(kept);
+    }
+    if (set.size() > 1 || (hides_late && set.size() == 1)) {
         {
             resolving_call scope(resolving_calls);
             VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));

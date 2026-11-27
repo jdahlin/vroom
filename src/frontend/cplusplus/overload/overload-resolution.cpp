@@ -263,6 +263,14 @@ semantic_analysis::list_array_sequence(SyntaxElement list, qualified_type array,
     return worst;
 }
 
+bool semantic_analysis::declared_past_horizon(entity_index e,
+                                              entity_index space) const
+{
+    uint32_t d = entity_table[e].first_declaration;
+    return entity_table[e].enclosing == space && d &&
+           entity_table.declaration(d).node.first_token() > lookup_horizon;
+}
+
 void semantic_analysis::overload_set(entity_index e,
                                      owned_array<entity_index> &out) const
 {

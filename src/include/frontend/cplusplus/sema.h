@@ -7347,6 +7347,9 @@ class semantic_analysis
     /* the functions of the overload set whose first is e
        (entity::next_overload), each once, added to out */
     void overload_set(entity_index e, owned_array<entity_index> &out) const;
+    /* [temp.dep.candidate]/1: e, a function of space, declared first after
+       the template instantiated */
+    bool declared_past_horizon(entity_index e, entity_index space) const;
     /* [over.call.func]: the token of the name a call's postfix-expression
        is, and the call's callee f made the best viable function of the
        set (its implied object argument's address object, 0 if none) */
