@@ -81,6 +81,9 @@ LANGUAGE_FEATURE(lambda_expressions, cplusplus_11, never, "N2927: lambda-express
 LANGUAGE_FEATURE(init_captures, cplusplus_14, never, "N3648: init-capture")
 LANGUAGE_FEATURE(constexpr_lambdas, cplusplus_17, never, "P0170R1: constexpr in a lambda-declarator")
 LANGUAGE_FEATURE(star_this_capture, cplusplus_17, never, "P0018R3: the simple-capture * this")
+/* [dcl.stc] */
+LANGUAGE_FEATURE(register_storage_class, cplusplus_98, cplusplus_17,
+                 "[diff.cpp14.dcl.dcl]/1: Removal of register storage-class-specifier")
 /* [except.spec] */
 LANGUAGE_FEATURE(dynamic_exception_specifications, cplusplus_98, cplusplus_17,
                  "[diff.cpp14.except]/1: Remove dynamic exception specifications")

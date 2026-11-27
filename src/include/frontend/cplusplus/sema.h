@@ -2363,6 +2363,8 @@ class semantic_analysis
         ext_vector_attribute ext_vector;
         /* [dcl.constexpr]/2: consteval (constexpr_ too) */
         bool consteval_ = false;
+        /* [diff.cpp14.dcl.dcl]/1: register */
+        bool register_ = false;
         /* [class.friend]: the friend specifier (only where friend_allowed) */
         bool friend_ = false;
         /* [dcl.stc]/8: mutable (only where mutable_allowed) */
