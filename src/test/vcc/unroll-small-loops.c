@@ -71,6 +71,25 @@ __attribute__((noinline)) static void vectors(v4 *out, const v4 *in, int n)
         out[k] = acc[k] + (v4)f[k % 2];
 }
 
+/* the largest trip count unrolled (16), with as many live elements, and one past it */
+__attribute__((noinline)) static int sixteen(v4 *out, const v4 *in, int n)
+{
+    v4 acc[16];
+    int a[17], total = 0;
+    for (int k = 0; k < 16; ++k)
+        acc[k] = in[k % 4];
+    for (int j = 0; j < n; ++j)
+        for (int k = 0; k < 16; ++k)
+            acc[k] += in[(j + k) % 4];
+    for (int k = 0; k < 16; ++k)
+        out[k % 4] += acc[k];
+    for (int k = 0; k < 17; ++k)
+        a[k] = in[k % 4][k % 4] + k * n;
+    for (int k = 0; k < 17; ++k)
+        total = total * 3 + a[k];
+    return total;
+}
+
 static void show(const v4 *v)
 {
     for (int k = 0; k < 4; k++)
@@ -87,6 +106,8 @@ int main(void)
                arrays(p, x + 2));
     for (int n = 0; n < 4; n++) {
         vectors(out, in, n);
+        show(out);
+        printf("%d\n", sixteen(out, in, n));
         show(out);
     }
     return 0;
