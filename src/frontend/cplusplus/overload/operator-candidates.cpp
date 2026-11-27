@@ -712,6 +712,10 @@ analysis_result semantic_analysis::overloaded_operator(
                     "determined");
             size_t kept = 0;
             for (entity_index e : others) {
+                /* [over.match.oper]/3.2 (below): without a class operand
+                   it is no candidate, declared early or late */
+                if (!any_class && !takes_enumeration(entity_table[e].type))
+                    continue;
                 uint32_t d = entity_table[e].first_declaration;
                 if (entity_table[e].enclosing != found.found_in || !d ||
                     entity_table.declaration(d).node.first_token() <=
