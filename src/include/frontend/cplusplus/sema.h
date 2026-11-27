@@ -6291,7 +6291,7 @@ class semantic_analysis
                                             bool require_trailing_defaults);
     bool equivalent_template(const function_template &f, SyntaxRef n,
                              uint32_t first, uint32_t count,
-                             qualified_type type);
+                             qualified_type type, bool signature_only = false);
     /* [temp.mem.func]/1: a member function of a class template (or of a
        partial specialization, [temp.class.spec.mfunc]/1) defined outside
        it: the definition, analysed per specialization of the class

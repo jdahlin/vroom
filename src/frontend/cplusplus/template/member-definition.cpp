@@ -1171,16 +1171,33 @@ analysis_result semantic_analysis::define_member_template_of(
        template-parameters and function type ([temp.over.link]/7) */
     owned_array<uint32_t> group;
     function_template_overloads(held, group);
+    uint32_t count = static_cast<uint32_t>(parameters.size());
+    /* [temp.over.link]: the declaration the template-head and type match;
+       or, where a non-type parameter's type is spelled otherwise (libc++'s
+       priority_queue names container_type in the class and _Container
+       outside it), the one declaration of this signature there is */
+    uint32_t matched = 0, alike = 0, alike_count = 0;
     for (uint32_t g : group) {
         const function_template f = function_templates[g - 1];
         const entity old = entity_table[f.entity];
-        if ((!allow_redefine && f.definition) || old.enclosing != c ||
-            old.member_cv != cv || old.constexpr_ != s.constexpr_)
+        if (old.enclosing != c || old.member_cv != cv ||
+            old.constexpr_ != s.constexpr_)
             continue;
-        if (!equivalent_template(f, inner, first,
-                                 static_cast<uint32_t>(parameters.size()),
-                                 type))
-            continue;
+        if (equivalent_template(f, inner, first, count, type, true)) {
+            alike = g;
+            alike_count++;
+        }
+        if (!matched && (allow_redefine || !f.definition) &&
+            equivalent_template(f, inner, first, count, type))
+            matched = g;
+    }
+    if (!matched && alike_count == 1 &&
+        !function_templates[alike - 1].definition)
+        matched = alike;
+    if (matched) {
+        uint32_t g = matched;
+        const function_template f = function_templates[g - 1];
+        const entity old = entity_table[f.entity];
         bool renamed = false;
         for (uint32_t i = 0; i < f.parameter_count; i++) {
             entity_index pe = template_parameter_entities[first + i];

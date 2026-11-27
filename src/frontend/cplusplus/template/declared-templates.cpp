@@ -1558,11 +1558,13 @@ bool semantic_analysis::same_dependent_parameter_type(SyntaxRef a, SyntaxRef b)
  */
 bool semantic_analysis::equivalent_template(const function_template &f,
                                             SyntaxRef n, uint32_t first,
-                                            uint32_t count, qualified_type type)
+                                            uint32_t count, qualified_type type,
+                                            bool signature_only)
 {
     if (f.parameter_count != count ||
-        !same_template_parameters(first, f.first_parameter, count) ||
-        !same_constraints(f.declaration, n))
+        (!signature_only &&
+         (!same_template_parameters(first, f.first_parameter, count) ||
+          !same_constraints(f.declaration, n))))
         return false;
     /* two definitions: [impl.clang] clang reports a redefinition; analysis
        does not claim it for a non-type parameter (a refusal holds the name) */
