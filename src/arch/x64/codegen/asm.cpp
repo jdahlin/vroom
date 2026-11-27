@@ -961,6 +961,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
     ri->offset = (int32_t)start;
     ri->reference = (uint32_t)(rb->n - start);
     ri->condition = !!(fixed & (1u << R12));
+    ri->shift = X64_RAW_USER;
     /* the x87 stack after the asm: its outputs from st(0) up, then the inputs it did not pop
 	   (one in st(1) is popped by the asm when it clobbers st(1), as GCC's rules) */
     {

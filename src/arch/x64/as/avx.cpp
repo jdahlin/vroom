@@ -270,7 +270,7 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
         /* vpinsrq/vpinsrd $i, r/m, xmm, xmm; vpextrq/d/b $i, xmm, r/m */
         if (nops >= 3 && o[0].kind == XK_IMM &&
             (!strncmp(mn, "vpinsr", 6) || !strncmp(mn, "vpextr", 6)) && mn[6] &&
-            !mn[7]) {
+            !mn[7] && mn[6] != 'w') {
             bool ins = mn[2] == 'i';
             char k = mn[6];
             uint8_t ops[3] = {0x0f, 0x3a,

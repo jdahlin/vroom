@@ -8,3 +8,4 @@ test/**
 codegen/walk/prefix.h
 codegen/walk/unprefix.h
 server/capabilities.cpp
+include/arch/x64/vexforms.h

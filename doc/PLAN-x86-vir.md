@@ -166,6 +166,12 @@ deleted in the commit that gives it a table row or a generic operation.
     nodes/second, from 76 k.  clang: 2157 k.
   - XV5b (done): `vpdpbusd` (`x86dot`) and the unmasked 512-bit dword
     compares greater, equal and less.  Native Stockfish: 1386 k.
+  - VEX (done): in a function whose target has AVX the compiler's own SSE
+    instructions are written in their VEX forms (`codegen/vex.cpp`), as
+    clang does; a loop mixing legacy SSE with `zmm` code ran three times
+    slower.  The assembler derives the forms it has no row for from the SSE
+    encodings.  Stockfish `-O3`: native 1386 k to 1460 k, AVX2 1239 k to
+    1406 k.
   - Left: mask registers as values (the `_mask` intrinsics), the other
     three-operand instructions, the 64-byte ABI in VIR, shift
     operators and shuffles, EVEX rounding and broadcast.  Without VNNI

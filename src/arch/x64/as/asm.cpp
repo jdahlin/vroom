@@ -477,8 +477,83 @@ VPRIV int x64_rtype(int mod, int pcrel, int size, int sgn, int rexw, int gotx)
                        : R_X86_64_32;
 }
 
+/* whether the two sources of the 0f-map VEX instruction f may trade places,
+ * as LLVM takes them (integer and bit operations, and the packed float ones
+ * but min, max and and-not) */
+static bool x64_vex_commutes(const XForm *f)
+{
+    static const uint8_t integer[] = {0x74, 0x75, 0x76, 0xd4, 0xd5, 0xda, 0xdb,
+                                      0xdc, 0xdd, 0xde, 0xe0, 0xe3, 0xe4, 0xe5,
+                                      0xea, 0xeb, 0xec, 0xed, 0xee, 0xef, 0xf4,
+                                      0xf5, 0xf6, 0xfc, 0xfd, 0xfe};
+    static const uint8_t floats[] = {0x54, 0x56, 0x57, 0x58, 0x59, 0xc2};
+    bool p66 = f->opsz16 || f->rep == 0x66;
+    bool scalar = f->rep == 0xf3 || f->rep == 0xf2;
+    uint8_t opcode = f->op[1];
+
+    if (p66)
+        for (uint8_t o : integer)
+            if (o == opcode)
+                return true;
+    if (scalar)
+        return false;
+    /* a compare commutes when its predicate does: eq, unord, neq, ord */
+    if (opcode == 0xc2 && (f->imm & 3) != 0 && (f->imm & 3) != 3)
+        return false;
+    for (uint8_t o : floats)
+        if (o == opcode)
+            return true;
+    return false;
+}
+
 VPRIV int x64_emit(as_context *a, XForm *f)
 {
+    XForm derived;
+
+    if (a->x64_vex_derived) {
+        derived = *f;
+        derived.vex = 1;
+        derived.vl = 0;
+        derived.vvvv = a->x64_vex_derived - 1;
+        if (derived.rep == 0x66)
+            derived.rep = 0, derived.opsz16 = 1;
+        f = &derived;
+    }
+    /* as LLVM MC: a register above 7 in r/m needs the three-byte prefix, so
+     * where the instruction allows it the register goes elsewhere */
+    XForm shorter;
+    XOp swapped;
+    uint8_t reversed[2] = {0x0f, 0};
+
+    if (f->vex && !f->tuple && f->nop == 2 && !f->w && f->rm &&
+        f->rm->kind == XK_REG && f->rm->reg >= 8) {
+        uint8_t opcode = f->op[1];
+        bool move = (opcode == 0x10 && (f->rep == 0xf3 || f->rep == 0xf2)) ||
+                    (opcode == 0x7e && f->rep == 0xf3);
+        bool commutes = f->vvvv < 8 && x64_vex_commutes(f);
+
+        if (commutes || (move && f->reg < 8)) {
+            shorter = *f;
+            swapped = *f->rm;
+            if (commutes) {
+                swapped.reg = (uint8_t)f->vvvv;
+                shorter.vvvv = f->rm->reg;
+            } else { /* the store direction of the same move */
+                swapped.reg = (uint8_t)f->reg;
+                shorter.reg = f->rm->reg;
+                reversed[1] = 0x11;
+                if (opcode == 0x7e) {
+                    reversed[1] = 0xd6;
+                    shorter.rep = 0;
+                    shorter.opsz16 = 1;
+                }
+                shorter.op = reversed;
+            }
+            shorter.rm = &swapped;
+            f = &shorter;
+        }
+    }
+
     uint8_t bytes[24];
     const XOp *rm = f->rm;
     int rex = 0x40 | (f->w ? 8 : 0) | (f->reg & 8 ? 4 : 0) |
@@ -992,6 +1067,94 @@ VPRIV int x64_as_instruction_assemble(as_context *a, const char *p,
     return as_x64_insn(a, mn, o, nops);
 }
 
+static int (*const x64_families[])(as_context *, char *, XOp *, int) = {
+    x64_i_crdr, x64_i_zero,  x64_i_jump, x64_i_setcc, x64_i_x87,
+    x64_i_sse,  x64_i_avx,   x64_i_sse4, x64_i_ssepk, x64_i_bits,
+    x64_i_sys,  x64_i_x87ar, x64_i_int,  x64_i_movx,
+};
+
+static int x64_vex_derive(as_context *a, char *mn, XOp *o, int nops);
+
+static int x64_family_assemble(as_context *a, char *mn, XOp *o, int nops)
+{
+    size_t count = sizeof x64_families / sizeof *x64_families;
+
+    for (size_t i = 0; i < count; i++) {
+        /* the last reports what none knew: derived VEX forms come first */
+        if (i == count - 1 && *mn == 'v') {
+            int d = x64_vex_derive(a, mn, o, nops);
+
+            if (d != X64_NEXT)
+                return d;
+        }
+        int r = x64_families[i](a, mn, o, nops);
+
+        if (r != X64_NEXT)
+            return r;
+    }
+    return X64_NEXT;
+}
+
+/* v<sse> with no row of its own: the SSE instruction's encoding under a VEX
+ * prefix.  The extra register operand goes to VEX.vvvv; a shift by an
+ * immediate names its destination there. */
+static int x64_vex_derive(as_context *a, char *mn, XOp *o, int nops)
+{
+    static const struct {
+        const char *name;
+        bool three;
+    } forms[] = {
+#define VEX_SAME(n) {n, false},
+#define VEX_THREE(n) {n, true},
+#define VEX_MERGE(n) {n, false},
+#include "arch/x64/vexforms.h"
+#undef VEX_SAME
+#undef VEX_THREE
+#undef VEX_MERGE
+    };
+    const char *name = mn + 1;
+    size_t k = 0, count = sizeof forms / sizeof *forms;
+
+    if (*mn != 'v')
+        return X64_NEXT;
+    while (k < count && strcmp(forms[k].name, name))
+        k++;
+    if (k == count)
+        return X64_NEXT;
+    int immediate = nops && o[0].kind == XK_IMM;
+    int registers = nops - immediate;
+    bool shift = immediate && !strncmp(name, "ps", 2) &&
+                 (name[2] == 'l' || name[2] == 'r') &&
+                 strncmp(name, "pshuf", 5);
+    XOp legacy[4];
+    int n = 0, source = 0;
+    bool extra = registers == 3 || (shift && registers == 2);
+
+    if (forms[k].three && !extra)
+        return X64_NEXT;
+    for (int i = 0; i < nops; i++) {
+        /* the extra operand: the one before the last, or the last (a shift's
+         * destination) */
+        if (extra && i == nops - 2 + shift) {
+            if (o[i].kind != XK_REG || o[i].cls != XR_XMM)
+                return X64_NEXT;
+            source = o[i].reg;
+            continue;
+        }
+        if (o[i].kind == XK_REG && o[i].cls != XR_XMM && o[i].cls != XR_GPR)
+            return X64_NEXT;
+        legacy[n++] = o[i];
+    }
+    char plain[32];
+
+    snprintf(plain, sizeof plain, "%s", name);
+    a->x64_vex_derived = source + 1;
+    int r = x64_family_assemble(a, plain, legacy, n);
+
+    a->x64_vex_derived = 0;
+    return r;
+}
+
 int as_x64_insn(as_context *a, char *mn, XOp *o, int nops)
 {
     if (a->dwarf_row_is_pending)
@@ -1003,19 +1166,9 @@ int as_x64_insn(as_context *a, char *mn, XOp *o, int nops)
     for (int i = 0; i < nops; i++)
         if (o[i].kind == XK_REG && (o[i].cls == XR_ZMM || o[i].cls == XR_MASK))
             return x64_i_avx512(a, mn, o, nops);
-    {
-        static int (*const fam[])(as_context *, char *, XOp *, int) = {
-            x64_i_crdr, x64_i_zero,  x64_i_jump, x64_i_setcc, x64_i_x87,
-            x64_i_sse,  x64_i_avx,   x64_i_sse4, x64_i_ssepk, x64_i_bits,
-            x64_i_sys,  x64_i_x87ar, x64_i_int,  x64_i_movx,
-        };
+    int r = x64_family_assemble(a, mn, o, nops);
 
-        for (size_t i = 0; i < sizeof fam / sizeof *fam; i++) {
-            int r = fam[i](a, mn, o, nops);
-
-            if (r != X64_NEXT)
-                return r;
-        }
-    }
+    if (r != X64_NEXT)
+        return r;
     return as_error_report(a, "invalid instruction mnemonic '%s'", mn);
 }

@@ -502,6 +502,16 @@ static void x64w_indirect(codegen_context *e, tbuf *b, uint32_t reference)
 static const int x64_interrupt_saved_registers[14] = {
     R12, RAX, RCX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R13, R14, R15};
 
+/* (an AVX function's go through the text, which is rewritten) */
+static bool x64_record_uses_xmm(const record *i)
+{
+    for (int k = 0; k < 4; k++)
+        if (i->registers[k] != X64_REGISTER_NONE &&
+            X64_REGISTER_IS_XMM(i->registers[k]))
+            return true;
+    return false;
+}
+
 VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 {
     cc *c = e->compile_context;
@@ -666,9 +676,19 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
                         (long long)(X->callee_save_slots[r] - 16));
             }
         }
+    /* AVX: each record's text in VEX forms, but for the user's inline asm */
+    bool vex = x86_feature_has(cc_x86_features_get(c, s), X86_FEATURE_AVX);
+    bool user_text = false;
+    size_t printed = SIZE_MAX; /* where the last record's text begins */
+
     for (uint32_t k = 0; k < X->record_count; k++) {
         const record *i = &X->records[k];
         int sz = i->size;
+
+        if (vex && !user_text && printed != SIZE_MAX)
+            x64_vex_rewrite(b, printed);
+        printed = SIZE_MAX;
+        user_text = i->opcode == X64_OP_RAW && i->shift == X64_RAW_USER;
 
         if (i->opcode != X64_OP_LABEL && i->opcode != X64_OP_TAIL)
             aftercall = i->opcode == X64_OP_CALL || i->opcode == X64_OP_CALLR;
@@ -698,7 +718,8 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
             continue; /* Windows: jump tables in .rdata after the function (x64w_tables), code only in .text */
         if (codegen_context_is_direct(e)) {
             record encoded;
-            bool code = x64_record_object_prepare(e, i, &encoded);
+            bool code = !(vex && x64_record_uses_xmm(i)) &&
+                        x64_record_object_prepare(e, i, &encoded);
             if (code != objcode) {
                 codegen_item_close(e, objitem);
                 objitem = codegen_item_open(e, code ? CODEGEN_ITEM_X64
@@ -716,6 +737,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
             }
         }
 
+        printed = b->n; /* (after an object item's header) */
         switch (i->opcode) {
         case X64_OP_LABEL:
             x64_label_name_append(b, s, i->label);
@@ -1345,6 +1367,8 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
         }
         vtext_char_append(b, '\n');
     }
+    if (vex && !user_text && printed != SIZE_MAX)
+        x64_vex_rewrite(b, printed);
     if (objcode) {
         codegen_item_close(e, objitem);
         objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
