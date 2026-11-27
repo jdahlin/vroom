@@ -1197,6 +1197,14 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
         VTRY_SET(r, to_base(at.first_token(), target.entity, m));
         same = true;
     }
+    if (!same && direct &&
+        tokens.files.behavior.edition >= standard_edition::cplusplus_20 &&
+        is_aggregate(target.entity)) {
+        owned_array<expression_meaning> arguments;
+        arguments.append(m);
+        return parenthesized_aggregate_initialization(at, type, arguments,
+                                                      result);
+    }
     /* /17.6.3: "If the conversion cannot be done or is ambiguous, the
        initialization is ill-formed": a copy-initialization of a class
        with no constructor and no base class from an unrelated class none
@@ -2471,6 +2479,76 @@ analysis_result semantic_analysis::aggregate_elements(
     aggregate_value(list, type, all, elements, result);
     if (union_default)
         semantics[result.node].a = members[union_default].member;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [dcl.init]/17.6.2.2 (C++20, P0960R3): parenthesized aggregate
+ * initialization of an aggregate class from an expression-list.  Differs
+ * from braced aggregate initialization: narrowing conversions are allowed
+ * (list = false), brace elision is not performed, and each element is
+ * copy-initialized from the corresponding argument (or value-initialized /
+ * default-member-initialized if omitted).
+ */
+analysis_result semantic_analysis::parenthesized_aggregate_initialization(
+    SyntaxRef at, qualified_type type,
+    owned_array<expression_meaning> &arguments, initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    entity_index c = target.entity;
+    const entity &x = entity_table[c];
+    owned_array<aggregate_class_element> members;
+    aggregate_class_elements(c, members);
+    uint64_t count = members.size();
+    if (x.union_ && count > 1)
+        count = 1;
+    if (arguments.size() > count)
+        return ill_formed(at,
+                          "too many initializers in parenthesized aggregate "
+                          "initialization",
+                          "dcl.init");
+    owned_array<uint32_t> elements;
+    constness all = constness::constant;
+    for (uint64_t i = 0; i < count; i++) {
+        qualified_type element = members[i].type;
+        initialized_value one;
+        if (members[i].empty_base) {
+            if (i < arguments.size()) {
+                VTRY(r, initialize_with(at, arguments[i], element, false, false,
+                                        one));
+            }
+            continue;
+        }
+        if (i < arguments.size()) {
+            VTRY(r,
+                 initialize_with(at, arguments[i], element, false, false, one));
+        } else {
+            bool has_default =
+                static_cast<bool>(members[i].default_initializer);
+            VTRY(r1, omitted_element_checks(at, element, has_default));
+            VTRY(r2, omitted_element_value(
+                         at, element, members[i].default_initializer, c, one));
+        }
+        all = combined_constness(all, one.evaluation);
+        elements.append(one.node);
+        qualified_type destroyed = element;
+        while (type_table[destroyed.unqualified()].kind == type_kind::array)
+            destroyed = type_table[destroyed.unqualified()].operand;
+        if (type_table[destroyed.unqualified()].kind == type_kind::class_type) {
+            entity_index sub = type_table[destroyed.unqualified()].entity;
+            if (entity_table[sub].kind == entity_kind::class_type &&
+                (destructor_deleted(sub) ||
+                 (entity_table[sub].destructor &&
+                  !accessible(entity_table[sub].destructor))))
+                return ill_formed(at,
+                                  "the destructor of an element of an "
+                                  "aggregate is potentially invoked by its "
+                                  "initialization and it is deleted or "
+                                  "inaccessible",
+                                  "dcl.init.aggr");
+        }
+    }
+    aggregate_value(at, type, all, elements, result);
     return analysis_result::well_formed;
 }
 
