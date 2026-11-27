@@ -716,7 +716,9 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
             if (u.member == f && (u.c == c || base_step(c, u.c, twice) != 0))
                 introduced = true;
         }
-        if (introduced && nonvirtual_subobjects(c, owner)) {
+        bool repeated = false;
+        base_step(c, owner, repeated);
+        if (introduced && !repeated && nonvirtual_subobjects(c, owner)) {
             VTRY_SET(r, pointer_along_path(t, c, owner, to_pointer, false,
                                            false, address));
         } else {

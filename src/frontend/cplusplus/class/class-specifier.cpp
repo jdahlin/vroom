@@ -706,7 +706,13 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         /* [basic.lookup.unqual]/7: the names of a class defined outside its
            class or namespace are looked up there (struct Y::X : B<X>) */
         entity_index bases_scope = current_scope;
-        if (head_qualifier)
+        /* (not for a template's member class: [temp.dep]'s bases are not
+           looked into here) */
+        bool templated = specialization != 0;
+        for (entity_index k = entity_table[c].enclosing; k && !templated;
+             k = entity_table[k].enclosing)
+            templated = entity_table[k].instantiation != 0;
+        if (head_qualifier && !templated)
             bases_scope = entity_table[c].enclosing;
         scoped_value<entity_index> nominated(current_scope, bases_scope);
         require_complete_class++;

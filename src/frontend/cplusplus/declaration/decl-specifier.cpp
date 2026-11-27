@@ -1029,7 +1029,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         if (at(preprocessing_op_or_punc::COLON)) {
             /* [basic.lookup.unqual]/7: after a qualified class-head-name,
                the nominated class's or namespace's names are found */
-            if (qualifier && known)
+            if (qualifier && known && !names.within_template())
                 names.reenter(scope);
             base_clause(region);
             names.reenter(outer);
