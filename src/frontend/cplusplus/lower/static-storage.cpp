@@ -88,7 +88,29 @@ void c_lowering::static_initialization(entity_index e, uint32_t init,
 {
     collection k = collect();
     owned_array<uint32_t> after;
+    uint32_t list = init;
+    if (list && node(list).kind == semantic_kind::bind_reference)
+        list = node(list).a;
+    static_backing = nullptr;
+    if (list)
+        static_backing = backing_array(list);
+    /* [class.temporary]/6: a local static reference's temporary has static
+       storage as a namespace-scope one's does */
+    bool local =
+        !static_owner && init &&
+        (node(init).kind == semantic_kind::bind_reference || static_backing);
+    if (local) {
+        static_owner = e;
+        static_temporaries = 0;
+        if (node(init).kind == semantic_kind::bind_reference)
+            static_root = init;
+    }
     uint32_t done = initialization(e, init, at);
+    if (local) {
+        static_owner = 0;
+        static_root = 0;
+    }
+    static_backing = nullptr;
     collected(k, out, after);
     if (!done)
         return;
