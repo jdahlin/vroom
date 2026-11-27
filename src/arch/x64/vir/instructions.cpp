@@ -1086,7 +1086,9 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             x64_vir_text_append(L, text);
         }
         return;
-    case VIR_OP_X86_DOT: { /* the accumulator is the destination */
+    /* the accumulator is the destination; a 256-bit one is computed on zmm,
+	 * whose upper lanes nothing reads */
+    case VIR_OP_X86_DOT: {
         char text[160];
         int third = x64_vir_register_number(p[2]);
         int into = d;

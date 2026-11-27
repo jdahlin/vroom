@@ -946,10 +946,11 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
 
             r[i] = walk_value_to_register(e, &v);
         }
+        uint64_t bytes = codegen_type_size(c, x->ty);
         codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
                             .align = 16,
-                            .offset = walk_slot_temporary(e, 64, 16)};
-        virbuild_vector_dot(e, r, &d);
+                            .offset = walk_slot_temporary(e, bytes, 16)};
+        virbuild_vector_dot(e, virbuild_wide_type(e, bytes), r, &d);
         for (unsigned i = 0; i < 3; i++)
             WALK_LOWER(tfree)(e, r[i]);
         return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,

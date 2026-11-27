@@ -350,21 +350,21 @@ static void virbuild_vector_result(codegen_context *e, uint32_t op,
     virbuild_store_table_clear(e, true);
 }
 
-/* *d = vpdpbusd of the 64-byte vectors at r[0] (the sums), r[1] and r[2] */
-VPRIV void virbuild_vector_dot(codegen_context *e, const int *r,
+/* *d = vpdpbusd of the vectors of type vt at r[0] (the sums), r[1] and r[2] */
+VPRIV void virbuild_vector_dot(codegen_context *e, uint32_t vt, const int *r,
                                const codegen_lvalue *d)
 {
     uint32_t value[3];
 
     for (int i = 0; i < 3; i++)
-        value[i] = virbuild_vector_load(e, VIR_TYPE_I64X8, 8, r[i], 0);
+        value[i] = virbuild_vector_load(e, vt, 8, r[i], 0);
     virbuild_context *V = e->vir_builder;
     uint32_t flags = virbuild_memory_flags_make(8, 8, false);
-    uint32_t sum = virbuild_insn_append(e, VIR_OP_X86_DOT, VIR_TYPE_I64X8, 0,
-                                        value[0], value[1], value[2]);
+    uint32_t sum = virbuild_insn_append(e, VIR_OP_X86_DOT, vt, 0, value[0],
+                                        value[1], value[2]);
     uint32_t slot;
     int64_t rel;
-    uint32_t to = virbuild_address_make(e, d, 64, &slot, &rel);
+    uint32_t to = virbuild_address_make(e, d, vir_type_size(vt), &slot, &rel);
 
     if (slot != VIRBUILD_BLOCK_NONE)
         V->slots[slot].exposed = 1;

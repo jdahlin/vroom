@@ -1411,7 +1411,8 @@ VPRIV int x64_x86_crossing_builtin(codegen_context *e, uint32_t n)
 
     if (zmm &&
         x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX512VNNI) &&
-        !strcmp(name, "ia32_vpdpbusd512"))
+        (!strcmp(name, "ia32_vpdpbusd512") ||
+         !strcmp(name, "ia32_vpdpbusd256")))
         return 8;
     if (zmm && !strcmp(name, "ia32_cmpd512_mask") && x->c == 5) {
         /* a, b, the predicate, the mask: only an unmasked one */
