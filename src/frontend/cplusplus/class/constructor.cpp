@@ -1968,10 +1968,6 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                                                  &listed_arguments);
                 else if (braced) {
                     bool base = entity_table[e].base_subobject;
-                    if (base && is_aggregate(record.entity))
-                        return not_supported_because(
-                            item, "class.base.init",
-                            "a braced initializer of an aggregate base class");
                     initialized_value listed;
                     bool saved_constructing_base = constructing_base;
                     constructing_base = base;
@@ -2011,8 +2007,16 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                        member. A base's tail padding can hold derived members. */
                     bool stored =
                         aggregate_value_stored(record.entity, listed.node);
-                    if (base ||
-                        (!stored && !aggregate_built_in_place(listed.node)))
+                    /* (an aggregate base's bytes are stored whole where
+                       it has no tail padding another subobject may use,
+                       and else member by member) */
+                    if (base) {
+                        require_complete(record.entity);
+                        stored = stored && is_aggregate(record.entity) &&
+                                 entity_table[record.entity].data_size ==
+                                     entity_table[record.entity].size;
+                    }
+                    if (!stored && !aggregate_built_in_place(listed.node))
                         return not_supported_because(
                             item, "class.base.init",
                             "a braced initializer whose value cannot be stored "
