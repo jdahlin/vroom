@@ -219,7 +219,11 @@ bool semantic_analysis::names_dependent_entity(token_index first,
             address_parameter_type(entity_table[e].type) &&
             !depends_on_template_parameter(entity_table[e].type))
             continue;
-        if (k == entity_kind::none || is_template_template_parameter(e))
+        if ((k == entity_kind::none &&
+             (entity_table[e].instantiation ||
+              (entity_table[e].argument_bound &&
+               depends_on_template_parameter(entity_table[e].type)))) ||
+            is_template_template_parameter(e))
             return true;
         if ((k == entity_kind::variable || k == entity_kind::typedef_name) &&
             depends_on_template_parameter(entity_table[e].type))
@@ -394,6 +398,24 @@ void semantic_analysis::collect_written_casts(
             SyntaxRef ar = x;
             b.cast = ar.index().index();
             b.type = entity_table[e].type;
+            found.append(b);
+        }
+    }
+    /* N::C() and N::C(x), a class named by a qualified name: that class, for
+       cv <type> (cast the simple-type-specifier's node) */
+    if (x.is(syntax_kind::postfix_expression) && x.size() >= 3 &&
+        x[0].is(syntax_kind::simple_type_specifier) &&
+        x[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+        size_t unsupported_before = unsupported.size();
+        type_index named = 0;
+        uint32_t named_cv = 0;
+        analysis_result r = qualified_type_name(x[0], named, named_cv);
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed && named) {
+            written_binding b;
+            SyntaxRef ar = x[0];
+            b.cast = ar.index().index();
+            b.type = qualified_type::make(named, named_cv);
             found.append(b);
         }
     }

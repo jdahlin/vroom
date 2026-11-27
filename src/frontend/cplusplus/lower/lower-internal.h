@@ -615,6 +615,9 @@ class c_lowering
     uint32_t new_array(const semantic_node &n, ast_qualified_type t);
     uint32_t delete_array(const semantic_node &n);
     uint32_t array_size(const semantic_node &n);
+    uint32_t zero_elements(qualified_type element, uint32_t first,
+                           uint32_t count, ast_qualified_type size,
+                           token_index at);
     uint32_t delete_object(const semantic_node &n);
     bool passed_indirectly(qualified_type t) const;
     /* a parameter's C type: a class passed by address is a pointer */

@@ -278,10 +278,10 @@ analysis_result semantic_analysis::deduce_placeholder(
     const struct type argument = type_table[e.type.unqualified()];
     if (argument.kind == type_kind::none ||
         argument.kind == type_kind::placeholder ||
-        argument.kind == type_kind::dependent || e.bit_field_width)
-        return not_supported_because(
-            at, "dcl.type.auto.deduct",
-            "an initializer with no type to deduce from, or a bit-field");
+        argument.kind == type_kind::dependent)
+        return not_supported_because(at, "dcl.type.auto.deduct",
+                                     "an initializer with no type to deduce "
+                                     "from");
     if (decltype_auto) {
         /* (T is the placeholder alone: placeholder_declaration) */
         if (!decltype_of(e, named, deduced))
@@ -683,9 +683,29 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
 {
     const entity &x = entity_table[e];
     if (x.kind == entity_kind::function &&
-        !(function_state.active && function_state.function == e) &&
-        deduce_member_body_now(e))
-        return analysis_result::well_formed;
+        !(function_state.active && function_state.function == e)) {
+        if (deduce_member_body_now(e))
+            return analysis_result::well_formed;
+        /* [dcl.spec.auto]/12: return type deduction for a function template
+           specialization occurs when its definition is instantiated, even
+           in an unevaluated operand */
+        if (entity_table[e].instantiation) {
+            uint32_t idx = entity_table[e].instantiation - 1;
+            instantiation_record &rec = instantiations[idx];
+            const entity tmpl = entity_table[rec.template_entity];
+            const function_template ft =
+                function_templates[tmpl.instantiation - 1];
+            if (!rec.defined && !rec.defining && ft.definition) {
+                rec.quiet = quiet_member_bodies != 0;
+                if (!instantiation_depth && !rec.wanted_by && !unevaluated &&
+                    !explicit_declaration_names)
+                    rec.wanted_by = current_declaration;
+                VTRY(r, instantiate_definition(current_declaration, idx));
+                if (!contains_placeholder(entity_table[e].type))
+                    return analysis_result::well_formed;
+            }
+        }
+    }
     const entity &x2 = entity_table[e];
     bool undeduced = false;
     if (x2.kind == entity_kind::variable)
@@ -700,11 +720,18 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
                 current_declaration, "dcl.spec.auto",
                 "a variable whose placeholder type is not deduced "
                 "(its initializer was not analysed)");
-        if (after.kind == entity_kind::function && after.instantiation)
+        if (after.kind == entity_kind::function && after.instantiation) {
+            if (after.unsupported_body)
+                return not_supported_caused_by(
+                    current_declaration, "dcl.spec.auto",
+                    "a function template's specialization whose placeholder "
+                    "type is not deduced",
+                    body_failures[after.unsupported_body - 1]);
             return not_supported_because(
                 current_declaration, "dcl.spec.auto",
                 "a function template's specialization whose placeholder "
                 "type is not deduced");
+        }
         if (after.kind == entity_kind::function)
             return not_supported_because(
                 current_declaration, "dcl.spec.auto",

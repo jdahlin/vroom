@@ -44,6 +44,16 @@ uint8_t token_stream::layout_pragma_at(token_index i)
     return in_effect;
 }
 
+uint32_t token_stream::target_pragma_at(token_index i)
+{
+    make_through(i);
+    uint32_t in_effect = 0;
+    for (size_t k = 0; k < target_change_at.size() && target_change_at[k] <= i;
+         k++)
+        in_effect = target_change_to[k];
+    return in_effect;
+}
+
 void token_stream::make_through(token_index i)
 {
     while (!complete && tokens.size() <= i) {
@@ -53,6 +63,11 @@ void token_stream::make_through(token_index i)
             layout_pragma_before = files.layout_pragma;
             layout_change_at.append(static_cast<token_index>(tokens.size()));
             layout_change_to.append(layout_pragma_before);
+        }
+        if (files.target_pragma != target_pragma_before) {
+            target_pragma_before = files.target_pragma;
+            target_change_at.append(static_cast<token_index>(tokens.size()));
+            target_change_to.append(target_pragma_before);
         }
         first_piece.append(static_cast<uint32_t>(preprocessing_tokens.size()));
         preprocessing_tokens.append(first);

@@ -497,11 +497,16 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         if (held_here)
             local.append(g);
     }
+    /* [namespace.udecl]/14: a function template may overload a function a
+       using-declaration brought into the namespace (<cctype>'s isalnum
+       before <locale>'s) */
+    bool used_here =
+        is_namespace(outer) && entity_table.bound_by_using(outer, name);
     if (prior && local.empty() && own &&
         entity_table[prior].kind == entity_kind::function &&
-        entity_table[prior].enclosing == outer &&
-        !entity_table[prior].nonstatic_member &&
-        !entity_table.bound_by_using(outer, name)) {
+        (used_here || (entity_table[prior].enclosing == outer &&
+                       !entity_table.bound_by_using(outer, name))) &&
+        !entity_table[prior].nonstatic_member) {
         overload_set(prior, functions);
         prior = make_held_name(name, outer);
         entity_table.bind(outer, name, prior);

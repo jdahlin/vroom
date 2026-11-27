@@ -2838,7 +2838,7 @@ static int walk_library_call_shrink(codegen_context *e, uint32_t n, uint32_t s)
 }
 
 /* memcpy/memmove/memset (kind) of a constant size up to 64 bytes: inline, as clang (a freestanding vDSO
-   has no memcpy); memset only of zero.  The value is the destination, as the call returns. */
+   has no memcpy); memset only of a constant byte.  The value is the destination, as the call returns. */
 static bool walk_memory_call_inline(codegen_context *e, uint32_t n, int kind,
                                     codegen_value *out)
 {
@@ -2850,8 +2850,7 @@ static bool walk_memory_call_inline(codegen_context *e, uint32_t n, int kind,
         !(cc_eval(c, c->lists[x->b + 2], &cv) && cv.kind == CC_VALUE_INTEGER &&
           cv.i >= 0 && cv.i <= 64) ||
         (kind == CC_LIBRARY_KIND_MEMSET &&
-         !(cc_eval(c, c->lists[x->b + 1], &cv) && cv.kind == CC_VALUE_INTEGER &&
-           cv.i == 0)))
+         !(cc_eval(c, c->lists[x->b + 1], &cv) && cv.kind == CC_VALUE_INTEGER)))
         return false;
     {
         uint64_t len;
@@ -2861,10 +2860,31 @@ static bool walk_memory_call_inline(codegen_context *e, uint32_t n, int kind,
         cc_eval(c, c->lists[x->b + 2], &cv);
         len = (uint64_t)cv.i;
         if (kind == CC_LIBRARY_KIND_MEMSET) {
+            cc_eval(c, c->lists[x->b + 1], &cv);
+            uint64_t byte = (uint64_t)cv.i & 0xff;
+
             v2 = walk_value_emit(e, c->lists[x->b + 1]);
             walk_value_free(e, &v2);
-            if (len)
+            if (len && !byte)
                 WALK_LOWER(zero)(e, rd, len);
+            /* another byte: the widest stores of it repeated */
+            for (uint64_t off = 0; byte && off < len;) {
+                int width = 8;
+
+                while ((uint64_t)width > len - off)
+                    width /= 2;
+                codegen_value pattern = codegen_value_constant(
+                    (int64_t)((byte * 0x0101010101010101ull) >>
+                              (64 - 8 * width)));
+                int r = walk_value_to_register(e, &pattern);
+                codegen_lvalue at = {.kind = CODEGEN_LVALUE_REGISTER,
+                                     .register_number = (uint8_t)rd,
+                                     .offset = (int64_t)off};
+
+                WALK_LOWER(store)(e, r, &at, width);
+                WALK_LOWER(tfree)(e, r);
+                off += (uint64_t)width;
+            }
         } else {
             codegen_value sv = walk_value_emit(e, c->lists[x->b + 1]);
             int rs = walk_value_to_register(e, &sv);

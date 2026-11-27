@@ -2011,6 +2011,7 @@ analysis_result semantic_analysis::declare_with_initializer(
        ([dcl.link]/6: a later declaration without one keeps it) */
     if (r == analysis_result::well_formed && c_language && !at_block_scope() &&
         (kind == entity_kind::function || kind == entity_kind::variable) &&
+        !(kind == entity_kind::function && (s.gnu_flags & gnu_overloadable)) &&
         entity_table[declared_entity].linkage_of_name != linkage::internal)
         entity_table.give_c_linkage(declared_entity);
     if (r == analysis_result::well_formed && kind == entity_kind::variable &&
@@ -2223,6 +2224,12 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r != analysis_result::well_formed)
         return r;
     entity_table[declared_entity].bound_unknown = false;
+    if (!(before == type)) {
+        /* [dcl.array]/7: an array of unknown bound completed by its
+           initializer, whether or not what follows is analysed */
+        entity_table[declared_entity].type = type;
+        declared_names.back().type = type;
+    }
     /* [stmt.ranged]/1: "= *begin" reads the variable begin, which is not
        usable in constant expressions ([expr.const]) */
     if (supplied && !s.constexpr_)
@@ -2354,12 +2361,6 @@ analysis_result semantic_analysis::declare_with_initializer(
         d2.entity = declared_entity;
         definitions.append(d2);
     }
-    if (!(before == type)) {
-        /* [dcl.array]/7: an array of unknown bound completed by its
-           initializer */
-        e.type = type;
-        declared_names.back().type = type;
-    }
     /* [dcl.constinit]/2: "If a variable declared with the constinit
        specifier has dynamic initialization, the program is ill-formed."
        (what is not known to be constant initialization is not claimed) */
@@ -2379,6 +2380,17 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* [dcl.constexpr]/10: "In any constexpr variable declaration, the
        full-expression of the initialization shall be a constant
        expression" */
+    if (s.constexpr_ && value.evaluation == constness::not_constant) {
+        /* [ext:gnu_vector_size] a vector computed by a function or by lane
+           operators: the evaluator has no rules for it, so whether it is a
+           constant is not known */
+        qualified_type lanes = type;
+        while (type_table[lanes.unqualified()].kind == type_kind::array)
+            lanes = type_table[lanes.unqualified()].operand;
+        if (is_vector_kind(type_table[lanes.unqualified()].kind))
+            return not_supported_because(declaration, "expr.const",
+                                         "a computed constexpr vector");
+    }
     if (s.constexpr_) {
         if (value.evaluation == constness::not_constant) {
             entity_table[declared_entity].usable = constness::not_constant;

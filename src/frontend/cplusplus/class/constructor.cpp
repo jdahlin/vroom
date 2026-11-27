@@ -951,10 +951,9 @@ analysis_result semantic_analysis::special_member_declarator(
            overriding a base's ([class.dtor]/13) */
         /* virt_override, virt_final: the destructor's virt-specifier-seq
            (member_declaration) */
-        virt_pure = false;
         analysis_result r3 =
             virtual_member(c, e, declaration, m.id, virtual_specified);
-        virt_override = virt_final = false;
+        virt_override = virt_final = virt_pure = false;
         return r3;
     }
     return analysis_result::well_formed;
@@ -1499,9 +1498,22 @@ analysis_result semantic_analysis::construct(
             }
         }
     }
-    VTRY(resolved,
-         best_viable_function(at, candidates, nullptr, arguments, best, nullptr,
-                              !copy, written_arguments, list_class));
+    bool no_viable = false;
+    bool try_paren_aggregate =
+        !copy && !nested_list &&
+        tokens.files.behavior.edition >= standard_edition::cplusplus_20 &&
+        is_aggregate(c) &&
+        !(written_arguments && written_arguments->size() == 1 &&
+          (*written_arguments)[0].is(syntax_kind::braced_init_list));
+    bool *no_viable_out = nullptr;
+    if (try_paren_aggregate)
+        no_viable_out = &no_viable;
+    VTRY(resolved, best_viable_function(at, candidates, nullptr, arguments,
+                                        best, no_viable_out, !copy,
+                                        written_arguments, list_class));
+    if (no_viable)
+        return parenthesized_aggregate_initialization(at, type, arguments,
+                                                      result);
     entity_index chosen = candidates[best].function;
     if (uint32_t g = candidates[best].template_index) {
         /* the chosen specialization's definition ([temp.inst]/4) */
@@ -1968,10 +1980,6 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                                                  &listed_arguments);
                 else if (braced) {
                     bool base = entity_table[e].base_subobject;
-                    if (base && is_aggregate(record.entity))
-                        return not_supported_because(
-                            item, "class.base.init",
-                            "a braced initializer of an aggregate base class");
                     initialized_value listed;
                     bool saved_constructing_base = constructing_base;
                     constructing_base = base;
@@ -1992,12 +2000,35 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                                 complete_object(initialized[slot]);
                         continue;
                     }
+                    /* [class.copy.elision]/1.3: a prvalue of the member's
+                       class in braces (m{make()}) is the member itself, as
+                       one in parentheses below */
+                    const semantic_node &element = semantics[listed.node];
+                    if (!base &&
+                        element.kind != semantic_kind::initializer_list &&
+                        element.kind != semantic_kind::zero &&
+                        element.kind != semantic_kind::construct &&
+                        element.category == value_category::prvalue &&
+                        element.type.unqualified() == type.unqualified()) {
+                        set_slot(slot, id,
+                                 subobject_store(object, type, id, listed.node,
+                                                 true));
+                        continue;
+                    }
                     /* [dcl.init.list]/3.4: store the value of an aggregate
                        member. A base's tail padding can hold derived members. */
                     bool stored =
                         aggregate_value_stored(record.entity, listed.node);
-                    if (base ||
-                        (!stored && !aggregate_built_in_place(listed.node)))
+                    /* (an aggregate base's bytes are stored whole where
+                       it has no tail padding another subobject may use,
+                       and else member by member) */
+                    if (base) {
+                        require_complete(record.entity);
+                        stored = stored && is_aggregate(record.entity) &&
+                                 entity_table[record.entity].data_size ==
+                                     entity_table[record.entity].size;
+                    }
+                    if (!stored && !aggregate_built_in_place(listed.node))
                         return not_supported_because(
                             item, "class.base.init",
                             "a braced initializer whose value cannot be stored "
@@ -4101,6 +4132,25 @@ analysis_result semantic_analysis::class_direct_initialization(
     }
     initialized_value value;
     analysis_result r = analysis_result::well_formed;
+    if (arguments.size() == 1 && written_arguments &&
+        (*written_arguments)[0].is(syntax_kind::braced_init_list) &&
+        is_aggregate(c)) {
+        /* [dcl.init]/17.6.2.1: T({...}) of an aggregate: its copy or move
+           constructor is viable, the list initializing the parameter's
+           temporary ([over.ics.list]/9), before any parenthesized aggregate
+           initialization; trivial, so the object is the list's */
+        bool known = false;
+        if (!class_trivially_copyable(c, known) || !known)
+            return not_supported_because(
+                n, "dcl.init",
+                "a braced list moved into a class that is not trivially "
+                "copyable");
+        VTRY_SET(r, list_initialization((*written_arguments)[0], type, false,
+                                        value));
+        if (r == analysis_result::well_formed)
+            class_prvalue(type, value.evaluation, value.node, m);
+        return r;
+    }
     if (!entity_table[c].first_constructor && arguments.empty()) {
         /* [dcl.init]/8.2: value-initialization of a class without a
            user-provided default constructor zero-initializes it (the

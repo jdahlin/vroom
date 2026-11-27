@@ -185,6 +185,7 @@ class itanium_mangler
     bool specialization_encoding(entity_index e);
     bool constraint_expression(entity_index t, SyntaxElement c);
     bool integer_literal(token_index token);
+    bool enumerator_literal(entity_index e);
     bool constraint_parameter(entity_index t, entity_index parameter);
     bool constraint_template_args(entity_index t, SyntaxElement c);
     bool compound_requirement(entity_index t, SyntaxElement req);
@@ -1565,9 +1566,11 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                         ::= cv <type> _ <expression>* E
      */
     if (expression.is(syntax_kind::postfix_expression) &&
-        expression.size() == 4 && expression[0].is_token() &&
-        (expression[0].is_identifier() ||
-         expression[0].keyword() != standard_keyword::none) &&
+        expression.size() == 4 &&
+        ((expression[0].is_token() &&
+          (expression[0].is_identifier() ||
+           expression[0].keyword() != standard_keyword::none)) ||
+         expression[0].is(syntax_kind::simple_type_specifier)) &&
         expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         expression[3].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
         size_t before = out->n;
@@ -1631,7 +1634,8 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         ((expression[0].is_token() &&
           (expression[0].is_identifier() ||
            expression[0].keyword() != standard_keyword::none)) ||
-         expression[0].is(syntax_kind::simple_template_id)) &&
+         expression[0].is(syntax_kind::simple_template_id,
+                          syntax_kind::simple_type_specifier)) &&
         expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         expression[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
         size_t before = out->n;
@@ -1833,6 +1837,9 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                 target = analysis.namespace_member(
                     scope, analysis.token_identifier(member.token()));
             if (target &&
+                analysis.entity_table[target].kind == entity_kind::enumerator)
+                return enumerator_literal(target);
+            if (target &&
                 analysis.entity_table[target].kind == entity_kind::variable) {
                 text("L_Z");
                 if (!encoding(target))
@@ -1952,6 +1959,15 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
             return true;
         }
 
+        /* [abi:expressions] e1[e2]: ix <expression> <expression> */
+        if (expression.size() == 4 &&
+            op.is(preprocessing_op_or_punc::LEFT_BRACKET) &&
+            expression[3].is(preprocessing_op_or_punc::RIGHT_BRACKET)) {
+            text("ix");
+            return dependent_expression(base) &&
+                   dependent_expression(expression[2]);
+        }
+
         bool dot = op.is(preprocessing_op_or_punc::DOT);
         /* e.template f<A>: dt <expression> <source-name> <template-args> */
         if (expression.size() == 4 &&
@@ -2010,6 +2026,14 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         if (entity_index pe = analysis.constraint_parameter(encoding_template,
                                                             expression.token()))
             return constraint_parameter(encoding_template, pe);
+    if (expression.is_identifier()) {
+        entity_index named = analysis.constraint_name(
+            analysis.entity_table[encoding_template].enclosing,
+            expression.token());
+        if (named &&
+            analysis.entity_table[named].kind == entity_kind::enumerator)
+            return enumerator_literal(named);
+    }
 
     /* [abi:expressions] true and false: L b 1 E, L b 0 E */
     if (expression.is(standard_keyword::true_)) {
@@ -2026,6 +2050,23 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         return true;
     }
     return integer_literal(expression.token());
+}
+
+/* [abi:mangling.literal] an enumerator named in a dependent expression: its
+   value, L <type> <value> E, the type its enumeration (as clang) */
+bool itanium_mangler::enumerator_literal(entity_index e)
+{
+    qualified_type of = analysis.entity_table[e].type;
+    uint64_t magnitude = 0;
+    bool negative = analysis.enumerator_value(e, magnitude);
+    text("L");
+    if (!type(of))
+        return false;
+    if (negative)
+        text("n");
+    number(magnitude);
+    text("E");
+    return true;
 }
 
 /* [abi:mangling.literal] an integer-literal: L <type> <value> E, the type

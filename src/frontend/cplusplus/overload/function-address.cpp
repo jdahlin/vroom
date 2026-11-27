@@ -279,6 +279,22 @@ analysis_result semantic_analysis::select_for_target(
                 type_table.function_qualified(ft.unqualified(), 0, 0), ft.cv());
         } else if (member_class && (te.member_cv & (cv_const | cv_volatile)))
             continue;
+        /* [over.over]/2 with [conv.fctptr]: a noexcept template's
+           specialization converts to a target that may throw, so deduce
+           against the target made non-throwing */
+        const struct type wanted = type_table[target.unqualified()];
+        if (type_table[te.type.unqualified()].non_throwing &&
+            !wanted.non_throwing) {
+            owned_array<qualified_type> parameters;
+            for (uint32_t i = 0; i < wanted.parameter_count; i++)
+                parameters.append(
+                    type_table.parameters(target.unqualified())[i]);
+            target = qualified_type::make(
+                type_table.function(wanted.operand, parameters.data(),
+                                    parameters.size(), wanted.variadic, true,
+                                    wanted.function_cv, wanted.function_ref),
+                target.cv());
+        }
         VTRY(r, deduce_from_function_type(at, t, target, arguments, failed));
         if (failed)
             continue;

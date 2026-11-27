@@ -147,6 +147,9 @@ EXTENSION(clang_c11_thread_local, clang,
 EXTENSION(clang_availability, clang,
           "clang Attributes, availability: availability(platform, introduced=version, ...), "
           "a version a pp-number such as 10.12.1")
+EXTENSION(clang_pragma_attribute, clang,
+          "clang Language Extensions, #pragma clang attribute: push and pop of a "
+          "target(\"features\") attribute over the functions defined between them")
 EXTENSION(clang_bit_int, clang,
           "clang Language Extensions, _BitInt (C23 6.2.5) in C++: _BitInt(N) a type-specifier")
 EXTENSION(clang_ext_vector_type, clang,

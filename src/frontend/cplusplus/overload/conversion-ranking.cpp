@@ -165,13 +165,25 @@ int semantic_analysis::compare_standard_conversions(
        cv-qualifiers, and the type to which the reference initialized by
        S2 refers is more cv-qualified than the type to which the reference
        initialized by S1 refers" */
-    if (a.reference && b.reference &&
-        a.target.unqualified() == b.target.unqualified() &&
-        a.target.cv() != b.target.cv()) {
-        uint32_t x = a.target.cv(), y = b.target.cv();
-        int c = prefer((x & y) == x, (x & y) == y);
-        if (c)
-            return c;
+    if (a.reference && b.reference) {
+        /* ([basic.type.qualifier]/6: an array's cv-qualifiers are its
+           elements') */
+        qualified_type x = a.target, y = b.target;
+        for (;;) {
+            const struct type &xt = type_table[x.unqualified()];
+            const struct type &yt = type_table[y.unqualified()];
+            if (xt.kind != type_kind::array || yt.kind != type_kind::array ||
+                xt.bound_known != yt.bound_known || xt.bound != yt.bound)
+                break;
+            x = xt.operand;
+            y = yt.operand;
+        }
+        if (x.unqualified() == y.unqualified() && x.cv() != y.cv()) {
+            int c = prefer((x.cv() & y.cv()) == x.cv(),
+                           (x.cv() & y.cv()) == y.cv());
+            if (c)
+                return c;
+        }
     }
     /* /4.1: "A conversion that does not convert a pointer or a pointer to
        member to bool is better than one that does." */

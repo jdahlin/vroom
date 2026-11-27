@@ -860,6 +860,14 @@ analysis_result semantic_analysis::substituted_parameter_type(
     if (r != analysis_result::well_formed)
         return r;
     type = qualified_type::make(t.unqualified(), cv_none);
+    /* [temp.param]/8: "A non-type template-parameter of type 'array of T'
+       or 'function type T' is adjusted to be of type 'pointer to T'." */
+    const struct type &adjusted = type_table[type.unqualified()];
+    if (adjusted.kind == type_kind::array)
+        type = qualified_type::make(type_table.pointer_to(adjusted.operand),
+                                    cv_none);
+    else if (adjusted.kind == type_kind::function)
+        type = qualified_type::make(type_table.pointer_to(type), cv_none);
     return analysis_result::well_formed;
 }
 
@@ -1262,14 +1270,31 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
         return not_supported_because(
             at, "temp.arg.nontype",
             "the address-of operator for a reference parameter's argument");
+    /* [over.over]/1: "a non-type template parameter": an overload set's
+       name is the function the parameter's type selects */
+    function_set set;
+    bool selected = named_function_set(operand, set);
     expression_meaning m;
-    VTRY(result, expression(operand, m));
+    analysis_result result;
+    if (selected)
+        result = target_expression(operand, to, m);
+    else
+        result = expression(operand, m);
+    if (result != analysis_result::well_formed)
+        return result;
     entity_index e = m.entity;
     if (!e)
         return not_supported_because(
             at, "temp.arg.nontype",
             "an address argument that does not name an entity");
     const entity x = entity_table[e];
+    /* [temp.spec]/6 checks the base-clause of a specialization, which is
+       analysed only once the specialization is instantiated: one whose
+       head selects from an overload set is not accepted unchecked */
+    if (selected && x.next_overload && explicit_declaration_names)
+        return not_supported_because(
+            at, "temp.spec",
+            "an overloaded function's address as a specialization's argument");
     /* /3: "... the result of a typeid expression" */
     if (x.typeinfo_of)
         return ill_formed(at,
@@ -1287,7 +1312,7 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
            it) */
         static_member = !x.nonstatic_member && !x.member_body_deferred;
     if ((x.kind != entity_kind::variable && x.kind != entity_kind::function) ||
-        x.instantiation || x.next_overload ||
+        x.instantiation || (x.next_overload && !selected) ||
         (!is_namespace(x.enclosing) && !static_member) || x.c11_thread_local)
         /* (an object of thread storage duration has no address that is
            the same in each thread: [temp.arg.nontype]/2's constant
@@ -1461,12 +1486,20 @@ analysis_result semantic_analysis::template_template_argument(
         }
     } else if (name.is(syntax_kind::qualified_id)) {
         auto c = name;
-        if (name.size() != 2 || !c[0].is(syntax_kind::nested_name_specifier))
+        if (!c[0].is(syntax_kind::nested_name_specifier))
             return not_supported_because(
                 at, "temp.arg.template",
                 "a template template argument with an unhandled qualified-id");
         qualifier = c[0].index();
-        name = c[1];
+        if (name.size() == 2) {
+            name = c[1];
+        } else if (name.size() == 3 && c[1].is(standard_keyword::template_)) {
+            name = c[2];
+        } else {
+            return not_supported_because(
+                at, "temp.arg.template",
+                "a template template argument with an unhandled qualified-id");
+        }
     }
     if (!name.is_token() || tokens[name.token()].kind != token_kind::identifier)
         return not_supported_because(
@@ -1476,7 +1509,8 @@ analysis_result semantic_analysis::template_template_argument(
     if (qualifier) {
         nominated_scope scope;
         VTRY(r, nested_name_specifier(qualifier, scope));
-        if (scope.entity && !is_namespace(scope.entity))
+        if (scope.entity && !is_namespace(scope.entity) &&
+            entity_table[scope.entity].kind != entity_kind::class_type)
             return not_supported_because(
                 at, "temp.arg.template",
                 "a template template argument qualified by a non-namespace");
@@ -1580,9 +1614,12 @@ analysis_result semantic_analysis::default_template_arguments(
             arguments[i] = make_pack(nullptr, 0);
             continue;
         }
-        if (!form.has_default)
+        if (!form.has_default) {
+            if (substituting)
+                return analysis_result::ill_formed;
             return not_supported_because(
                 at, "temp.arg", "a parameter with no argument and no default");
+        }
         entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                                template_lexical_outer(ft));
         /* the names of the declaration that gave the default

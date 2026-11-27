@@ -692,11 +692,14 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
     if (ar.kind != type_kind::class_type ||
         template_template_parameter(specialized_template(pr.entity)))
         return -1;
-    /* (an incomplete class, perhaps a specialization not instantiated,
-       has bases not known yet) */
+    /* (a class declared and not defined is no derived class here; a
+       specialization not instantiated has bases not known yet) */
     const entity &x = entity_table[ar.entity];
-    if (!x.defined)
+    if (!x.defined) {
+        if (!x.instantiation && !x.size)
+            return 0;
         return -1;
+    }
     int found = 0;
     owned_array<template_argument> result;
     owned_array<bool> result_set;

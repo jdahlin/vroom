@@ -217,7 +217,10 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 local = asm.read_text().split('frame_words:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if '%rsp' in local or '%rbp' in local:
                     raise SystemExit('frame_words: two-word local still round-trips through the frame')
-                for name in ('copy129', 'zero257', 'dynamic', 'nonzero'):
+                body = asm.read_text().split('nonzero:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if 'rep ' in body or re.search(r'\bcall\w*\s+memset', body):
+                    raise SystemExit('nonzero: a small constant fill should be stored in place')
+                for name in ('copy129', 'zero257', 'dynamic'):
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if 'rep ' not in body and not re.search(r'\bcall\w*\s+mem(?:cpy|set)', body):
                         raise SystemExit(f'{name}: missing generic block-operation fallback')

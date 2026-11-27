@@ -73,8 +73,7 @@ bool implementation_defined_behavior::has(extension e) const
     unsigned vendor = (unsigned)extensions[static_cast<int>(e)].vendor;
     if (vendor == (unsigned)extension_vendor::microsoft)
         return microsoft_extensions;
-    return (extension_vendors >> vendor & 1) &&
-           !(extensions_off >> static_cast<int>(e) & 1);
+    return extension_vendors >> vendor & 1;
 }
 
 const char *extension_name(extension e)

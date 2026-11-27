@@ -705,13 +705,20 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
         if (rule->flag == gnu_enable_if) {
             if (enable_if_allowed)
                 continue;
-            if (count != 6)
+            SyntaxElement condition;
+            if (count == 6) {
+                condition = a[2];
+            } else if (count == 4 && a[2].is(syntax_kind::initializer_list) &&
+                       a[2].size() == 3) {
+                condition = a[2][0];
+            } else {
                 return not_supported_because(
                     at, "ext.gnu",
-                    "an enable_if attribute without exactly one argument where "
+                    "an enable_if attribute without two arguments where "
                     "not allowed");
+            }
             bool constant = false, value = false;
-            VTRY(r, bool_constant_expression(at, a[2], constant, value));
+            VTRY(r, bool_constant_expression(at, condition, constant, value));
             if (!constant || !value)
                 return not_supported_because(
                     at, "ext.gnu",

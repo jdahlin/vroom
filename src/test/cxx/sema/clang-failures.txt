@@ -299,8 +299,6 @@ lower src/test/cxx/sema/gram/class.base.init-anonymous-struct-members.cpp -std=c
 symbols SemaCXX/PR38913.cpp -std=gnu++17: _Z1av is not a symbol clang -O0 defines
 symbols SemaCXX/PR38913.cpp -std=gnu++17: _Z1bv is not a symbol clang -O0 defines
 symbols SemaCXX/attr-exclude_from_explicit_instantiation.explicit_instantiation.cpp -std=gnu++17: _ZN3FooIiE18static_data_memberE is not a symbol clang -O0 defines
-tree CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p2-1z.cpp -std=c++1z: p2-1z.cpp:44:14: if_statement: no substatement
-tree CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p2-1z.cpp -std=c++1z: p2-1z.cpp:7:3: if_statement: no substatement
 tree CXX/drs/cwg16xx.cpp -std=c++11 -pedantic-errors: cwg16xx.cpp:543:12: assignment: the right operand is a bind_reference
 tree CXX/drs/cwg16xx.cpp -std=c++14 -pedantic-errors: cwg16xx.cpp:543:12: assignment: the right operand is a bind_reference
 tree CXX/drs/cwg16xx.cpp -std=c++17 -pedantic-errors: cwg16xx.cpp:543:12: assignment: the right operand is a bind_reference
@@ -312,12 +310,6 @@ tree CXX/expr/expr.prim/expr.prim.lambda/p12.cpp -std=c++11 -Wunused -Wno-unused
 tree CXX/expr/p10-0x.cpp -std=c++11: p10-0x.cpp:34:3: expression_statement: the expression is a statement_expression
 tree CXX/special/class.copy/p11.0x.move.cpp -std=c++11: p11.0x.move.cpp:151:1: assignment: the right operand is a bind_reference
 tree CXX/special/class.copy/p11.0x.move.cpp -std=c++11: p11.0x.move.cpp:151:1: assignment: the right operand is not a prvalue
-tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z -DUNDEFINED: p2.cpp:31:5: if_statement: no substatement
-tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:174:3: if_statement: no substatement
-tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:213:3: if_statement: no substatement
-tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:228:3: if_statement: no substatement
-tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:245:5: if_statement: no substatement
-tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:58:5: if_statement: no substatement
 tree CXX/temp/temp.deduct/p9.cpp -std=c++20: p9.cpp:17:45: expression_statement: no expression
 tree CXX/temp/temp.deduct/p9.cpp -std=c++20: p9.cpp:9:30: expression_statement: no expression
 tree SemaCXX/constant-expression-cxx11.cpp -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include: constant-expression-cxx11.cpp:2030:5: return_statement: the operand is a statement_expression
@@ -335,7 +327,6 @@ tree SemaCXX/constant-expression-cxx14.cpp -std=c++20 -Werror=return-type: const
 tree SemaCXX/constant-expression-cxx14.cpp -std=c++23 -Werror=return-type: constant-expression-cxx14.cpp:835:7: expression_statement: the expression is a statement_expression
 tree SemaCXX/constant-expression-cxx14.cpp -std=c++23 -Werror=return-type: constant-expression-cxx14.cpp:845:5: return_statement: the operand is a statement_expression
 tree SemaCXX/constant-expression-cxx14.cpp -std=c++23 -Werror=return-type: constant-expression-cxx14.cpp:852:5: expression_statement: the expression is a statement_expression
-tree SemaCXX/constexpr-late-instantiation.cpp -std=c++2c: constexpr-late-instantiation.cpp:228:3: if_statement: no substatement
 tree SemaCXX/lambda-expressions.cpp -std=c++11 -Wno-unused-value: lambda-expressions.cpp:426:12: initializer_list: no element
 tree SemaCXX/lambda-expressions.cpp -std=c++14 -Wno-unused-value: lambda-expressions.cpp:426:12: initializer_list: no element
 tree SemaCXX/lambda-expressions.cpp -std=c++17 -Wno-unused-value: lambda-expressions.cpp:426:12: initializer_list: no element
@@ -355,12 +346,8 @@ tree SemaCXX/uninitialized.cpp -Wall -Wc++20-compat -Wuninitialized -Wno-unused-
 tree SemaCXX/uninitialized.cpp -Wall -Wc++20-compat -Wuninitialized -Wno-unused-value -Wno-unused-lambda-capture -Wno-uninitialized-const-reference -std=c++20: uninitialized.cpp:797:7: declaration_statement: the initializer is a statement_expression
 tree SemaCXX/uninitialized.cpp -Wall -Wc++20-compat -Wuninitialized -Wno-unused-value -Wno-unused-lambda-capture -Wno-uninitialized-const-reference -std=c++20: uninitialized.cpp:80:3: declaration_statement: the initializer is a statement_expression
 tree SemaCXX/union-member-destructor.cpp -std=c++11: union-member-destructor.cpp:49:17: expression_statement: the expression is a zero
-tree SemaCXX/warn-constant-evaluated-constexpr.cpp -std=c++2a: warn-constant-evaluated-constexpr.cpp:18:3: if_statement: no substatement
-tree SemaCXX/warn-constant-evaluated-constexpr.cpp -std=c++2a: warn-constant-evaluated-constexpr.cpp:25:3: if_statement: no substatement
 tree SemaCXX/warn-memset-bad-sizeof.cpp -std=gnu++17 -Wno-sizeof-array-argument -Wno-stringop-overread: warn-memset-bad-sizeof.cpp:145:10: conversion: the operand is a statement_expression
 tree SemaCXX/warn-memset-bad-sizeof.cpp -std=gnu++17 -Wno-sizeof-array-argument -Wno-stringop-overread: warn-memset-bad-sizeof.cpp:152:9: conversion: the operand is a statement_expression
-tree SemaCXX/warn-nrvo.cpp -std=gnu++17 -Wnrvo -Wno-return-mismatch: warn-nrvo.cpp:55:3: if_statement: no substatement
-tree SemaCXX/warn-nrvo.cpp -std=gnu++17 -Wnrvo -Wno-return-mismatch: warn-nrvo.cpp:63:5: if_statement: no substatement
 tree SemaCXX/warn-sysheader-macro.cpp -std=gnu++17 -Wshadow -Wold-style-cast -Wc++20-designator: warn-sysheader-macro.cpp:32:3: declaration_statement: the initializer is a statement_expression
 tree SemaCXX/warn-thread-safety-analysis.cpp -std=c++11 -Wthread-safety -Wthread-safety-pointer -Wthread-safety-beta -Wno-thread-safety-negative -DUSE_CAPABILITY=0: warn-thread-safety-analysis.cpp:8026:3: declaration_statement: the initializer is a statement_expression
 tree SemaCXX/warn-thread-safety-analysis.cpp -std=c++11 -Wthread-safety -Wthread-safety-pointer -Wthread-safety-beta -Wno-thread-safety-negative -DUSE_CAPABILITY=1: warn-thread-safety-analysis.cpp:8026:3: declaration_statement: the initializer is a statement_expression
@@ -603,7 +590,6 @@ verdict CXX/drs/cwg6xx.cpp -std=c++2c -pedantic-errors: ill-formed for us, accep
 verdict CXX/over/over.match/over.match.best/p2.cpp -std=c++2a: ill-formed for us, accepted by clang: line 27 (1 declarations)
 verdict CXX/over/over.match/over.match.funcs/over.match.class.deduct/p2.cpp -std=c++1z: ill-formed for us, accepted by clang: line 52 (1 declarations)
 verdict CXX/over/over.match/over.match.funcs/over.match.oper/p3.cpp -std=c++11: ill-formed for us, accepted by clang: line 49 (1 declarations)
-verdict CXX/over/over.over/p1.cpp -std=c++1z -DNOEXCEPT=noexcept: ill-formed for us, accepted by clang: line 14 (7 declarations)
 verdict CXX/special/class.copy/implicit-move.cpp -std=c++11 -Wno-inaccessible-base: ill-formed for us, accepted by clang: line 211 (2 declarations)
 verdict CXX/special/class.copy/p12-0x.cpp -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 96 (7 declarations)
 verdict CXX/special/class.copy/p12-0x.cpp -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted: ill-formed for us, accepted by clang: line 96 (7 declarations)
@@ -635,7 +621,6 @@ verdict SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-
 verdict SemaCXX/constant-expression-cxx14.cpp -std=c++14 -Werror=return-type: ill-formed for us, accepted by clang: line 245 (1 declarations)
 verdict SemaCXX/constant-expression-cxx14.cpp -std=c++20 -Werror=return-type: ill-formed for us, accepted by clang: line 245 (1 declarations)
 verdict SemaCXX/constant-expression-cxx2a.cpp -std=c++2a -Wno-mismatched-new-delete: ill-formed for us, accepted by clang: line 914 (4 declarations)
-verdict SemaCXX/constexpr-x86-avx-builtins.cpp -std=c++20 -isystem /usr/lib/llvm-23/lib/clang/23/include: ill-formed for us, accepted by clang: line 13 (1 declarations)
 verdict SemaCXX/conversion-function.cpp -std=c++11 -Wbind-to-temporary-copy: ill-formed for us, accepted by clang: line 140 (1 declarations)
 verdict SemaCXX/conversion-function.cpp -std=c++20 -Wbind-to-temporary-copy: ill-formed for us, accepted by clang: line 140 (1 declarations)
 verdict SemaCXX/conversion-function.cpp -std=c++23 -Wbind-to-temporary-copy: ill-formed for us, accepted by clang: line 140 (1 declarations)
@@ -670,8 +655,6 @@ verdict SemaCXX/ext-int-vector.cpp -std=gnu++17: ill-formed for us, accepted by 
 verdict SemaCXX/ext-int.cpp -std=gnu++17 -Wimplicit-int-conversion -Wno-unused -Wunevaluated-expression: ill-formed for us, accepted by clang: line 133 (1 declarations)
 verdict SemaCXX/imaginary-constants.cpp -std=c++14 -DCXX14=1: ill-formed for us, accepted by clang: line 13 (3 declarations)
 verdict SemaCXX/libstdcxx_common_type_hack.cpp -std=c++11 -D__GLIBCXX__=20100000L: ill-formed for us, accepted by clang: line 28 (1 declarations)
-verdict SemaCXX/linkage2.cpp -Wno-non-c-typedef-for-linkage -Wno-c++11-extensions -Wno-local-type-template-args -std=gnu++98: ill-formed for us, accepted by clang: line 119 (1 declarations)
-verdict SemaCXX/linkage2.cpp -Wno-non-c-typedef-for-linkage -std=gnu++11: ill-formed for us, accepted by clang: line 119 (1 declarations)
 verdict SemaCXX/ms-ctor-closure.cpp -std=c++23 -fms-extensions: ill-formed for us, accepted by clang: line 19 (1 declarations)
 verdict SemaCXX/ms_mutable_reference_member.cpp -std=gnu++17 -fms-compatibility: ill-formed for us, accepted by clang: line 3 (1 declarations)
 verdict SemaCXX/overload-resolution-deferred-templates.cpp -std=c++11: ill-formed for us, accepted by clang: line 235 (1 declarations)

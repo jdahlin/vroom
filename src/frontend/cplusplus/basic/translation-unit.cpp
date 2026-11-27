@@ -815,6 +815,7 @@ analysis_result semantic_analysis::declare(
                internal linkage has none */
             for (entity_index o = prior; o; o = entity_table[o].next_overload)
                 if (c_language && !s.static_ && !in_unnamed &&
+                    !(s.gnu_flags & gnu_overloadable) &&
                     entity_table[o].c_language_linkage &&
                     entity_table[o].linkage_of_name != linkage::internal)
                     return ill_formed_at_token(id,
@@ -1339,7 +1340,8 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
         if (within_unnamed_namespace(space))
             made.linkage_of_name = linkage::internal;
         /* [dcl.link]/5 */
-        if (c_language)
+        if (c_language && !(kind == entity_kind::function &&
+                            (s.gnu_flags & gnu_overloadable)))
             entity_table.give_c_linkage(target);
         block_declared.append(target);
     }

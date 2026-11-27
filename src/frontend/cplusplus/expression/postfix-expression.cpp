@@ -734,7 +734,11 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         bool as_cast = single && (record.kind == type_kind::lvalue_reference ||
                                   record.kind == type_kind::rvalue_reference ||
                                   record.kind == type_kind::pointer_to_member);
-        if (!as_cast && record.kind != type_kind::fundamental &&
+        /* [ext:gnu_vector_size] a vector type too, with a braced list or a
+           single expression */
+        bool vector_value = is_vector_kind(record.kind) && (braced || single);
+        if (!as_cast && !vector_value &&
+            record.kind != type_kind::fundamental &&
             record.kind != type_kind::pointer &&
             record.kind != type_kind::enumeration)
             return not_supported_because(

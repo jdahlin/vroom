@@ -129,9 +129,10 @@ bool c_lowering::folded_read(const semantic_node &x) const
            x.evaluation == constness::constant &&
            analysis.entity_table[x.a].kind == entity_kind::variable &&
            analysis.entity_table[x.a].usable == constness::constant &&
-           /* (a class object has no scalar value to fold: its definition
-              is read) */
-           record(x.type).kind != type_kind::class_type;
+           /* (a class object or a vector has no scalar value to fold: its
+              definition is read) */
+           record(x.type).kind != type_kind::class_type &&
+           !is_vector_kind(record(x.type).kind);
 }
 
 uint32_t c_lowering::read(uint32_t n)
@@ -601,6 +602,8 @@ uint32_t c_lowering::conversion(const semantic_node &n)
             kind = AST_CAST_NOP;
         return cast(expression(n.a), t, kind);
     }
+    case conversion_kind::vector_splat:
+        return cast(expression(n.a), t, AST_CAST_SPLAT);
     case conversion_kind::vector_convert:
         return ast_builder_convert_vector(c, t, expression(n.a));
     case conversion_kind::integral_to_pointer:

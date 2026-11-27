@@ -165,10 +165,16 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
             return not_supported_because(
                 at, "ext.gnu",
                 "a cast from a vector to a type that is not vector or scalar");
-        if (target.kind == type_kind::ext_vector && scalar_from)
-            /* clang: the scalar in every element, not its bits */
-            return not_supported_because(
-                at, "ext.clang", "a cast of a scalar to an ext_vector_type");
+        if (target.kind == type_kind::ext_vector && scalar_from) {
+            /* [ext:clang_ext_vector_type] the scalar in every element, not
+               its bits */
+            if (!(kinds & cast_static) ||
+                fundamental_of(m.type) == fundamental_type::bool_)
+                return not_supported_because(
+                    at, "ext.clang",
+                    "a cast of a scalar to an ext_vector_type");
+            return vector_splat(at, m, to);
+        }
         if (size_of_type(m.type) != size_of_type(to))
             return ill_formed(at,
                               "invalid conversion between vector type and a "
@@ -929,10 +935,21 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
                          (!lvalue_reference || (referenced.cv() == cv_const &&
                                                 (kinds & cast_static)));
         if (lvalue_reference && m.category != value_category::lvalue &&
-            !xvalue_ok)
+            !xvalue_ok) {
+            if (kinds == cast_static)
+                return ill_formed(at,
+                                  "static_cast to an lvalue reference from a "
+                                  "non-lvalue",
+                                  "expr.static.cast");
+            if (kinds == cast_const)
+                return ill_formed(at,
+                                  "const_cast to an lvalue reference from a "
+                                  "non-lvalue",
+                                  "expr.const.cast");
             return not_supported_because(at, "expr.cast",
                                          "a cast to an lvalue reference from a "
                                          "value that is not an lvalue");
+        }
         if (same && m.type.cv() == referenced.cv() && m.category == category &&
             (kinds & (cast_static | cast_const)))
             /* the glvalue itself */

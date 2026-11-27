@@ -418,6 +418,10 @@ const char *class_layout::base(entity &b)
     uint64_t base_alignment = d.alignment;
     if (d.virtual_base_count)
         base_alignment = d.nv_alignment;
+    /* [ext.clang] #pragma pack caps a base's alignment as a member's */
+    if (table[c].max_field_alignment &&
+        base_alignment > table[c].max_field_alignment)
+        base_alignment = table[c].max_field_alignment;
     raise_alignment(base_alignment);
     bool empty = empty_class(analysis, of);
     uint64_t at = 0;
@@ -463,6 +467,12 @@ void class_layout::bit_field(entity &m, bool packed)
     uint64_t class_alignment = type_alignment;
     if (packed)
         class_alignment = 1;
+    /* [ext.clang] #pragma pack(n) caps the alignment a
+       bit-field gives the class, and no padding is put before one to keep
+       it within a unit of its type (clang's MaxFieldAlignment) */
+    uint64_t cap = table[c].max_field_alignment;
+    if (cap && cap < class_alignment)
+        class_alignment = cap;
     uint64_t bit_alignment = type_alignment * 8;
     if (table[c].union_) {
         /* [class.union]/2: each member "as if it were the sole member of
@@ -477,7 +487,8 @@ void class_layout::bit_field(entity &m, bool packed)
         return;
     }
     uint64_t at = data_bits;
-    if (!packed && (!m.bit_width || (at % bit_alignment) + m.bit_width > unit))
+    if (!packed && !cap &&
+        (!m.bit_width || (at % bit_alignment) + m.bit_width > unit))
         at = align_up(at, bit_alignment);
     m.offset = at / 8;
     m.bit_offset = at;
@@ -609,10 +620,9 @@ const char *class_layout::allocation_of_members()
     if ((x.gnu_flags & gnu_packed) &&
         (x.base_count || x.virtual_base_count || x.dynamic))
         return "ext.gnu";
-    /* [ext.clang] #pragma pack with bases or a virtual table pointer: rules
-       this does not follow yet */
-    if (x.max_field_alignment &&
-        (x.base_count || x.virtual_base_count || x.dynamic))
+    /* [ext.clang] #pragma pack with virtual bases or a virtual table
+       pointer: rules this does not follow yet */
+    if (x.max_field_alignment && (x.virtual_base_count || x.dynamic))
         return "cpp.pragma";
     /* [abi:class-types] II: the primary base (virtual or non-virtual) is
        allocated first, at offset 0 */
@@ -636,7 +646,8 @@ const char *class_layout::allocation_of_members()
         if (m.base_subobject)
             continue;
         if (m.bit_field) {
-            if (x.max_field_alignment)
+            /* (a zero-width one under #pragma pack: not followed) */
+            if (x.max_field_alignment && !m.bit_width)
                 return "cpp.pragma";
             /* a packed bit-field starts at the next bit whatever its
                type's alignment */

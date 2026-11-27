@@ -327,6 +327,19 @@ void ast_builder_symbol_visibility(cc *c, uint32_t s, const char *name,
         ast_builder_attribute_string(c, name, length);
 }
 
+void ast_builder_symbol_target(cc *c, uint32_t s, const char *features,
+                               size_t length)
+{
+    /* (clang takes white space around a feature, as its headers write) */
+    uint32_t string = ast_builder_attribute_string(c, features, length);
+    char *packed = const_cast<char *>(c->strs[string - 1].s), *to = packed;
+    for (const char *from = packed; *from; from++)
+        if (*from != ' ')
+            *to++ = *from;
+    *to = 0;
+    cc_x86_target_attribute_parse(c, ast_builder_attributes(c, s), string, 0);
+}
+
 void ast_builder_symbol_align(cc *c, uint32_t s, uint32_t alignment)
 {
     if (alignment > c->syms[s].align)

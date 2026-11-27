@@ -442,13 +442,33 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
        element", the allocation /15's "array allocation overhead") */
     uint64_t cookie = 0;
     expression_meaning element_count;
+    /* new T[n]() and new T[n]{}: each element value-initialized
+       ([dcl.init]/11; [dcl.init.aggr] for an empty list's elements) */
+    bool value_initialized = false;
     if (array) {
-        if (init)
-            return not_supported_because(n, "expr.new",
-                                         "an array new with an initializer");
+        if (init) {
+            if (init.is(syntax_kind::braced_init_list))
+                value_initialized = init.size() == 2;
+            else if (init.is(syntax_kind::new_initializer))
+                value_initialized = init.size() == 2;
+            /* (a type-id of array type: not yet) */
+            if (!value_initialized || !bound)
+                return not_supported_because(
+                    n, "expr.new",
+                    "an array new with an initializer other than () or {}");
+        }
         /* the class's operator delete[], [impl.clang] as clang looks it up,
            ::new or not */
         VTRY_SET(r, array_cookie(n, c, type, false, cookie));
+        if (value_initialized && c) {
+            /* [class.free]: an ambiguous operator delete[] of the class is
+               found here too (the lookup refuses it) */
+            owned_array<entity_index> deallocations;
+            bool in_class_delete = false;
+            VTRY_SET(r,
+                     allocation_functions(n, allocation_function::delete_array,
+                                          c, deallocations, in_class_delete));
+        }
     }
     /* [expr.new]/(array of class type): the destructor is potentially
        invoked for the elements ([class.dtor]/16, [dcl.fct.def.delete]/2): a
@@ -463,8 +483,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                           "destructor of the elements is deleted",
                           "class.dtor");
     bool elements =
-        array && c &&
-        (entity_table[c].first_constructor || destroys(c) || cookie);
+        value_initialized ||
+        (array && c &&
+         (entity_table[c].first_constructor || destroys(c) || cookie));
     if (array && bound) {
         /* [expr.new]/9: "If the expression in a noptr-new-declarator is
            present, it is implicitly converted to std::size_t." */
@@ -683,9 +704,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                                   "const-default-constructible class type",
                                   "dcl.init");
         }
-    } else if (init.is(syntax_kind::braced_init_list)) {
+    } else if (init.is(syntax_kind::braced_init_list) && !value_initialized) {
         r = list_initialization(init, type, true, value);
-    } else if (init.is(syntax_kind::new_initializer)) {
+    } else if (init.is(syntax_kind::new_initializer) || value_initialized) {
         bool has_list =
             init.size() == 3 && init[1].is(syntax_kind::initializer_list);
         owned_array<expression_meaning> list;
@@ -733,6 +754,12 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                 r = construct(n, type, list, object.node, value);
             else if (list.size() == 1)
                 r = initialize_with(n, list[0], type, true, false, value);
+            else if (c &&
+                     tokens.files.behavior.edition >=
+                         standard_edition::cplusplus_20 &&
+                     is_aggregate(c))
+                r = parenthesized_aggregate_initialization(n, type, list,
+                                                           value);
             else if (c)
                 return not_supported_because(
                     n, "dcl.init",
