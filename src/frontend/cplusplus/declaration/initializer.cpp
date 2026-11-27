@@ -737,13 +737,22 @@ analysis_result semantic_analysis::converted_temporary_binding(
             at, "dcl.init.ref",
             "too deeply nested converting reference binding");
     qualified_type made_type = qualified_type::make(t1.unqualified(), cv_none);
+    /* (of this binding only, not of the ones the conversion makes) */
+    bool direct = direct_reference_binding;
+    direct_reference_binding = false;
     const struct type &source = type_table[m.type.unqualified()];
     if (source.kind == type_kind::class_type &&
         has_conversion_functions(source.entity)) {
         /* /5.1.2, /5.3.2: "can be converted to an lvalue [or rvalue] of
-           type "cv3 T3"" by a conversion function ([over.match.ref]) */
+           type "cv3 T3"" by a conversion function ([over.match.ref]/1.1:
+           explicit ones too in a direct-initialization) */
         bool converted = false;
-        VTRY(c, conversion_function_call(at, m, made_type, false, converted));
+        VTRY(c, conversion_function_call(at, m, made_type, direct, converted));
+        if (converted && (m.type.cv() & ~t1.cv()))
+            return not_supported_because(
+                at, "dcl.init.ref",
+                "a conversion function result more cv-qualified than the "
+                "reference");
         if (converted && (!lvalue_only || m.category == value_category::lvalue))
             return analysis_result::well_formed;
         if (converted)
@@ -927,8 +936,10 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
                                direct, list, result);
     switch (type_table[type.unqualified()].kind) {
     case type_kind::lvalue_reference:
-    case type_kind::rvalue_reference:
+    case type_kind::rvalue_reference: {
+        scoped_value<bool> binding(direct_reference_binding, direct);
         return reference_initialization(at, m, type, result);
+    }
     case type_kind::class_type:
         return class_initialization(at, m, type, direct, result);
     case type_kind::ext_vector:

@@ -4014,6 +4014,9 @@ class semantic_analysis
     entity_index skipped_member_body = 0;
     void defer_needs_of_instantiated_body(entity_index f);
     bool virtual_table_needed(entity_index c) const;
+    /* [over.match.ref]/1.1: the reference being bound is
+       direct-initialized */
+    bool direct_reference_binding = false;
     /* the node of the object the latest non-array new-expression
        initializes: its construction needs no destructor */
     uint32_t new_object_made = 0;
