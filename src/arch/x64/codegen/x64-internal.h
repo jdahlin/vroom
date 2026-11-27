@@ -307,6 +307,7 @@ VPRIV bool x64_x86_shift_code(codegen_context *e, int op, ast_qualified_type vt,
 VPRIV bool x64_x86_shuffle_code(codegen_context *e, const int *bytes,
                                 x64_x86_shuffle *shuffle);
 VPRIV bool x64_x86_code_exists_on_zmm(uint32_t code);
+VPRIV const char *x64_prefetch_name(int kind); /* (WALK_LOWER(prefetch)) */
 VPRIV bool x64_x86_halved_code(codegen_context *e, uint32_t n, uint32_t *code,
                                bool *count);
 /* an AVX2 builtin that crosses the halves: 1 movmskps256, 2 permvarsi256

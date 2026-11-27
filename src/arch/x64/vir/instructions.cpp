@@ -484,6 +484,14 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
     case VIR_OP_CRC32C64:
         x64_record_emit_three_registers(e, X64_OP_CRC32, 8, d, a, c);
         return;
+    case VIR_OP_PREFETCH: {
+        char text[64];
+
+        snprintf(text, sizeof text, "\t%s\t(%%%s)\n",
+                 x64_prefetch_name((int)i->b), x64_register_names_64[a]);
+        x64_vir_text_append(L, text);
+        return;
+    }
     case VIR_OP_X86:
         if (vir_type_is_vector(i->type) &&
             !vir_type_is_vector(L->function->insns[i->a].type)) {
