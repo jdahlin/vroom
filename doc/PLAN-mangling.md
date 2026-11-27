@@ -257,7 +257,18 @@ Mechanical: move functions into the files of 3.1, unchanged, with
 `mangling-internal.h` holding the class.  Every file compiles alone
 (`VCC_UNITY=`, `cplusplus-check`).  Move GV, Th/Tv and the `__cxxabiv1`
 names from `lower/` into `symbols.cpp` behind `itanium_*_name` functions.
-Status: not started.
+Status: done (2026-11-27).  11 files and the header; the class is
+`cplusplus::itanium_mangler` (no longer in an anonymous namespace, so that
+the files compile apart).  `itanium_guard_variable_name`,
+`itanium_thunk_name` and `itanium_runtime_vtable_name` replace the
+splicing in `lower/`.  That fixed a bug: an inline variable of the global
+namespace, whose symbol is its identifier, had its guard named by cutting
+two bytes off that identifier (`_ZGVc` for `abc`, clang `_ZGV3abc`); test
+`src/test/cxx/run/abi.mangle-guard-inline-variable.cpp`.  Identity gate:
+no difference.  `VCC_UNITY=`: the mangling objects compile alone and every
+member one references another defines (the whole file-by-file build
+stops earlier, at `frontend/c/builtins-library.cpp` and
+`arch/x64/codegen/simd.cpp`, as on origin/main).
 
 ### M3: names and comments
 The renames of 3.5, the per-branch alternative tags, and the long

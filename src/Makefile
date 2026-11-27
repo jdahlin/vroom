@@ -178,7 +178,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 # (the lowering to C's AST needs C's front end and code generator: apart
 # from the cplusplus module; dump/ is the developer outputs, -fcxx-dump=)
 cxxlower_SRC = $(wildcard frontend/cplusplus/lower/*.cpp)
-cplusplus_SRC = $(filter-out $(cxxlower_SRC),$(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp frontend/cplusplus/abi/*/*.cpp))
+cplusplus_SRC = $(filter-out $(cxxlower_SRC),$(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp frontend/cplusplus/abi/*/*.cpp frontend/cplusplus/abi/*/*/*.cpp))
 CXX_OBJ = $(if $(filter c++,$(VCC_LANG)),$(call mod,cplusplus) $(call o,$(cxxlower_SRC)))
 # its subset of C++ (doc/PLAN-cxx-spec.md, Conventions), held by the compiler:
 # no RTTI, no C++ library header (C headers only), no object with a static

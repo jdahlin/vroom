@@ -276,20 +276,10 @@ uint32_t c_lowering::thunk(entity_index f, int64_t adjustment, token_index at,
         if (t.f == f && t.adjustment == adjustment && t.vcall == vcall &&
             t.variant == variant)
             return t.symbol;
-    owned_buffer function_name;
-    if (!itanium_symbol_name(analysis, tokens.pp, f, function_name.get(),
-                             variant))
-        return fail("a thunk whose function's symbol is not mangled", at);
     owned_buffer name;
-    if (vcall)
-        vbuffer_format_append(name.get(), "_ZTv%lld_n%llu_",
-                              static_cast<long long>(adjustment),
-                              static_cast<unsigned long long>(-vcall));
-    else
-        vbuffer_format_append(name.get(), "_ZThn%llu_",
-                              static_cast<unsigned long long>(-adjustment));
-    vbuffer_append(name.get(), function_name.data() + 2,
-                   function_name.size() - 2);
+    if (!itanium_thunk_name(analysis, tokens.pp, f, variant, adjustment, vcall,
+                            name.get()))
+        return fail("a thunk whose function's symbol is not mangled", at);
     /* f's linkage, as symbol() gives it */
     int storage = AST_STORAGE_NONE;
     uint32_t flags = AST_SYMBOL_FLAG_GLOBAL;

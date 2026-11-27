@@ -1436,16 +1436,16 @@ uint32_t cv_of(const types &table, qualified_type t);
    ([dcl.fct]/4) */
 bool same_parameters(const types &table, type_index a, type_index b);
 /* the function whose definition a block-scope entity is declared in, 0
-   for an entity not in a function (abi/itanium/mangling.cpp) */
+   for an entity not in a function (abi/itanium/mangling/scopes.cpp) */
 entity_index enclosing_function(const entities &table, entity_index e);
 /* the function a member of a local class (or of a class nested in one)
    is in (for a member function of a local class: the next function out),
-   0 for any other entity (abi/itanium/mangling.cpp) */
+   0 for any other entity (abi/itanium/mangling/scopes.cpp) */
 entity_index next_enclosing_function(const entities &table, entity_index f);
 /* [impl.clang] (clang's VisibleNoLinkage): whether c, a local class or
    closure type (or a class nested in one), is named in other translation
    units: the outermost function it is in is inline or a template's
-   specialization (abi/itanium/mangling.cpp) */
+   specialization (abi/itanium/mangling/scopes.cpp) */
 bool visible_local_class(const entities &table, entity_index c);
 
 /* [basic.lval]/1: "Every expression belongs to exactly one of the
@@ -7898,6 +7898,24 @@ bool itanium_construction_vtable_name(const semantic_analysis &analysis,
                                       const preprocessor &pp, entity_index c,
                                       uint64_t offset, entity_index base,
                                       vbuffer *out);
+/* [abi:mangling-special-guards]: the guard variable of variable e's
+   initialization (_ZGV <encoding>) */
+bool itanium_guard_variable_name(const semantic_analysis &analysis,
+                                 const preprocessor &pp, entity_index e,
+                                 vbuffer *out);
+/* [abi:mangling-special-thunks]: a this-adjusting thunk of function f (a
+   constructor's or destructor's variant as itanium_symbol_name's), by
+   adjustment and, for a virtual one, the vcall offset's offset (0: none):
+   _ZTh <adjustment> _ or _ZTv <adjustment> _ <vcall> _, then f's
+   encoding */
+bool itanium_thunk_name(const semantic_analysis &analysis,
+                        const preprocessor &pp, entity_index f, int variant,
+                        int64_t adjustment, int64_t vcall, vbuffer *out);
+/* [abi:rtti-layout]: the virtual table of the run-time library's
+   std::type_info class __cxxabiv1::NAME (_ZTVN10__cxxabiv1 ... E) */
+void itanium_runtime_vtable_name(const semantic_analysis &analysis,
+                                 const preprocessor &pp, const char *name,
+                                 vbuffer *out);
 
 } // namespace cplusplus
 
