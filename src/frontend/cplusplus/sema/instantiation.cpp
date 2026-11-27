@@ -1071,7 +1071,8 @@ semantic_analysis::member_definition_name(const template_member_definition &o)
 void semantic_analysis::define_waiting_members(entity_index scope,
                                                token_index name, bool define)
 {
-    for (size_t i = 0; i < postponed_bodies.size(); i++) {
+    size_t count = postponed_bodies.size();
+    for (size_t i = 0; i < count; i++) {
         const postponed_body b = postponed_bodies[i];
         if (!b.c || !b.member_definition ||
             instantiations[b.instantiation].specialization != scope)

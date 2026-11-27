@@ -1599,14 +1599,19 @@ analysis_result semantic_analysis::member_explicit_instantiation(
             n, "temp.explicit",
             "a member instantiation of an explicitly specialized class");
     /* the member: one function of the name, of the declared type (the
-       definition outside its class, if waiting, made now: [temp.explicit]/10) */
-    define_waiting_members(m.qualifier, m.id);
+       definition outside its class, if waiting, made now for a definition:
+       [temp.explicit]/10) */
     entity_index f =
         explicit_instantiation_target(c, m, type, cv, has_specifiers, variable);
     if (!f || entity_table[f].enclosing != m.qualifier)
         return not_supported_because(
             n, "temp.explicit",
             "a member instantiation that matches no member");
+    if (!extern_) {
+        if (!variable)
+            entity_table[f].member_definition_needed = true;
+        define_waiting_members(m.qualifier, m.id);
+    }
     if (variable) {
         /* an explicit instantiation declaration: the member is defined
            where the definition is instantiated, which a use asks for */
