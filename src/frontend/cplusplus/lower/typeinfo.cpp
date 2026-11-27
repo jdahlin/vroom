@@ -92,16 +92,19 @@ bool c_lowering::typeinfo_internal(type_index t) const
     }
 }
 
-/* the run-time library's virtual table of the type_info class that
-   describes a kind of type: its address point, the symbol + 16 */
+/* the run-time library's virtual table of the type_info class
+   __cxxabiv1::NAME that describes a kind of type: its address point, the
+   symbol + 16 */
 uint32_t c_lowering::typeinfo_class_vtable(const char *name)
 {
     for (size_t i = 0; i < runtime_vtable_names.size(); i++)
         if (!strcmp(runtime_vtable_names[i], name))
             return runtime_vtables[i];
     ast_qualified_type vp = pointer_to(void_type);
+    owned_buffer symbol;
+    itanium_runtime_vtable_name(analysis, tokens.pp, name, symbol.get());
     uint32_t s =
-        ast_builder_symbol(c, AST_SYMBOL_VARIABLE, name, strlen(name),
+        ast_builder_symbol(c, AST_SYMBOL_VARIABLE, symbol.data(), symbol.size(),
                            ast_builder_type_array(c, vp, 3, true),
                            AST_STORAGE_EXTERN, AST_SYMBOL_FLAG_GLOBAL, 0);
     ast_builder_toplevel(c, s);
@@ -146,13 +149,13 @@ uint32_t c_lowering::typeinfo(type_index t, token_index at)
     int storage = AST_STORAGE_NONE;
     uint32_t flags = AST_SYMBOL_FLAG_GLOBAL;
     bool define = true;
-    const char *library = "_ZTVN10__cxxabiv117__class_type_infoE";
+    const char *library = "__class_type_info";
     uint32_t length = 2;
     entity_index k = 0;
     const dynamic_class *d = nullptr;
     switch (r.kind) {
     case type_kind::fundamental:
-        library = "_ZTVN10__cxxabiv123__fundamental_type_infoE";
+        library = "__fundamental_type_info";
         break;
     case type_kind::class_type: {
         k = r.entity;
@@ -174,30 +177,30 @@ uint32_t c_lowering::typeinfo(type_index t, token_index at)
                      (analysis.dynamic_of(be) != nullptr) == (d != nullptr));
             }
             if (single) {
-                library = "_ZTVN10__cxxabiv120__si_class_type_infoE";
+                library = "__si_class_type_info";
                 length = 3;
             } else {
-                library = "_ZTVN10__cxxabiv121__vmi_class_type_infoE";
+                library = "__vmi_class_type_info";
                 length = 3 + 2 * x.base_count;
             }
         }
         break;
     }
     case type_kind::enumeration:
-        library = "_ZTVN10__cxxabiv116__enum_type_infoE";
+        library = "__enum_type_info";
         break;
     case type_kind::function:
-        library = "_ZTVN10__cxxabiv120__function_type_infoE";
+        library = "__function_type_info";
         break;
     case type_kind::array:
-        library = "_ZTVN10__cxxabiv117__array_type_infoE";
+        library = "__array_type_info";
         break;
     case type_kind::pointer:
-        library = "_ZTVN10__cxxabiv119__pointer_type_infoE";
+        library = "__pointer_type_info";
         length = 4;
         break;
     case type_kind::pointer_to_member:
-        library = "_ZTVN10__cxxabiv129__pointer_to_member_type_infoE";
+        library = "__pointer_to_member_type_info";
         length = 5;
         break;
     default:

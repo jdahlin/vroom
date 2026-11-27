@@ -293,19 +293,10 @@ enum class entity_kind : uint8_t {
        a template's own declaration; the template_argument's
        template_entity, its value no parameter's position (UINT32_MAX).
        An instantiation analyses the argument again with its arguments.
-       What mangling knows of it: for [!] Q<args>::name written so, type
-       the dependent Q<args>, name the member's identifier, value 1 (3 if
-       negated), one entity for the same three ([temp.over.link]); else
-       value 0, an entity of its own.  An operator's operands are entities of
-       this kind too (template-argument.cpp, dependent_value_entity): value
-       8 &&, 9 ||, 10 >, 15 <, 16 <=, 17 >=, 18 == and 19 != with the
-       operands enclosing and name; 11 sizeof(type); 12 a literal; 13
-       Q::f(); 14 ! of enclosing; 20 a static data member no longer
-       dependent (name the member); 21 Q::template f<args>() (type Q, name
-       f, the arguments dependent_value_arguments'); value 1 or 3 with
-       0x10000 set: Q an alias template's specialization as written (the
-       alias's identifier plus one in the upper half, its arguments
-       dependent_value_arguments', type the class it denotes) */
+       What mangling knows of it is its value, a dependent_value_form and
+       what goes with it (below); value 0: an entity of its own, of no
+       form.  An operator's operands are entities of this kind too
+       (template-argument.cpp, dependent_value_entity). */
     dependent_value,
     /* not an entity: a dependent type in a template's own declaration
        known only by how it is written: [temp.dep.type]/10.3
@@ -319,6 +310,95 @@ enum class entity_kind : uint8_t {
        ([basic.scope.block], [basic.scope.param]), the scope the names
        declared in it are bound in */
     block_scope,
+};
+
+/*
+ * What [abi:mangle.template-arg] spells of a value-dependent argument
+ * (entity_kind::dependent_value), in the entity's value: the form in the
+ * low byte (dependent_value_negated set in it for one written with !), the
+ * number of namespaces written before a qualifier in bits 8-15
+ * (dependent_value_namespaces), dependent_value_alias, and an identifier plus
+ * one in the upper half (dependent_value_identifier).  One entity for the
+ * same value, type, name and enclosing ([temp.over.link]).
+ */
+enum class dependent_value_form : uint8_t {
+    none = 0,
+    /* [!] Q<args>::name: type the dependent Q<args>, name the member's
+       identifier, enclosing the namespace written before Q; with
+       dependent_value_alias, Q an alias template's specialization as
+       written (the alias's identifier in the upper half, its arguments
+       dependent_value_arguments', type the class it denotes); else the
+       upper half a member class's between Q<args> and name */
+    member = 1,
+    negated_member = 3,
+    /* [!] [ns::] v<args>, a variable template's specialization: type it,
+       enclosing ns */
+    variable_specialization = 4,
+    negated_variable_specialization = 6,
+    /* a binary operator (dependent_value_operators): its operands
+       enclosing and name */
+    logical_and = 8,
+    logical_or = 9,
+    greater = 10,
+    /* sizeof(type): type it */
+    sizeof_type = 11,
+    /* a decimal integer-literal: name its value */
+    integer_literal = 12,
+    /* Q::f(): type Q, name f */
+    member_call = 13,
+    /* ! of enclosing */
+    logical_not = 14,
+    less = 15,
+    less_equal = 16,
+    greater_equal = 17,
+    equal = 18,
+    not_equal = 19,
+    /* a static data member no longer dependent: name the member */
+    static_member = 20,
+    /* Q::template f<args>(): type Q, name f, the arguments
+       dependent_value_arguments' */
+    member_template_call = 21,
+};
+constexpr uint64_t dependent_value_negated = 2;
+constexpr uint64_t dependent_value_alias = 0x10000;
+
+constexpr uint64_t dependent_value_code(dependent_value_form f)
+{
+    return static_cast<uint64_t>(f);
+}
+
+constexpr dependent_value_form dependent_value_form_of(uint64_t value)
+{
+    return static_cast<dependent_value_form>(value & 0xff);
+}
+
+constexpr uint32_t dependent_value_namespaces(uint64_t value)
+{
+    return static_cast<uint32_t>((value >> 8) & 0xff);
+}
+
+/* the identifier in the upper half, plus one (0: none) */
+constexpr uint32_t dependent_value_identifier(uint64_t value)
+{
+    return static_cast<uint32_t>(value >> 32);
+}
+
+/* the binary operator forms and the operator each is written with */
+inline constexpr struct {
+    dependent_value_form form;
+    preprocessing_op_or_punc op;
+} dependent_value_operators[] = {
+    {dependent_value_form::logical_and,
+     preprocessing_op_or_punc::AMPERSAND_AMPERSAND},
+    {dependent_value_form::logical_or, preprocessing_op_or_punc::BAR_BAR},
+    {dependent_value_form::greater, preprocessing_op_or_punc::GREATER},
+    {dependent_value_form::less, preprocessing_op_or_punc::LESS},
+    {dependent_value_form::less_equal, preprocessing_op_or_punc::LESS_EQUAL},
+    {dependent_value_form::greater_equal,
+     preprocessing_op_or_punc::GREATER_EQUAL},
+    {dependent_value_form::equal, preprocessing_op_or_punc::EQUAL_EQUAL},
+    {dependent_value_form::not_equal,
+     preprocessing_op_or_punc::EXCLAMATION_EQUAL},
 };
 
 /* [basic.link]/2 */
@@ -1356,16 +1436,16 @@ uint32_t cv_of(const types &table, qualified_type t);
    ([dcl.fct]/4) */
 bool same_parameters(const types &table, type_index a, type_index b);
 /* the function whose definition a block-scope entity is declared in, 0
-   for an entity not in a function (abi/itanium/mangling.cpp) */
+   for an entity not in a function (abi/itanium/mangling/scopes.cpp) */
 entity_index enclosing_function(const entities &table, entity_index e);
 /* the function a member of a local class (or of a class nested in one)
    is in (for a member function of a local class: the next function out),
-   0 for any other entity (abi/itanium/mangling.cpp) */
+   0 for any other entity (abi/itanium/mangling/scopes.cpp) */
 entity_index next_enclosing_function(const entities &table, entity_index f);
 /* [impl.clang] (clang's VisibleNoLinkage): whether c, a local class or
    closure type (or a class nested in one), is named in other translation
    units: the outermost function it is in is inline or a template's
-   specialization (abi/itanium/mangling.cpp) */
+   specialization (abi/itanium/mangling/scopes.cpp) */
 bool visible_local_class(const entities &table, entity_index c);
 
 /* [basic.lval]/1: "Every expression belongs to exactly one of the
@@ -6950,12 +7030,15 @@ class semantic_analysis
     entity_index constraint_own_type_parameter(entity_index t,
                                                uint64_t position) const;
     bool constraint_parameter_is_own(entity_index t, entity_index p) const;
-    /* [abi:mangle.template-arg] the template-param-decl clang writes
-       before a template argument whose template-parameter-list is not its
-       template template-parameter's (parameter i of function template t):
-       in decl; empty when they agree.  False when it has none to give */
+    /* [abi:mangle.template-arg] whether clang writes a template-param-decl
+       before a template argument (named) whose template-parameter-list is
+       not its template template-parameter's (parameter i of function
+       template t): declared that parameter, whose parameters (types only)
+       the decl lists, or 0 when they agree.  False when it has no rule for
+       it */
     bool template_argument_declaration(entity_index t, uint32_t i,
-                                       entity_index named, vbuffer *decl) const;
+                                       entity_index named,
+                                       entity_index &declared) const;
     /* the type a type-id written in t's requires-clause names, analysed in
        t's template-parameter scope (what [abi:mangle.template-args] spells) */
     bool constraint_type(entity_index t, SyntaxElement written,
@@ -7823,6 +7906,24 @@ bool itanium_construction_vtable_name(const semantic_analysis &analysis,
                                       const preprocessor &pp, entity_index c,
                                       uint64_t offset, entity_index base,
                                       vbuffer *out);
+/* [abi:mangling-special-guards]: the guard variable of variable e's
+   initialization (_ZGV <encoding>) */
+bool itanium_guard_variable_name(const semantic_analysis &analysis,
+                                 const preprocessor &pp, entity_index e,
+                                 vbuffer *out);
+/* [abi:mangling-special-thunks]: a this-adjusting thunk of function f (a
+   constructor's or destructor's variant as itanium_symbol_name's), by
+   adjustment and, for a virtual one, the vcall offset's offset (0: none):
+   _ZTh <adjustment> _ or _ZTv <adjustment> _ <vcall> _, then f's
+   encoding */
+bool itanium_thunk_name(const semantic_analysis &analysis,
+                        const preprocessor &pp, entity_index f, int variant,
+                        int64_t adjustment, int64_t vcall, vbuffer *out);
+/* [abi:rtti-layout]: the virtual table of the run-time library's
+   std::type_info class __cxxabiv1::NAME (_ZTVN10__cxxabiv1 ... E) */
+void itanium_runtime_vtable_name(const semantic_analysis &analysis,
+                                 const preprocessor &pp, const char *name,
+                                 vbuffer *out);
 
 } // namespace cplusplus
 

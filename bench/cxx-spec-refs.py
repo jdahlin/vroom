@@ -386,6 +386,37 @@ def extension_contexts(path):
     return contexts
 
 
+MANGLING = os.path.join(FRONTEND, 'abi', 'itanium', 'mangling')
+MANGLING_TABLE = re.compile(r'^ITANIUM_(?:TERMINAL|OPERATOR|BUILTIN_TYPE)\(\w+, "([^"]*)"', re.M)
+C_COMMENT = re.compile(r'/\*.*?\*/|//[^\n]*', re.S)
+C_STRING = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
+
+
+def mangling_letters(errors):
+    """doc/PLAN-mangling.md 3.3: every letter of a mangled name is in one of
+    the mangler's tables (productions.inc, operators.inc, builtin-types.inc)
+    and the encoder (encoder.cpp) writes it; a builder file spells none and
+    writes no byte itself"""
+    codes = set()
+    for name in ('productions.inc', 'operators.inc', 'builtin-types.inc'):
+        with open(os.path.join(MANGLING, name)) as f:
+            codes.update(MANGLING_TABLE.findall(f.read()))
+    for path in sorted(glob.glob(os.path.join(MANGLING, '*.cpp')) +
+                       [os.path.join(MANGLING, 'mangling-internal.h')]):
+        if os.path.basename(path) == 'encoder.cpp':
+            continue
+        with open(path) as f:
+            text = f.read()
+        code = C_COMMENT.sub(lambda m: '\n' * m.group(0).count('\n'), text)
+        rel = os.path.relpath(path, R)
+        for n, line in enumerate(code.split('\n'), 1):
+            for m in C_STRING.finditer(line):
+                if m.group(1) in codes:
+                    errors.append(f'{rel}:{n}: "{m.group(1)}" is a terminal of the mangler\'s tables: name it, the encoder writes it')
+            if re.search(r'\bvbuffer_\w+\(\s*out\b|\bout->', line):
+                errors.append(f'{rel}:{n}: the builder writes no byte itself (itanium_encoder)')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-v', action='store_true')
@@ -552,7 +583,11 @@ def main():
         for n in sorted(by_clause.get(a.missing, ())):
             if n not in quoted:
                 print(f'  {n} [{grammar[n][0]}]')
-    return 1 if errors else 0
+    letters = []
+    mangling_letters(letters)
+    for e in letters:
+        print(e)
+    return 1 if errors or letters else 0
 
 
 def os_path(subclauses, label):
