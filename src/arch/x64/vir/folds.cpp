@@ -195,6 +195,19 @@ static bool x64_vir_edits_spare(x64_vir_context *L, uint32_t b, uint32_t pos,
     return true;
 }
 
+static bool x64_vir_vector_commutes(const char *mnemonic)
+{
+    static const char *const commutative[] = {
+        "paddb",   "paddw",  "paddd",  "paddq",  "pand",   "por",
+        "pxor",    "pmullw", "pminsw", "pmaxsw", "pmulhw", "pmulhuw",
+        "pmaddwd", "addps",  "addpd",  "mulps",  "mulpd"};
+
+    for (const char *name : commutative)
+        if (!strcmp(mnemonic, name))
+            return true;
+    return false;
+}
+
 /* A pointer addition with one use, the next instruction's load or store address: it becomes
  * that instruction's memory operand, base register and index as the lowering has them */
 VPRIV bool x64_vir_memory_address_fold(x64_vir_context *L, uint32_t b,
@@ -207,6 +220,41 @@ VPRIV bool x64_vir_memory_address_fold(x64_vir_context *L, uint32_t b,
            (L->function->insns[v + 1].op == VIR_OP_LOAD ||
             L->function->insns[v + 1].op == VIR_OP_STORE) &&
            x64_vir_edits_spare(L, b, v + 1, base, index);
+}
+
+/* Whether load v, of 32 or 64 bytes, can be the next instruction's memory
+ * operand (VEX and EVEX ones need no alignment): its only use, as the second
+ * source of a vector operation, or either when they trade places; or as
+ * vpdpbusd's last.  Nothing between may move the address registers. */
+VPRIV bool x64_vir_vector_load_fold(x64_vir_context *L, uint32_t b, uint32_t v,
+                                    int base, int index)
+{
+    const vir_function *f = L->function;
+    const vir_insn *load = &f->insns[v];
+
+    if (vir_type_size(load->type) <= 16 || (load->flags & VIR_INSN_FLAG_VOL) ||
+        v + 1 >= f->blocks[b].first + f->blocks[b].insn_count ||
+        L->uses[v] != 1 || L->allocation->slot[v] != VIR_BLOCK_NONE ||
+        !x64_vir_edits_spare(L, b, v + 1, base, index))
+        return false;
+    const vir_insn *next = &f->insns[v + 1];
+
+    if (next->op == VIR_OP_X86_DOT)
+        return next->c == v && next->a != v && next->b != v;
+    if (next->op != VIR_OP_X86 || next->type != load->type ||
+        (next->c &
+         (X64_X86_SHIFT | X64_X86_UNARY | X64_X86_IMMEDIATE | X64_X86_TABLE)))
+        return false;
+    const char *mnemonic = x64_x86_code_mnemonic(next->c);
+    uint32_t count;
+
+    /* (a compare on zmm goes through a mask; a shift's count is in xmm) */
+    if (!strncmp(mnemonic, "pcmp", 4) ||
+        x64_x86_shift_immediate_code(next->c, 0, &count) || next->a == next->b)
+        return false;
+    if (next->b == v)
+        return true;
+    return next->a == v && x64_vir_vector_commutes(mnemonic);
 }
 
 VPRIV bool x64_vir_memory_next_fold(x64_vir_context *L, uint32_t b, uint32_t v)

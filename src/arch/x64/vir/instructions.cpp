@@ -528,8 +528,17 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             x64_vir_text_append(L, text);
             return;
         }
-        if (vir_type_size(i->type) > 16)
-            x64_vir_x86_wide_emit(L, i->c, d, a, c, i->type);
+        if (L->vector_load &&
+            (i->a == L->vector_load || i->b == L->vector_load)) {
+            int first = a;
+
+            if (i->b != L->vector_load)
+                first = c; /* (they trade places) */
+            x64_vir_x86_wide_emit(L, i->c, d, first, X64_REGISTER_NONE, i->type,
+                                  L->vector_address);
+            L->vector_load = 0;
+        } else if (vir_type_size(i->type) > 16)
+            x64_vir_x86_wide_emit(L, i->c, d, a, c, i->type, NULL);
         else
             x64_vir_x86_emit(L, i->c, d, a, c);
         return;
@@ -746,6 +755,28 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         int width = vir_type_is_vector((uint32_t)ty)
                         ? (int)vir_type_size((uint32_t)ty)
                         : 1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags);
+        if (i->op == VIR_OP_LOAD && at.kind == CODEGEN_LVALUE_REGISTER) {
+            int index = X64_REGISTER_NONE;
+
+            if (folded && L->memory_is_indexed)
+                index = L->memory_index;
+            if (x64_vir_vector_load_fold(L, b, v, at.register_number, index)) {
+                int length =
+                    snprintf(L->vector_address, sizeof L->vector_address,
+                             "%lld(%%%s", (long long)at.offset,
+                             x64_register_names_64[at.register_number]);
+
+                if (index != X64_REGISTER_NONE)
+                    length += snprintf(
+                        L->vector_address + length,
+                        sizeof L->vector_address - (size_t)length, ",%%%s,%d",
+                        x64_register_names_64[index], 1 << L->memory_shift);
+                snprintf(L->vector_address + length,
+                         sizeof L->vector_address - (size_t)length, ")");
+                L->vector_load = v;
+                return;
+            }
+        }
         if (folded && L->memory_is_indexed) {
             record *r = x64_record_emit_three_registers(
                 e, load ? X64_OP_LDX : X64_OP_STX, width,
@@ -826,6 +857,24 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                                                 : X64_OP_SARI,
                                             sz, d, a, X64_REGISTER_NONE)
                 ->immediate = count;
+            return;
+        }
+        if (L->bmi2) {
+            const char *name = "shlx";
+            const char *const *names = x64_register_names_32;
+            char suffix = 'l', text[96];
+
+            if (i->op == VIR_OP_LSHR)
+                name = "shrx";
+            else if (i->op == VIR_OP_ASHR)
+                name = "sarx";
+            if (sz == 8) {
+                names = x64_register_names_64;
+                suffix = 'q';
+            }
+            snprintf(text, sizeof text, "\t%s%c\t%%%s, %%%s, %%%s\n", name,
+                     suffix, names[c], names[a], names[d]);
+            x64_vir_text_append(L, text);
             return;
         }
         /* The result may be rcx: moving the first operand there would destroy cl.
@@ -1066,16 +1115,23 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         char text[160];
         int third = x64_vir_register_number(p[2]);
         int into = d;
+        bool memory = L->vector_load && i->c == L->vector_load;
 
-        if (d != a && (d == c || d == third))
+        if (d != a && (d == c || (!memory && d == third)))
             into = XMM0 + 15;
         if (into != a) {
             snprintf(text, sizeof text, "\tvmovdqa64\t%%zmm%d, %%zmm%d\n",
                      a - XMM0, into - XMM0);
             x64_vir_text_append(L, text);
         }
-        snprintf(text, sizeof text, "\tvpdpbusd\t%%zmm%d, %%zmm%d, %%zmm%d\n",
-                 third - XMM0, c - XMM0, into - XMM0);
+        if (memory)
+            snprintf(text, sizeof text, "\tvpdpbusd\t%s, %%zmm%d, %%zmm%d\n",
+                     L->vector_address, c - XMM0, into - XMM0);
+        else
+            snprintf(text, sizeof text,
+                     "\tvpdpbusd\t%%zmm%d, %%zmm%d, %%zmm%d\n", third - XMM0,
+                     c - XMM0, into - XMM0);
+        L->vector_load = 0;
         x64_vir_text_append(L, text);
         if (into != d) {
             snprintf(text, sizeof text, "\tvmovdqa64\t%%zmm%d, %%zmm%d\n",
@@ -1363,6 +1419,16 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         /* Let the next placed block fall through, including the true edge.
 		 * A deferred edge-copy stub is a different label and cannot fall through. */
         if (next != VIR_BLOCK_NONE && yes == L->label[next]) {
+            uint32_t swap = yes;
+            yes = no;
+            no = swap;
+            cc ^= 1;
+            nt = i->b;
+        } else if ((next == VIR_BLOCK_NONE || no != L->label[next]) &&
+                   nt == i->c && L->position[i->c] <= L->position[b] &&
+                   L->position[i->b] > L->position[b]) {
+            /* neither falls through and the false edge goes back: the
+			 * conditional jump takes it, one branch per iteration */
             uint32_t swap = yes;
             yes = no;
             no = swap;

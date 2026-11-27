@@ -319,6 +319,30 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
         f.imm = c;
         return x64_emit(a, &f);
     }
+    /* shlx/shrx/sarx count, src, dst (BMI2: VEX 66/f2/f3 0f38 f7; vvvv the
+     * count) */
+    if (nops == 3 &&
+        (!strncmp(mn, "shlx", 4) || !strncmp(mn, "shrx", 4) ||
+         !strncmp(mn, "sarx", 4)) &&
+        (mn[4] == 'l' || mn[4] == 'q' || !mn[4]) && o[0].kind == XK_REG &&
+        o[0].cls == XR_GPR && o[2].kind == XK_REG && o[2].cls == XR_GPR) {
+        uint8_t ops[3] = {0x0f, 0x38, 0xf7};
+        uint8_t prefix = 0;
+        bool p66 = false;
+
+        if (mn[1] == 'a')
+            prefix = 0xf3;
+        else if (mn[2] == 'r')
+            prefix = 0xf2;
+        else
+            p66 = true;
+        if (o[1].kind == XK_EXPR)
+            o[1].kind = XK_MEM;
+        return x64_emit_form(a, F(.w = o[2].size == 8, .opsz16 = p66,
+                                  .rep = prefix, .op = ops, .nop = 3,
+                                  .reg = o[2].reg, .rm = &o[1],
+                                  .vvvv = o[0].reg, .vex = 1));
+    }
     /* pext/pdep mask, src, dst (BMI2: VEX f3/f2 0f38 f5; vvvv the source) */
     if (nops == 3 && (!strncmp(mn, "pext", 4) || !strncmp(mn, "pdep", 4)) &&
         (mn[4] == 'l' || mn[4] == 'q' || !mn[4]) && o[1].kind == XK_REG &&

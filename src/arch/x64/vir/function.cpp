@@ -18,7 +18,8 @@ static void vx_target_block_begin(void *ctx, uint32_t b)
     L->skip = 0;
     L->compare_condition = UINT32_MAX;
     L->memory_value = L->memory_skip = L->scaled_value = L->scaled_skip =
-        L->big_endian_value = L->test_value = L->compare_memory_value = 0;
+        L->big_endian_value = L->test_value = L->compare_memory_value =
+            L->vector_load = 0;
     L->carry_value = 0;
     if (L->function->blocks[b].flags & VIR_BLOCK_FLAG_LPAD)
         x64_vir_landing_pad_enter(L, b);
@@ -144,6 +145,8 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         cs |= (1u << RSI) | (1u << RDI);
     x64_vir_context L = {
         .context = e, .function = f, .allocation = &V->allocation, .ms = ms};
+    L.bmi2 = x86_feature_has(cc_x86_features_get(e->compile_context, sym),
+                             X86_FEATURE_BMI2);
     vir_target_registers regs = {
         .alloc = {(X64_TEMPORARIES & ~(1u << R10)) | cs, (1u << 14) - 1},
         .callee = {cs, ms ? ((1u << 14) - 1) & ~((1u << 6) - 1) : 0},
