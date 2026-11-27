@@ -242,3 +242,125 @@ CC_PRIVATE uint32_t cc_builtin_fast_math_build(cc *c, const char *name,
         result = cc_lowering_sequence(c, pre[--np], result);
     return result;
 }
+
+/* a library function (name[0..length), its arguments converted, returning
+   `result`) written as the builtin the front end already computes or as
+   another library call, as clang does; 0 if it is not one */
+CC_PRIVATE uint32_t cc_library_forward_build(cc *c, const char *name,
+                                             size_t length,
+                                             ast_qualified_type result,
+                                             const uint32_t *args, uint32_t n,
+                                             uint32_t loc)
+{
+    /* the arguments' kinds: p pointer, z integer, x _Complex;
+       literal: only where every pointer argument is a string literal */
+    static const struct {
+        const char *name, *kinds;
+        bool literal;
+    } functions[] = {{"alloca", "z", false},  {"creal", "x", false},
+                     {"crealf", "x", false},  {"cimag", "x", false},
+                     {"cimagf", "x", false},  {"conj", "x", false},
+                     {"conjf", "x", false},   {"strlen", "p", true},
+                     {"strcmp", "pp", true},  {"bzero", "pz", false},
+                     {"bcopy", "ppz", false}, {"mempcpy", "ppz", false}};
+
+    for (const auto &f : functions) {
+        /* (alloca is no library function: computed at -O0 too, as clang) */
+        if (!c->o->opt && strcmp(f.name, "alloca"))
+            continue;
+        if (strlen(f.name) != length || memcmp(f.name, name, length) ||
+            strlen(f.kinds) != n)
+            continue;
+        for (uint32_t i = 0; i < n; i++) {
+            ast_qualified_type t = AST_NODE(args[i])->ty;
+            int kind = AST_TYPE_KIND(c, t);
+            bool fits = false;
+
+            if (f.kinds[i] == 'p')
+                fits = kind == AST_TYPE_POINTER;
+            else if (f.kinds[i] == 'z')
+                fits = cc_type_is_integer(c, t);
+            else
+                fits = cc_type_is_complex(c, t);
+            if (!fits)
+                return 0;
+            if (f.literal) {
+                uint32_t a = args[i];
+
+                while (AST_NODE(a)->op == AST_NODE_CAST)
+                    a = AST_NODE(a)->a;
+                if (AST_NODE(a)->op != AST_NODE_STRING)
+                    return 0;
+            }
+        }
+        if (f.kinds[0] == 'x') {
+            /* creal, cimag: the part; conj: the imaginary one negated */
+            uint32_t pre, z = cc_lowering_once(c, args[0], &pre);
+            uint32_t value;
+
+            if (f.name[1] == 'r')
+                value = cc_complex_part(c, z, 0);
+            else if (f.name[1] == 'i')
+                value = cc_complex_part(c, z, 1);
+            else {
+                uint32_t im = cc_complex_part(c, z, 1);
+
+                value = cc_complex_node_new(c, result, cc_complex_part(c, z, 0),
+                                            neg(c, im), loc);
+            }
+            return cc_lowering_sequence(c, pre, value);
+        }
+        if (!strcmp(f.name, "strcmp")) {
+            /* two literals: -1, 0 or 1, as clang */
+            uint32_t string[2];
+
+            for (uint32_t i = 0; i < 2; i++) {
+                string[i] = args[i];
+                while (AST_NODE(string[i])->op == AST_NODE_CAST)
+                    string[i] = AST_NODE(string[i])->a;
+                if (c->strs[AST_NODE(string[i])->a].esz != 1)
+                    return 0;
+            }
+            int order = strcmp(c->strs[AST_NODE(string[0])->a].s,
+                               c->strs[AST_NODE(string[1])->a].s);
+
+            return cc_node_integer_new(c, (order > 0) - (order < 0), result,
+                                       loc);
+        }
+        if (!strcmp(f.name, "bzero")) {
+            uint32_t set[3] = {
+                args[0],
+                cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc),
+                args[1]};
+
+            return cc_library_call_build(c, "__builtin_memset", set, 3, loc);
+        }
+        if (!strcmp(f.name, "bcopy")) {
+            uint32_t move[3] = {args[1], args[0], args[2]};
+
+            return cc_library_call_build(c, "__builtin_memmove", move, 3, loc);
+        }
+        if (!strcmp(f.name, "mempcpy")) {
+            uint32_t pre, count = cc_lowering_once(c, args[2], &pre);
+            uint32_t copy[3] = {args[0], args[1], count};
+            uint32_t end =
+                cc_library_call_build(c, "__builtin_memcpy", copy, 3, loc);
+            ast_qualified_type bytes =
+                cc_type_pointer(c, cc_type_basic(AST_TYPE_CHAR));
+
+            if (!end)
+                return 0;
+            end = cc_node_binary_new(c, LEX_TOKEN_PLUS, bytes,
+                                     cc_conversion_apply(c, end, bytes), count,
+                                     loc);
+            return cc_lowering_sequence(c, pre,
+                                        cc_conversion_apply(c, end, result));
+        }
+        char builtin[32];
+
+        snprintf(builtin, sizeof builtin, "__builtin_%s", f.name);
+        return ast_builder_builtin_call(c, builtin, strlen(builtin), result,
+                                        args, n);
+    }
+    return 0;
+}

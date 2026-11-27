@@ -717,6 +717,16 @@ CC_PRIVATE uint32_t cc_builtin_abs_build(cc *c, const char *name, size_t length,
 CC_PRIVATE uint32_t cc_builtin_math_inline_build(cc *c, const char *name,
                                                  size_t length, uint32_t call,
                                                  uint32_t loc);
+/* a call of the library function the builtin `name` names, with its
+   arguments converted to the parameters' types */
+CC_PRIVATE uint32_t cc_library_call_build(cc *c, const char *name,
+                                          const uint32_t *args, uint32_t n,
+                                          uint32_t loc);
+CC_PRIVATE uint32_t cc_library_forward_build(cc *c, const char *name,
+                                             size_t length,
+                                             ast_qualified_type result,
+                                             const uint32_t *args, uint32_t n,
+                                             uint32_t loc);
 CC_PRIVATE uint32_t cc_x86_header_call_build(cc *c, const char *name,
                                              size_t length,
                                              const uint32_t *args, uint32_t n,

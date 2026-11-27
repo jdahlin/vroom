@@ -751,6 +751,8 @@ class c_lowering
     uint32_t abs_call(uint32_t function,
                       const owned_array<uint32_t> &arguments);
     uint32_t math_call(uint32_t function, uint32_t call);
+    uint32_t forwarded_call(uint32_t function, ast_qualified_type result,
+                            const owned_array<uint32_t> &arguments);
     uint32_t x86_header_call(uint32_t function,
                              const owned_array<uint32_t> &arguments);
     uint32_t special_builtin(builtin_lowering lowering, const semantic_node &n,

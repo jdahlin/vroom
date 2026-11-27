@@ -216,6 +216,11 @@ uint32_t ast_builder_abs_call(cc *c, const char *name, size_t length,
    ast_builder_abs_call */
 uint32_t ast_builder_math_call(cc *c, const char *name, size_t length,
                                uint32_t call, bool builtin);
+/* a library call written as what the front end computes (creal, bzero,
+   strlen of a literal, ...); 0 as for ast_builder_abs_call */
+uint32_t ast_builder_library_forward(cc *c, const char *name, size_t length,
+                                     ast_qualified_type result,
+                                     const uint32_t *args, uint32_t n);
 /* the C library function the builtin __builtin_NAME (name[0..length) is
    NAME) declares implicitly, as clang does: its prototype in the front
    end's builtin table letters (*clang_encoding false) or in clang's
