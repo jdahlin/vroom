@@ -159,8 +159,16 @@ void semantic_analysis::default_argument_used(uint32_t node)
 {
     for (const default_argument_need_range &r : default_argument_need_ranges)
         if (r.node == node)
-            for (uint32_t i = 0; i < r.count; i++)
-                mark_needed(default_argument_needed[r.first + i]);
+            for (uint32_t i = 0; i < r.count; i++) {
+                entity_index f = default_argument_needed[r.first + i];
+                mark_needed(f);
+                /* [temp.inst]/12: the default argument was analysed
+                   unevaluated; its use in a call needs a function
+                   template specialization's definition */
+                if (need_specialization_definition(current_declaration, f) !=
+                    analysis_result::well_formed)
+                    return;
+            }
 }
 
 /* [class.virtual]/17 with [basic.def.odr]/5: a class's virtual functions
