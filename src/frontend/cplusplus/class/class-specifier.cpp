@@ -181,6 +181,8 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
     entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
     entity_table[e].access = access;
     entity_table.add_declaration(e, n);
+    /* (a class analysed since added its members after c's) */
+    make_members_contiguous(c);
     class_members.append(e);
     entity_table[c].member_count++;
     entity_table[u].anonymous_object = e;
@@ -2670,6 +2672,8 @@ analysis_result semantic_analysis::member_declarator(
            declarator's */
         entity_table[e].no_unique_address =
             ((s.gnu_flags | m.gnu_flags) & gnu_no_unique_address) != 0;
+        /* (a class analysed since added its members after c's) */
+        make_members_contiguous(c);
         class_members.append(e);
         entity_table[c].member_count++;
     }

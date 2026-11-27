@@ -138,6 +138,8 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
         entity_table[e].default_initializer = default_init;
     entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
     entity_table[e].access = access;
+    /* (a class analysed since added its members after c's) */
+    make_members_contiguous(c);
     class_members.append(e);
     entity_table[c].member_count++;
     entity_table.add_declaration(e, declaration);
