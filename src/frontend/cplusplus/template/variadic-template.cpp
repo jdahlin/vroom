@@ -330,10 +330,36 @@ analysis_result semantic_analysis::parameter_pack_expansion(
     token_index from = first;
     if (d.size() && d[0].is(syntax_kind::decl_specifier_seq))
         from = d[0].end_token();
+    /* an ellipsis in a function type's parameter list (R f(Args...)) is
+       that type's, not the declarator's */
+    owned_array<token_index> nested;
+    owned_array<SyntaxElement> work;
+    for (auto child : d.elements())
+        work.append(child);
+    while (!work.empty()) {
+        SyntaxElement x = work.back();
+        work.resize(work.size() - 1);
+        if (x.is_token())
+            continue;
+        if (x.is(syntax_kind::parameters_and_qualifiers)) {
+            nested.append(x.first_token());
+            nested.append(x.end_token());
+            continue;
+        }
+        for (auto child : x.elements())
+            work.append(child);
+    }
+    auto in_nested = [&](token_index t) {
+        for (size_t i = 0; i < nested.size(); i += 2)
+            if (t >= nested[i] && t < nested[i + 1])
+                return true;
+        return false;
+    };
     token_index found = 0;
     uint32_t ellipses = 0;
     for (token_index t = from; t < end; t++)
-        if (token_is(tokens, t, preprocessing_op_or_punc::ELLIPSIS)) {
+        if (token_is(tokens, t, preprocessing_op_or_punc::ELLIPSIS) &&
+            !in_nested(t)) {
             found = t;
             ellipses++;
         }
