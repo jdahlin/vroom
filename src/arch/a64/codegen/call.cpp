@@ -147,9 +147,10 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
     codegen_value res = codegen_value_none();
     int hn;
 
-    bool musttail = e->musttail;
+    bool musttail = e->musttail, sibling = e->sibling;
 
     e->musttail = false;
+    e->sibling = false;
     e->has_calls = true;
     if (musttail) {
         if (sret)
@@ -364,13 +365,18 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
     else if (sret)
         a64_record_emit_immediate(e, A64_OP_ADDI, 1, 8, A64_REGISTER_FRAME,
                                   rslot);
-    if (musttail) {
-        a64_record *t;
-
-        for (int i = 0; i < n; i++)
-            if (args[i].argument.kind == A64_ABI_ARGUMENT_REFERENCE_REGISTER)
+    /* a call in tail position: a jump where musttail could be one */
+    sibling = sibling && !nsaa && !sret && !e->dynamic_frame;
+    for (int i = 0; i < n; i++)
+        if (args[i].argument.kind == A64_ABI_ARGUMENT_REFERENCE_REGISTER) {
+            if (musttail)
                 codegen_musttail_refuse(
                     e, "an argument passed by reference to a copy");
+            sibling = false;
+        }
+    if (musttail || sibling) {
+        a64_record *t;
+
         if (fslot != 1)
             a64_record_emit_memory(e, A64_OP_LD, 3, 0, R_X16,
                                    A64_REGISTER_FRAME, fslot);
@@ -1016,6 +1022,15 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
         if (musttail)
             e->current_location = x->loc;
         e->musttail = musttail;
+        e->sibling = false;
+        if (!musttail && em_tail_site(e, n) &&
+            !e->function_instance->is_inlined &&
+            e->cleanup_count == e->function_instance->cleanup_base) {
+            if (s)
+                e->sibling = em_tail_target_ok(e, s);
+            else
+                e->sibling = !ref;
+        }
         r = s || ref ? do_call(e, ref, NULL, args, na, x->ty, noret, nfix)
                      : do_call(e, 0, &fnv, args, na, x->ty, false, nfix);
     }

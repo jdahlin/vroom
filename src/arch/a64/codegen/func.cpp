@@ -1115,6 +1115,7 @@ static bool emit_function1(codegen_context *e, uint32_t s, int nlreg)
                          e->variadic_vector_save_slot + 16 * r);
         }
     }
+    em_tail_sites_find(e, s);
     gen_stmt(e, y->body);
     /* falling off the end of main returns 0 */
     if (e->is_reachable && CODEGEN_IDENTIFIER_IS(y->name, "main"))

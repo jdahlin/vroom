@@ -3119,6 +3119,14 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
         if (musttail)
             e->current_location = x->loc;
         e->musttail = musttail;
+        e->sibling = false;
+        if (!musttail && em_tail_site(e, n) && !e->walk_state->inline_call &&
+            !e->walk_state->instance && !e->walk_state->cleanup_count &&
+            !e->walk_state->eh_fn)
+            e->sibling =
+                !ref ||
+                (CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_SYMBOL &&
+                 em_tail_target_ok(e, CODEGEN_REFERENCE_INDEX(ref)));
         codegen_value v =
             WALK_LOWER(call)(e, ref, ref ? NULL : &fn, args, (int)na, var,
                              rec_ ? &r : NULL, f->base);

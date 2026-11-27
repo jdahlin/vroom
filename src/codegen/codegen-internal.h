@@ -223,7 +223,9 @@ enum {
 /* CWRITE: only ever assigned integer constants (all cwval unless CMULTI) */ /* per sym; MUSTFOLD: a function that calls an error() function */
 enum {
     CODEGEN_NODE_HAS_LABEL = 1,
-    CODEGEN_NODE_HAS_ALLOCA = 2
+    CODEGEN_NODE_HAS_ALLOCA = 2,
+    /* a function's body: it may hand an address in its frame to someone (no sibling calls) */
+    CODEGEN_NODE_FRAME_EXPOSED = 4
 }; /* per node: statement contains a label or case */
 
 typedef struct codegen_call_edge {
@@ -504,6 +506,12 @@ typedef struct codegen_context {
     /* the call being lowered is a return statement's musttail call: the lowering's call op takes
        it, and jumps or refuses */
     bool musttail;
+    /* the call being lowered is in tail position (em_tail_site) of a function that lets no frame
+       address out: the lowering's call op jumps where it can */
+    bool sibling;
+    uint32_t
+        tail_sites[64]; /* the calls in tail position (em_tail_sites_find) */
+    uint32_t tail_site_count;
     cc *compile_context;
     /* records of the function being emitted */
     a64_record *records;
@@ -1088,6 +1096,9 @@ VPRIV __attribute__((noreturn)) void codegen_musttail_refuse(codegen_context *e,
                                                              const char *why);
 VPRIV bool em_tail_caller_ok(codegen_context *e, uint32_t fn);
 VPRIV bool em_tail_target_ok(codegen_context *e, uint32_t s);
+VPRIV bool em_tail_returns_twice(codegen_context *e, uint32_t s);
+VPRIV void em_tail_sites_find(codegen_context *e, uint32_t fn);
+VPRIV bool em_tail_site(const codegen_context *e, uint32_t call);
 VPRIV bool em_tail_candidate(codegen_context *e, uint32_t fn, uint32_t expr,
                              uint32_t maxargs, uint32_t *callee);
 VPRIV bool a64_tail_return(codegen_context *e, uint32_t expr);

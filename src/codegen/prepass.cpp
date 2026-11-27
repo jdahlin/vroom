@@ -120,6 +120,8 @@ typedef struct codegen_prepass_state {
     int loopd;   /* loops around the node */
     uint32_t llo, lhi; /* local syms seen (lspan) */
     bool discard_param;
+    uint32_t
+        indexed; /* the array or pointer operand of the a[b] being walked */
     bool
         record_calls; /* VIR's inlining sizes: the direct calls go to codegen_prepass_calls */
     uint32_t call_count;
@@ -678,6 +680,50 @@ static bool codegen_initializer_has_label_address(cc *c, uint32_t n)
 }
 
 /* walks every node; returns whether it contains a label (or case) */
+/* the object the lvalue (or array) n designates is not in this function's frame: static
+   storage, or reached through a pointer, whose making is noted where it happens */
+static bool codegen_prepass_lvalue_is_outside_frame(cc *c, uint32_t n)
+{
+    for (;;) {
+        const node *x = N(n);
+
+        switch (x->op) {
+        case AST_NODE_VARIABLE:
+            return !codegen_symbol_is_local_variable(c, x->a) ||
+                   c->syms[x->a].sc == AST_STORAGE_STATIC ||
+                   c->syms[x->a].sc == AST_STORAGE_EXTERN;
+        case AST_NODE_STRING:
+        case AST_NODE_DEREFERENCE:
+            return true;
+        case AST_NODE_MEMBER:
+            n = x->a;
+            break;
+        case AST_NODE_COMMA:
+            n = x->b;
+            break;
+        case AST_NODE_INDEX:
+            if (N(x->a)->op != AST_NODE_CAST ||
+                N(x->a)->aux != AST_CAST_ARRAY_DECAY)
+                return true;
+            n = N(x->a)->a;
+            break;
+        default: /* a compound literal, a call's result, ... */
+            return false;
+        }
+    }
+}
+
+static void codegen_prepass_frame_exposed(codegen_prepass_state *P)
+{
+    P->E->node_flags[P->c->syms[P->fn].body] |= CODEGEN_NODE_FRAME_EXPOSED;
+}
+
+static void codegen_prepass_address_note(codegen_prepass_state *P, uint32_t n)
+{
+    if (!codegen_prepass_lvalue_is_outside_frame(P->c, n))
+        codegen_prepass_frame_exposed(P);
+}
+
 static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
 {
     cc *c = P->c;
@@ -688,6 +734,10 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
         return false;
     x = N(n);
     P->nodes++;
+    if (x->op == AST_NODE_CALL_INTO)
+        codegen_prepass_address_note(P, x->a);
+    if (x->op == AST_NODE_ASM)
+        codegen_prepass_frame_exposed(P);
     switch (x->op) {
     case AST_NODE_VARIABLE:
         if (P->E->inline_parameter_reads && !P->discard_param &&
@@ -739,6 +789,11 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
             (x->aux == AST_CAST_BIT_CAST &&
              (N(x->a)->flags & AST_NODE_FLAG_LVALUE)))
             codegen_prepass_written_mark(P, x->a, true);
+        /* (an array or vector only indexed here hands its address to no one) */
+        if ((x->aux == AST_CAST_ARRAY_DECAY ||
+             x->aux == AST_CAST_VECTOR_ADDRESS) &&
+            n != P->indexed)
+            codegen_prepass_address_note(P, x->a);
         bool saved = P->discard_param;
         if (KIND(c, x->ty) == AST_TYPE_VOID) {
             uint32_t a = x->a;
@@ -754,6 +809,7 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
     }
     case AST_NODE_ADDRESS:
         codegen_prepass_written_mark(P, x->a, true);
+        codegen_prepass_address_note(P, x->a);
         lab = codegen_prepass_node_walk(P, x->a);
         break;
     case AST_NODE_PRE_INCREMENT:
@@ -784,6 +840,7 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
                   codegen_prepass_node_walk(P, x->b);
             break;
         }
+        P->indexed = x->a;
         __attribute__((fallthrough));
     case AST_NODE_CALL_INTO:
     case AST_NODE_BINARY:
@@ -806,6 +863,14 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
         if (x->aux == AST_CALL_MUSTTAIL)
             P->E->symbol_flags[P->fn] |= CODEGEN_SYMBOL_NO_INLINE;
 
+        if (callee &&
+            ((codegen_symbol_attributes(c, callee)->flags &
+              CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE) ||
+             CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "setjmp") ||
+             CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "_setjmp") ||
+             CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "sigsetjmp") ||
+             CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "__sigsetjmp")))
+            codegen_prepass_frame_exposed(P);
         if (callee && codegen_symbol_attributes(c, callee)->error_fn)
             P->E->symbol_flags[P->fn] |= CODEGEN_SYMBOL_MUST_FOLD;
         /* VIR: a function calling setjmp is not inlined (as LLVM): the caller's promoted
@@ -843,6 +908,13 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
             (x->aux == CC_BUILTIN_ALLOCA ||
              x->aux == CC_BUILTIN_ALLOCA_UNINITIALIZED))
             P->E->node_flags[c->syms[P->fn].body] |= CODEGEN_NODE_HAS_ALLOCA;
+        if (x->op == AST_NODE_BUILTIN &&
+            (x->aux == CC_BUILTIN_ALLOCA ||
+             x->aux == CC_BUILTIN_ALLOCA_UNINITIALIZED ||
+             x->aux == CC_BUILTIN_SETJMP ||
+             x->aux == CC_BUILTIN_FRAME_ADDRESS ||
+             x->aux == CC_BUILTIN_VA_START))
+            codegen_prepass_frame_exposed(P);
         for (uint32_t i = 0; i < x->c; i++)
             lab |= codegen_prepass_node_walk(P, c->lists[x->b + i]);
         /*
@@ -911,6 +983,7 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
             uint32_t count;
 
             P->catches = true;
+            codegen_prepass_frame_exposed(P);
             /* (a handler's label is the function's own: the landing pads are made at its end) */
             P->E->symbol_flags[P->fn] |= CODEGEN_SYMBOL_NO_INLINE;
             const uint32_t *h = codegen_catch_scope(c, x->a, &count);
@@ -927,6 +1000,9 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
             (y->kind == AST_SYMBOL_VARIABLE &&
              (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)))
             P->cdepth++;
+        if (y->kind == AST_SYMBOL_VARIABLE &&
+            (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA))
+            codegen_prepass_frame_exposed(P);
         /* a __used static local is emitted with its function, referenced or not */
         if (y->kind == AST_SYMBOL_VARIABLE && y->sc == AST_STORAGE_STATIC &&
             codegen_symbol_attributes(c, x->a)->used &&

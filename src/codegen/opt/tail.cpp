@@ -1,6 +1,9 @@
 /*
- * tail.c: may a function end in a sibling call (a tail call) to its callee?  Only the conservative
- * case: a body that is exactly `return f(args);` forwarding to a direct call.
+ * tail.c: sibling calls (tail calls).  Two ways in: em_tail_candidate, a body that is exactly
+ * `return f(args);` forwarding to a direct call, which the direct emitters emit without a frame;
+ * and em_tail_sites_find, the calls in tail position of any function whose body takes no address
+ * in its frame (the prepass's CODEGEN_NODE_FRAME_EXPOSED), which their call lowering jumps to.
+ * VIR finds its own on its instructions (codegen/vir/lowering-driver.cpp).
  *
  * em_tail_caller_ok and em_tail_target_ok are the option and attribute rules (-O1 or more, sibling
  * calls not disabled, not instrumented, no interrupt, error or ifunc function, no attribute that
@@ -51,12 +54,144 @@ VPRIV bool em_tail_target_ok(codegen_context *e, uint32_t s)
          (CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE |
           CC_ATTRIBUTE_FLAG_TAIL_NOT_CALLED)))
         return false;
+    return !em_tail_returns_twice(e, s);
+}
+
+/* s returns twice: such a function keeps the frame it was called from */
+VPRIV bool em_tail_returns_twice(codegen_context *e, uint32_t s)
+{
+    cc *c = e->compile_context;
+    const sym *target = &c->syms[s];
+
+    if (target->kind != AST_SYMBOL_FUNCTION)
+        return false;
     /* The standard nonlocal-jump entry points are special even when a caller
 	   supplies a plain prototype without the usual returns_twice attribute. */
-    return !(CODEGEN_IDENTIFIER_IS(target->name, "setjmp") ||
-             CODEGEN_IDENTIFIER_IS(target->name, "_setjmp") ||
-             CODEGEN_IDENTIFIER_IS(target->name, "sigsetjmp") ||
-             CODEGEN_IDENTIFIER_IS(target->name, "__sigsetjmp"));
+    return (codegen_symbol_attributes(c, s)->flags &
+            CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE) ||
+           CODEGEN_IDENTIFIER_IS(target->name, "setjmp") ||
+           CODEGEN_IDENTIFIER_IS(target->name, "_setjmp") ||
+           CODEGEN_IDENTIFIER_IS(target->name, "sigsetjmp") ||
+           CODEGEN_IDENTIFIER_IS(target->name, "__sigsetjmp");
+}
+
+/* the call node under casts that keep the register's value, else 0 */
+static uint32_t em_tail_call_under(cc *c, uint32_t n)
+{
+    while (n && N(n)->op == AST_NODE_CAST &&
+           (N(n)->aux == AST_CAST_NOP ||
+            N(n)->aux == AST_CAST_POINTER_TO_POINTER ||
+            N(n)->aux == AST_CAST_VOID))
+        n = N(n)->a;
+    if (!n || N(n)->op != AST_NODE_CALL || N(n)->aux == AST_CALL_MUSTTAIL)
+        return 0;
+    return n;
+}
+
+static void em_tail_site_add(codegen_context *e, uint32_t call)
+{
+    if (call &&
+        e->tail_site_count < sizeof e->tail_sites / sizeof *e->tail_sites)
+        e->tail_sites[e->tail_site_count++] = call;
+}
+
+/* the statement n of a function returning rt; last: after it the function returns at once */
+static void em_tail_statement(codegen_context *e, uint32_t n,
+                              ast_qualified_type rt, bool last)
+{
+    cc *c = e->compile_context;
+    const node *x;
+    bool is_void = KIND(c, rt) == AST_TYPE_VOID;
+
+    if (!n)
+        return;
+    x = N(n);
+    switch (x->op) {
+    case AST_NODE_BLOCK:
+        for (uint32_t i = 0; i < x->c; i++) {
+            bool then_returns = last;
+
+            if (i + 1 < x->c) {
+                const node *next = N(c->lists[x->b + i + 1]);
+
+                then_returns =
+                    is_void && next->op == AST_NODE_RETURN && !next->a;
+            }
+            em_tail_statement(e, c->lists[x->b + i], rt, then_returns);
+        }
+        return;
+    case AST_NODE_IF:
+        em_tail_statement(e, x->b, rt, last);
+        em_tail_statement(e, x->c, rt, last);
+        return;
+    case AST_NODE_WHILE:
+    case AST_NODE_DO:
+    case AST_NODE_SWITCH:
+        em_tail_statement(e, x->b, rt, false);
+        return;
+    case AST_NODE_FOR:
+        em_tail_statement(e, c->lists[x->c + 1], rt, false);
+        return;
+    case AST_NODE_CASE:
+    case AST_NODE_DEFAULT:
+    case AST_NODE_LABEL:
+        em_tail_statement(e, x->c, rt, last);
+        return;
+    case AST_NODE_RETURN: {
+        uint32_t call = em_tail_call_under(c, x->a);
+
+        if (!call)
+            return;
+        ast_qualified_type t = N(call)->ty;
+
+        /* the callee leaves the result where this function's caller wants it */
+        if (AST_QUALIFIED_TYPE_UNQUALIFIED(t) ==
+                AST_QUALIFIED_TYPE_UNQUALIFIED(rt) ||
+            (codegen_type_is_pointer(c, t) && codegen_type_is_pointer(c, rt)) ||
+            (is_void && KIND(c, t) == AST_TYPE_VOID))
+            em_tail_site_add(e, call);
+        return;
+    }
+    case AST_NODE_EXPRESSION: {
+        uint32_t call = last && is_void ? em_tail_call_under(c, x->a) : 0;
+
+        if (!call)
+            return;
+        ast_qualified_type t = N(call)->ty;
+
+        /* a dropped result: not one left on the x87 stack or in memory */
+        if (KIND(c, t) == AST_TYPE_VOID || codegen_type_is_pointer(c, t) ||
+            (codegen_type_is_integer(c, t) && codegen_type_size(c, t) <= 8))
+            em_tail_site_add(e, call);
+        return;
+    }
+    default:
+        return;
+    }
+}
+
+/* the calls in tail position of function fn, for the direct emitters: `return f(...);`, and in a
+   void function a call after which it returns */
+VPRIV void em_tail_sites_find(codegen_context *e, uint32_t fn)
+{
+    cc *c = e->compile_context;
+
+    e->tail_site_count = 0;
+    e->sibling = false;
+    if (!em_tail_caller_ok(e, fn))
+        return;
+    codegen_function_walk_ensure(e->unit, c, fn);
+    if (e->unit->node_flags[c->syms[fn].body] & CODEGEN_NODE_FRAME_EXPOSED)
+        return;
+    em_tail_statement(e, c->syms[fn].body, T(c, c->syms[fn].ty)->base, true);
+}
+
+VPRIV bool em_tail_site(const codegen_context *e, uint32_t call)
+{
+    for (uint32_t i = 0; i < e->tail_site_count; i++)
+        if (e->tail_sites[i] == call)
+            return true;
+    return false;
 }
 
 /* The target must separately reject unsupported ABI/frame states. Capability

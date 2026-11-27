@@ -224,6 +224,7 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
 
     bool sret = r && r->is_in_memory;
     bool musttail = e->musttail;
+    e->sibling = false; /* VIR finds its sibling calls itself */
     uint16_t call_flags = 0;
 
     /* (what the direct emitter refuses, or an argument in a copy in this
