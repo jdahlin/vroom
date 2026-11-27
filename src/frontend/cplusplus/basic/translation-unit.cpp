@@ -324,29 +324,50 @@ analysis_result semantic_analysis::declare(
            merely have been introduced by a using-declaration in the scope
            of the class or namespace nominated by the nested-name-specifier
            of the declarator-id" */
-        lookup_result found =
-            lookup_in_namespace(scope, name, lookup_filter::any);
-        if (found.ambiguous || found.unknown || !found.entity)
+        /* a function of a name a function template holds too (declared
+           above, template_name_functions): the one with these parameters */
+        entity_index beside_template = 0;
+        entity_index holder = entity_table.find(scope, name);
+        if (kind == entity_kind::function && holder &&
+            entity_table[holder].kind == entity_kind::none &&
+            entity_table[holder].held_by_template)
+            for (const template_name_function &x : template_name_functions)
+                if (x.name == holder &&
+                    entity_table[x.function].enclosing == scope &&
+                    same_parameters(type_table,
+                                    entity_table[x.function].type.unqualified(),
+                                    type.unqualified()))
+                    beside_template = x.function;
+        lookup_result found;
+        if (!beside_template)
+            found = lookup_in_namespace(scope, name, lookup_filter::any);
+        if (beside_template) {
+            prior = beside_template;
+        } else if (found.ambiguous || found.unknown || !found.entity) {
             /* one not found may be a friend's, declared in a class
                ([namespace.memdef]/3) */
             return not_supported_because(
                 declaration, "dcl.meaning",
                 "a qualified declaration of a name not found unambiguously");
-        prior = found.entity;
-        entity_index in = entity_table[prior].enclosing;
-        if (entity_table.find(found.found_in, name) != prior ||
-            found.found_in != in)
-            /* named by a using-declaration there, or found through a
+        } else {
+            prior = found.entity;
+            entity_index in = entity_table[prior].enclosing;
+            if (entity_table.find(found.found_in, name) != prior ||
+                found.found_in != in)
+                /* named by a using-declaration there, or found through a
                using-directive */
-            return not_supported_because(declaration, "dcl.meaning",
-                                         "a qualified redeclaration through a "
-                                         "using declaration or directive");
-        for (entity_index y = in; y != scope; y = entity_table[y].enclosing)
-            if (!y || !entity_table[y].inline_)
-                return not_supported_because(declaration, "dcl.meaning",
-                                             "a qualified redeclaration of a "
-                                             "member of a nested namespace");
-        scope = in;
+                return not_supported_because(
+                    declaration, "dcl.meaning",
+                    "a qualified redeclaration through a "
+                    "using declaration or directive");
+            for (entity_index y = in; y != scope; y = entity_table[y].enclosing)
+                if (!y || !entity_table[y].inline_)
+                    return not_supported_because(
+                        declaration, "dcl.meaning",
+                        "a qualified redeclaration of a "
+                        "member of a nested namespace");
+            scope = in;
+        }
     } else {
         prior = entity_table.find(scope, name);
         /* [basic.link]/7: a member of the namespace declared in a block before,
