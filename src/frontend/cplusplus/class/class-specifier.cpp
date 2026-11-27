@@ -1153,6 +1153,9 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
        declared in the smallest namespace or block scope that contains the
        declaration": the scope a class it declares is declared in */
     entity_index target = current_scope;
+    while (entity_table[target].kind == entity_kind::block_scope &&
+           entity_table[target].template_scope)
+        target = entity_table[target].enclosing;
     if (is_namespace(target) && defining_class) {
         target = defining_class;
         while (!is_namespace(target) &&

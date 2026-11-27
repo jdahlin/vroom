@@ -631,6 +631,7 @@ struct entity {
        scope */
     entity_index conflicts = 0;
     bool parameter_scope = false;
+    bool template_scope = false;
     /* [basic.link]: its declarations, in order, are a chain through
        `declarations`: the first and the last */
     uint32_t first_declaration = 0, last_declaration = 0;
