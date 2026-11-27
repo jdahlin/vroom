@@ -255,7 +255,7 @@ bool semantic_analysis::ends_in_ellipsis(SyntaxElement a) const
                                       preprocessing_op_or_punc::ELLIPSIS);
 }
 
-/* a pack expansion among a template-id's written arguments whose pattern
+/* [impl.clang] a pack expansion among a template-id's written arguments whose pattern
    names a pack an enclosing instantiation bound (libc++'s
    _And<_IsDefault<_Tp>...> in tuple's constructors): the pattern's type for
    each element, which the mangler spells one after another as clang does
