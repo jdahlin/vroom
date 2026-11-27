@@ -1099,6 +1099,8 @@ VPRIV bool em_tail_target_ok(codegen_context *e, uint32_t s);
 VPRIV bool em_tail_returns_twice(codegen_context *e, uint32_t s);
 VPRIV void em_tail_sites_find(codegen_context *e, uint32_t fn);
 VPRIV bool em_tail_site(const codegen_context *e, uint32_t call);
+VPRIV uint32_t em_argument_borrowed(cc *c, uint32_t fn, uint32_t i,
+                                    uint32_t arg);
 VPRIV bool em_tail_candidate(codegen_context *e, uint32_t fn, uint32_t expr,
                              uint32_t maxargs, uint32_t *callee);
 VPRIV bool a64_tail_return(codegen_context *e, uint32_t expr);

@@ -122,6 +122,8 @@ typedef struct codegen_prepass_state {
     bool discard_param;
     uint32_t
         indexed; /* the array or pointer operand of the a[b] being walked */
+    uint32_t
+        borrowed; /* the address-of argument being walked, which its callee does not keep */
     bool
         record_calls; /* VIR's inlining sizes: the direct calls go to codegen_prepass_calls */
     uint32_t call_count;
@@ -792,7 +794,7 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
         /* (an array or vector only indexed here hands its address to no one) */
         if ((x->aux == AST_CAST_ARRAY_DECAY ||
              x->aux == AST_CAST_VECTOR_ADDRESS) &&
-            n != P->indexed)
+            n != P->indexed && n != P->borrowed)
             codegen_prepass_address_note(P, x->a);
         bool saved = P->discard_param;
         if (KIND(c, x->ty) == AST_TYPE_VOID) {
@@ -809,7 +811,8 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
     }
     case AST_NODE_ADDRESS:
         codegen_prepass_written_mark(P, x->a, true);
-        codegen_prepass_address_note(P, x->a);
+        if (n != P->borrowed)
+            codegen_prepass_address_note(P, x->a);
         lab = codegen_prepass_node_walk(P, x->a);
         break;
     case AST_NODE_PRE_INCREMENT:
@@ -915,8 +918,17 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
              x->aux == CC_BUILTIN_FRAME_ADDRESS ||
              x->aux == CC_BUILTIN_VA_START))
             codegen_prepass_frame_exposed(P);
-        for (uint32_t i = 0; i < x->c; i++)
-            lab |= codegen_prepass_node_walk(P, c->lists[x->b + i]);
+        for (uint32_t i = 0; i < x->c; i++) {
+            uint32_t a = c->lists[x->b + i], ref;
+
+            if (x->op == AST_NODE_CALL) {
+                uint32_t to = codegen_call_direct_callee(c, x->a, &ref);
+
+                if (to)
+                    P->borrowed = em_argument_borrowed(c, to, i, a);
+            }
+            lab |= codegen_prepass_node_walk(P, a);
+        }
         /*
 		 * The va builtins take their va_lists' addresses (Apple's char *
 		 * could otherwise be a register variable): every operand.

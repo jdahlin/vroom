@@ -2,7 +2,7 @@
  * tail.c: sibling calls (tail calls).  Two ways in: em_tail_candidate, a body that is exactly
  * `return f(args);` forwarding to a direct call, which the direct emitters emit without a frame;
  * and em_tail_sites_find, the calls in tail position of any function whose body takes no address
- * in its frame (the prepass's CODEGEN_NODE_FRAME_EXPOSED), which their call lowering jumps to.
+ * in its frame (the prepass's CODEGEN_NODE_FRAME_EXPOSED; tail-borrow.cpp), which their call lowering jumps to.
  * VIR finds its own on its instructions (codegen/vir/lowering-driver.cpp).
  *
  * em_tail_caller_ok and em_tail_target_ok are the option and attribute rules (-O1 or more, sibling

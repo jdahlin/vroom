@@ -55,7 +55,11 @@ The frontend and walker also apply local optimizations when `cc_opts.opt >= 1`.
   in registers) jumps after the epilogue, when the function takes no address in
   its frame (`&local`, a local array or vector not just indexed, a compound
   literal, inline asm, a VLA or `alloca`, `setjmp`, `__builtin_frame_address`,
-  a `try`), has no live cleanup, and the call has no argument on the stack, no
+  a `try`) -- an address passed to a function whose source drops it before
+  returning, inlined or not, does not count (`opt/tail-borrow.cpp`: a static or
+  C++ inline function that only loads and stores through it, hands it to such
+  functions or `memcpy`'s bytes, or returns it to its caller's own such use) --
+  has no live cleanup, and the call has no argument on the stack, no
   result in memory (x86-64), no argument by reference to a copy (arm64).  VIR
   asks the same of its own instructions after inlining and slot promotion: a
   slot's address that only loads, stores and copies use does not count.  The
