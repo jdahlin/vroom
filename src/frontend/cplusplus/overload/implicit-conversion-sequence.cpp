@@ -755,10 +755,33 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                         false, several, cannot_tell);
                     /* ([temp.deduct.conv]/6's deductions of a pointer are
                        not all made here) */
-                    functions = found || several || cannot_tell ||
-                                ((x.kind == type_kind::pointer ||
-                                  x.kind == type_kind::pointer_to_member) &&
-                                 has_conversion_function_templates(c2));
+                    bool maybe_template =
+                        (x.kind == type_kind::pointer ||
+                         x.kind == type_kind::pointer_to_member) &&
+                        has_conversion_function_templates(c2);
+                    if (found && !several && !cannot_tell && !maybe_template) {
+                        expression_meaning value =
+                            conversion_function_result(found);
+                        qualified_type target_unqual =
+                            qualified_type::make(t1.unqualified(), cv_none);
+                        sequence scs =
+                            standard_conversion_sequence(value, target_unqual);
+                        if (scs.kind == sequence::form::standard) {
+                            scs.kind = sequence::form::user_defined;
+                            scs.function = found;
+                            scs.reference = true;
+                            scs.rvalue_reference = rvalue_reference;
+                            bool direct_lvalue =
+                                !rvalue_reference &&
+                                value.category == value_category::lvalue &&
+                                reference_compatible(t1, value.type);
+                            scs.binds_rvalue = !direct_lvalue;
+                            scs.target = t1;
+                            return scs;
+                        }
+                    }
+                    functions =
+                        found || several || cannot_tell || maybe_template;
                 }
                 if (functions) {
                     sequence cannot_tell = of_form(sequence::form::unknown);
