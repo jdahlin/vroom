@@ -4155,14 +4155,23 @@ constness semantic_analysis::evaluate_invocation(
     const entity &e = entity_table[f];
     if (e.kind != entity_kind::function)
         return CONST_UNKNOWN;
-    /* [expr.prim.lambda.closure]/4: a closure's function call operator is
-       a constexpr function "if it satisfies the requirements for a
-       constexpr function": evaluated, and not a constant expression where
-       its body is not one */
-    bool implicit_constexpr =
-        (e.enclosing && entity_table[e.enclosing].lambda &&
-         entity_table[e.enclosing].call_operator == f) ||
-        (e.implicit && e.definition);
+    /* [expr.prim.lambda.closure]/4: a closure's function call operator
+       (a generic lambda's specialization of it too) is a constexpr
+       function "if it satisfies the requirements for a constexpr
+       function": evaluated, and not a constant expression where its body
+       is not one */
+    bool call_operator = false;
+    if (e.enclosing && entity_table[e.enclosing].lambda) {
+        entity_index declared = entity_table[e.enclosing].call_operator;
+        /* (before C++17 no lambda's is constexpr, which a non-generic
+           one's evaluation does not tell apart yet) */
+        call_operator =
+            declared == f ||
+            (e.instantiation &&
+             instantiations[e.instantiation - 1].template_entity == declared &&
+             tokens.files.behavior.edition >= standard_edition::cplusplus_17);
+    }
+    bool implicit_constexpr = call_operator || (e.implicit && e.definition);
     if (!e.constexpr_ && !implicit_constexpr) {
         /* (a library builtin, declared with C language linkage, may be
            one the evaluator does not know clang evaluates) */
