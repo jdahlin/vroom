@@ -684,7 +684,7 @@ static bool codegen_initializer_has_label_address(cc *c, uint32_t n)
 /* walks every node; returns whether it contains a label (or case) */
 /* the object the lvalue (or array) n designates is not in this function's frame: static
    storage, or reached through a pointer, whose making is noted where it happens */
-static bool codegen_prepass_lvalue_is_outside_frame(cc *c, uint32_t n)
+VPRIV bool codegen_prepass_lvalue_is_outside_frame(cc *c, uint32_t n)
 {
     for (;;) {
         const node *x = N(n);

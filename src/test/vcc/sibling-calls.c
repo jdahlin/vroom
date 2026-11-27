@@ -223,13 +223,15 @@ int main(void)
     F a = {1, 2, 3, 4}, b = {5, 6, 7, 8};
 
     step(&program, DEPTH, a, b, 0.5);
-    printf("%g %g %g\n", (double)vector_result[0], (double)vector_result[3],
-           double_result);
+    /* (the output must not depend on DEPTH: clang's reference is built at -O2) */
+    printf("%g %g %g\n", (double)(vector_result[0] - (float)DEPTH),
+           (double)(vector_result[3] - (float)DEPTH),
+           double_result - (double)DEPTH);
     printf("%d %d\n", is_even(DEPTH), is_odd(DEPTH + 1));
-    printf("%g\n", sum_double(DEPTH, 0, 0));
+    printf("%g\n", sum_double(DEPTH, 0, 0) - 1.5 * (double)DEPTH);
     printf("%s\n", walk_pointer("pointer", DEPTH));
     struct two p = pair_chain(DEPTH, 1, 2), q = pair_swapped(10);
-    printf("%ld %ld %ld %ld\n", p.a, p.b, q.a, q.b);
+    printf("%ld %ld %ld %ld\n", p.a - DEPTH, p.b - 2 * DEPTH, q.a, q.b);
     printf("%d %d %d %d %d\n", local_argument(10), local_array(20),
            local_stored(30), parameter_address(40), local_member(50));
     printf("%d %d %d %d %d %d\n", local_in_register_struct(60),

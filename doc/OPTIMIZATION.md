@@ -58,7 +58,8 @@ The frontend and walker also apply local optimizations when `cc_opts.opt >= 1`.
   a `try`) -- an address passed to a function whose source drops it before
   returning, inlined or not, does not count (`opt/tail-borrow.cpp`: a static or
   C++ inline function that only loads and stores through it, hands it to such
-  functions or `memcpy`'s bytes, or returns it to its caller's own such use) --
+  functions or `memcpy`'s bytes, or returns it to its caller's own such use;
+  the call that is passed it stays a call, since the callee reads the frame) --
   has no live cleanup, and the call has no argument on the stack, no
   result in memory (x86-64), no argument by reference to a copy (arm64).  VIR
   asks the same of its own instructions after inlining and slot promotion: a

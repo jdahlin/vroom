@@ -1094,6 +1094,7 @@ VPRIV void codegen_musttail_check(codegen_context *e, uint32_t call,
                                   uint32_t function);
 VPRIV __attribute__((noreturn)) void codegen_musttail_refuse(codegen_context *e,
                                                              const char *why);
+VPRIV bool codegen_prepass_lvalue_is_outside_frame(cc *c, uint32_t n);
 VPRIV bool em_tail_caller_ok(codegen_context *e, uint32_t fn);
 VPRIV bool em_tail_target_ok(codegen_context *e, uint32_t s);
 VPRIV bool em_tail_returns_twice(codegen_context *e, uint32_t s);

@@ -88,9 +88,32 @@ static uint32_t em_tail_call_under(cc *c, uint32_t n)
     return n;
 }
 
+/* no argument of call is itself the address of something in this frame, which is gone when a
+   sibling call's callee runs: tail-borrow.cpp lets such an address through the prepass because
+   the callee drops it, which only a call that keeps the frame can rely on */
+static bool em_tail_arguments_outside_frame(cc *c, uint32_t call)
+{
+    const node *x = N(call);
+
+    for (uint32_t i = 0; i < x->c; i++) {
+        const node *a = N(c->lists[x->b + i]);
+
+        while (
+            a->op == AST_NODE_CAST &&
+            (a->aux == AST_CAST_NOP || a->aux == AST_CAST_POINTER_TO_POINTER))
+            a = N(a->a);
+        if ((a->op == AST_NODE_ADDRESS ||
+             (a->op == AST_NODE_CAST && (a->aux == AST_CAST_ARRAY_DECAY ||
+                                         a->aux == AST_CAST_VECTOR_ADDRESS))) &&
+            !codegen_prepass_lvalue_is_outside_frame(c, a->a))
+            return false;
+    }
+    return true;
+}
+
 static void em_tail_site_add(codegen_context *e, uint32_t call)
 {
-    if (call &&
+    if (call && em_tail_arguments_outside_frame(e->compile_context, call) &&
         e->tail_site_count < sizeof e->tail_sites / sizeof *e->tail_sites)
         e->tail_sites[e->tail_site_count++] = call;
 }
