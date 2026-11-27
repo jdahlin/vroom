@@ -4101,6 +4101,25 @@ analysis_result semantic_analysis::class_direct_initialization(
     }
     initialized_value value;
     analysis_result r = analysis_result::well_formed;
+    if (arguments.size() == 1 && written_arguments &&
+        (*written_arguments)[0].is(syntax_kind::braced_init_list) &&
+        is_aggregate(c)) {
+        /* [dcl.init]/17.6.2.1: T({...}) of an aggregate: its copy or move
+           constructor is viable, the list initializing the parameter's
+           temporary ([over.ics.list]/9), before any parenthesized aggregate
+           initialization; trivial, so the object is the list's */
+        bool known = false;
+        if (!class_trivially_copyable(c, known) || !known)
+            return not_supported_because(
+                n, "dcl.init",
+                "a braced list moved into a class that is not trivially "
+                "copyable");
+        VTRY_SET(r, list_initialization((*written_arguments)[0], type, false,
+                                        value));
+        if (r == analysis_result::well_formed)
+            class_prvalue(type, value.evaluation, value.node, m);
+        return r;
+    }
     if (!entity_table[c].first_constructor && arguments.empty()) {
         /* [dcl.init]/8.2: value-initialization of a class without a
            user-provided default constructor zero-initializes it (the
