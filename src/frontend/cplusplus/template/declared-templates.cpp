@@ -1105,8 +1105,17 @@ bool semantic_analysis::depends_on_parameter_from(qualified_type t,
         const instantiation_record &x =
             instantiations[entity_table[r.entity].instantiation - 1];
         auto depends_on = [&](const template_argument &a) {
-            return a.kind != template_argument::kind_t::type ||
-                   depends_on_parameter_from(a.type, from);
+            if (a.kind == template_argument::kind_t::type)
+                return depends_on_parameter_from(a.type, from);
+            if (a.kind == template_argument::kind_t::pack)
+                return true;
+            /* a template-parameter named (its position value), else a
+               constant (SkSpan<T>'s defaulted extent) */
+            if (a.template_entity)
+                return a.value >= from;
+            return a.kind != template_argument::kind_t::value ||
+                   made_of_template_parameter(type_table, a.type, &entity_table,
+                                              from);
         };
         for (uint32_t i = 0; i < x.argument_count; i++) {
             const template_argument &a =
