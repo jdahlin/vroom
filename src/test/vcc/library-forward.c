@@ -1,6 +1,7 @@
 /* Library calls written as what the front end computes, as clang: alloca, the
  * parts of a complex number, bzero, bcopy, mempcpy, and strlen and strcmp of
- * literals.  Each argument is evaluated once. */
+ * literals.  Each argument is evaluated once.  At -O0 only alloca is
+ * computed, and the test runtime has no bzero, bcopy or mempcpy. */
 void *alloca(__SIZE_TYPE__);
 double creal(_Complex double), cimag(_Complex double);
 _Complex double conj(_Complex double);
@@ -12,6 +13,22 @@ void bzero(void *, __SIZE_TYPE__);
 void bcopy(const void *, void *, __SIZE_TYPE__);
 void *mempcpy(void *, const void *, __SIZE_TYPE__);
 int printf(const char *, ...);
+#ifndef __OPTIMIZE__
+#define bzero(p, n) __builtin_memset(p, 0, n)
+#define bcopy(s, d, n) __builtin_memmove(d, s, n)
+#define mempcpy(d, s, n) forward_mempcpy(d, s, n)
+static void *forward_mempcpy(void *d, const void *s, __SIZE_TYPE__ n)
+{
+    __builtin_memcpy(d, s, n);
+    return (char *)d + n;
+}
+double creal(_Complex double z) { return __real__ z; }
+double cimag(_Complex double z) { return __imag__ z; }
+_Complex double conj(_Complex double z) { return __builtin_conj(z); }
+float crealf(_Complex float z) { return __real__ z; }
+float cimagf(_Complex float z) { return __imag__ z; }
+_Complex float conjf(_Complex float z) { return __builtin_conjf(z); }
+#endif
 static int calls;
 static __SIZE_TYPE__ three(void) { return ++calls, 3; }
 int main(void)
