@@ -1110,6 +1110,12 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             bool made = !named && function_state.active &&
                         !entity_table[function_state.function].instantiation &&
                         arguments[0].category == value_category::prvalue;
+            /* (in a specialization's own body, an expression of a type
+               that depends on nothing is what it is) */
+            if (!named && function_state.active && instantiation_depth &&
+                entity_table[function_state.function].instantiation &&
+                !depends_on_template_parameter(arguments[0].type))
+                made = true;
             if (!made &&
                 (!named ||
                  !entity_table[entity_table[named].enclosing].parameter_scope))
