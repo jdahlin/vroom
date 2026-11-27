@@ -58,10 +58,35 @@ node_index parser::gnu_offsetof_expression()
     return finish_node(syntax_kind::gnu_offsetof_expression, mark, first);
 }
 
+/* the member `name` of class c or of its base classes
+   ([class.member.lookup]): added to found, its subobject's offset in c to
+   offset.  False for a virtual base, whose offset is not one of the class */
+bool semantic_analysis::offsetof_member(entity_index c, uint32_t name,
+                                        uint64_t at,
+                                        owned_array<entity_index> &found,
+                                        uint64_t &offset)
+{
+    entity_index member = declared_in(c, name, lookup_filter::any);
+    if (member) {
+        found.append(member);
+        offset = at;
+        return true;
+    }
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = entity_table[class_bases[x.first_base + i]];
+        const struct type &t = type_table[b.type.unqualified()];
+        if (b.virtual_base || t.kind != type_kind::class_type ||
+            !offsetof_member(t.entity, name, at + b.offset, found, offset))
+            return false;
+    }
+    return true;
+}
+
 /* [ext:gnu_offsetof] a prvalue of type std::size_t, a constant: the
    offset in bytes of the designated subobject from the start of an
-   object of the type.  A member found in a base class is not handled
-   yet; a template's own operand is
+   object of the type.  A member of a virtual base, or one found in more
+   than one base subobject, is not handled yet; a template's own operand is
    dependent, analysed when it is instantiated */
 analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
                                                 expression_meaning &m)
@@ -109,12 +134,17 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
             !entity_table[record.entity].size)
             return ill_formed(n, "offsetof requires a complete class type",
                               "ext.gnu");
-        entity_index member = declared_in(
-            record.entity, tokens.identifier(c.token()), lookup_filter::any);
-        if (!member)
+        owned_array<entity_index> found;
+        uint64_t base_offset = 0;
+        if (!offsetof_member(record.entity, tokens.identifier(c.token()), 0,
+                             found, base_offset) ||
+            found.size() != 1)
             return not_supported_because(
                 n, "ext.gnu",
-                "offsetof of a member name not found in the class");
+                "offsetof of a member name not found once in the class and "
+                "its non-virtual bases");
+        entity_index member = found[0];
+        offset += base_offset;
         const entity &e = entity_table[member];
         if (e.kind != entity_kind::variable || !e.nonstatic_member ||
             e.anonymous_object)
@@ -124,7 +154,7 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
         offset += e.offset;
         /* [class.union.anon]/1: a member of an anonymous union is one of the
            class whose member its unnamed object is, at that object's offset
-           (and so on, outwards); a member of a base class is not handled yet */
+           (and so on, outwards) */
         entity_index member_of = e.enclosing;
         while (entity_table[member_of].anonymous_object) {
             const entity &object =
@@ -132,9 +162,6 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
             offset += object.offset;
             member_of = object.enclosing;
         }
-        if (member_of != record.entity)
-            return not_supported_because(
-                n, "ext.gnu", "offsetof of a member of a base class");
         t = e.type;
     }
     m = integer_constant(fundamental_type::unsigned_long_int, offset,

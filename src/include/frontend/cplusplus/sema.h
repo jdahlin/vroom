@@ -3903,6 +3903,8 @@ class semantic_analysis
     bool declared_defaulted(entity_index f) const;
     bool clang_trivial_special_members(entity_index c);
     bool class_trivially_copyable(entity_index c, bool &known);
+    bool offsetof_member(entity_index c, uint32_t name, uint64_t at,
+                         owned_array<entity_index> &found, uint64_t &offset);
     analysis_result gnu_offsetof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
     analysis_result gnu_va_arg(SyntaxRef n, expression_meaning &m);
