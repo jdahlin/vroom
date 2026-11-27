@@ -79,6 +79,9 @@ static inline void vir_fix_clear(vir_register_constraint *x)
 typedef struct vir_target_registers {
     uint64_t alloc[2]; /* allocatable registers per class: 0 integer, 1 float */
     uint64_t callee[2]; /* callee-saved */
+    /* allocatable registers that only values of 64 bytes may take (x86-64:
+     * zmm16-zmm31, which narrower AVX-512 forms would need VL for) */
+    uint64_t wide[2];
     /* fixed operands and clobbers of instruction v; *out is cleared (all VIR_REGISTER_NONE) by the caller */
     void (*fixed)(const vir_function *f, uint32_t v,
                   vir_register_constraint *out, void *ctx);

@@ -113,6 +113,23 @@ static uint32_t vir_alloc_check_parameter_location(const vir_alloc_checker *c,
                : VIR_ALLOC_CHECK_SLOT_LOCATION(c->out->slot[q]);
 }
 
+/* register r given value v: a `wide` register holds values of 64 bytes only */
+static void vir_alloc_check_register_width(vir_alloc_checker *c, uint32_t b,
+                                           uint32_t i, uint32_t r, uint32_t v)
+{
+    char t[40], name[16];
+
+    if (r >= 128 || !v ||
+        !(c->registers->wide[VIR_REGISTER_CLASS(r)] >> VIR_REGISTER_NUMBER(r) &
+          1) ||
+        vir_type_size(c->function->insns[v].type) == 64)
+        return;
+    vir_alloc_register_name(name, r);
+    vir_alloc_check_value_name(c, t, v);
+    vir_alloc_check_failure_add(
+        c, b, i, "%s takes %s, which is not a value of 64 bytes", name, t);
+}
+
 static bool vir_alloc_check_move_apply(vir_alloc_checker *c, uint32_t *st,
                                        const vir_edge_move *m, uint32_t b)
 {
@@ -135,6 +152,7 @@ static bool vir_alloc_check_move_apply(vir_alloc_checker *c, uint32_t *st,
     switch (m->kind) {
     case VIR_EDIT_MOVE:
         st[d] = st[s];
+        vir_alloc_check_register_width(c, b, 0, d, st[d]);
         break;
     case VIR_EDIT_REMATERIALIZE:
         if (m->value >= c->function->constant_count || !m->value) {
@@ -143,6 +161,7 @@ static bool vir_alloc_check_move_apply(vir_alloc_checker *c, uint32_t *st,
                 c, b, 0, "edge rematerializes %s, not a constant", t);
         }
         st[d] = m->value;
+        vir_alloc_check_register_width(c, b, 0, d, st[d]);
         break;
     case VIR_EDIT_EXCHANGE: {
         uint32_t x = st[d];
@@ -150,6 +169,8 @@ static bool vir_alloc_check_move_apply(vir_alloc_checker *c, uint32_t *st,
         vir_alloc_check_register_written_mark(c, s);
         st[d] = st[s];
         st[s] = x;
+        vir_alloc_check_register_width(c, b, 0, d, st[d]);
+        vir_alloc_check_register_width(c, b, 0, s, st[s]);
         break;
     }
     default:
@@ -178,6 +199,7 @@ static void vir_alloc_check_block(vir_alloc_checker *c, uint32_t b,
         uint32_t q = k->first + j;
         uint8_t r = o->operand_registers[pos++];
 
+        vir_alloc_check_register_width(c, b, 0, r, q);
         if (r != VIR_REGISTER_NONE && o->slot[q] != VIR_BLOCK_NONE &&
             o->spill_defined[q])
             st[VIR_ALLOC_CHECK_SLOT_LOCATION(o->slot[q])] =
@@ -233,6 +255,7 @@ static void vir_alloc_check_block(vir_alloc_checker *c, uint32_t b,
                         st[VIR_ALLOC_CHECK_SLOT_LOCATION(o->slot[d->value])];
                 }
                 vir_alloc_check_register_written_mark(c, d->dst);
+                vir_alloc_check_register_width(c, b, i, d->dst, st[d->dst]);
                 break;
             case VIR_EDIT_REMATERIALIZE:
                 if (!d->value || d->value >= f->constant_count)
@@ -240,6 +263,7 @@ static void vir_alloc_check_block(vir_alloc_checker *c, uint32_t b,
                         c, b, i, "rematerializes a non-constant");
                 st[d->dst] = d->value;
                 vir_alloc_check_register_written_mark(c, d->dst);
+                vir_alloc_check_register_width(c, b, i, d->dst, st[d->dst]);
                 break;
             case VIR_EDIT_MOVE:
                 if (!vir_alloc_check_register_is_valid(c, d->src, false))
@@ -248,6 +272,7 @@ static void vir_alloc_check_block(vir_alloc_checker *c, uint32_t b,
                 else
                     st[d->dst] = st[d->src];
                 vir_alloc_check_register_written_mark(c, d->dst);
+                vir_alloc_check_register_width(c, b, i, d->dst, st[d->dst]);
                 break;
             case VIR_EDIT_SWAP:
                 swapped = true;
@@ -358,6 +383,7 @@ static void vir_alloc_check_block(vir_alloc_checker *c, uint32_t b,
                     }
                     st[r] = i;
                     vir_alloc_check_register_written_mark(c, r);
+                    vir_alloc_check_register_width(c, b, i, r, i);
                 }
             }
             if (o->slot[i] != VIR_BLOCK_NONE && o->spill_defined[i]) {
