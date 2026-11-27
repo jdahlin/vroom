@@ -1486,12 +1486,20 @@ analysis_result semantic_analysis::template_template_argument(
         }
     } else if (name.is(syntax_kind::qualified_id)) {
         auto c = name;
-        if (name.size() != 2 || !c[0].is(syntax_kind::nested_name_specifier))
+        if (!c[0].is(syntax_kind::nested_name_specifier))
             return not_supported_because(
                 at, "temp.arg.template",
                 "a template template argument with an unhandled qualified-id");
         qualifier = c[0].index();
-        name = c[1];
+        if (name.size() == 2) {
+            name = c[1];
+        } else if (name.size() == 3 && c[1].is(standard_keyword::template_)) {
+            name = c[2];
+        } else {
+            return not_supported_because(
+                at, "temp.arg.template",
+                "a template template argument with an unhandled qualified-id");
+        }
     }
     if (!name.is_token() || tokens[name.token()].kind != token_kind::identifier)
         return not_supported_because(
@@ -1501,7 +1509,8 @@ analysis_result semantic_analysis::template_template_argument(
     if (qualifier) {
         nominated_scope scope;
         VTRY(r, nested_name_specifier(qualifier, scope));
-        if (scope.entity && !is_namespace(scope.entity))
+        if (scope.entity && !is_namespace(scope.entity) &&
+            entity_table[scope.entity].kind != entity_kind::class_type)
             return not_supported_because(
                 at, "temp.arg.template",
                 "a template template argument qualified by a non-namespace");
@@ -1605,9 +1614,12 @@ analysis_result semantic_analysis::default_template_arguments(
             arguments[i] = make_pack(nullptr, 0);
             continue;
         }
-        if (!form.has_default)
+        if (!form.has_default) {
+            if (substituting)
+                return analysis_result::ill_formed;
             return not_supported_because(
                 at, "temp.arg", "a parameter with no argument and no default");
+        }
         entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                                template_lexical_outer(ft));
         /* the names of the declaration that gave the default

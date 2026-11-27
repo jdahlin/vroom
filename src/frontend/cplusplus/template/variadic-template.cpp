@@ -342,6 +342,22 @@ analysis_result semantic_analysis::parameter_pack_expansion(
     uint32_t before = 0, after = 0;
     bool in_before = expansion_count(first, found, before);
     bool in_after = expansion_count(found + 1, end, after);
+    for (auto seq : d.elements()) {
+        if (!seq.decl_specifier_seq())
+            continue;
+        entity_index pack = find_pack(invented_parameter_name(seq));
+        if (pack) {
+            uint32_t n = entity_table[pack].member_count;
+            if (in_before && before != n)
+                return not_supported_because(
+                    d, "temp.variadic",
+                    "a pack expansion in a parameter not last or of unequal "
+                    "lengths");
+            before = n;
+            in_before = true;
+        }
+        break;
+    }
     if (!in_before && !in_after)
         return analysis_result::well_formed;
     if (!last || (in_before && in_after && before != after))

@@ -576,11 +576,26 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
            whose type names a pack, is that pack's expansion (an
            instantiation's: R (*)(A...) with A bound to its elements) */
         bool clause_expansion = false;
-        if (!ellipsis && variadic && k + 1 == declarations2.size() &&
-            expansion_count(declarations2[k].first_token(),
-                            declarations2[k].end_token(), elements)) {
-            clause_expansion = true;
-            ellipsis = clause_ellipsis;
+        if (!ellipsis && variadic && k + 1 == declarations2.size()) {
+            bool has_pack =
+                expansion_count(declarations2[k].first_token(),
+                                declarations2[k].end_token(), elements);
+            if (!has_pack) {
+                for (auto seq : declarations2[k].elements()) {
+                    if (!seq.decl_specifier_seq())
+                        continue;
+                    entity_index pack = find_pack(invented_parameter_name(seq));
+                    if (pack) {
+                        elements = entity_table[pack].member_count;
+                        has_pack = true;
+                    }
+                    break;
+                }
+            }
+            if (has_pack) {
+                clause_expansion = true;
+                ellipsis = clause_ellipsis;
+            }
         }
         if (ellipsis) {
             uint32_t pack_name = 0;

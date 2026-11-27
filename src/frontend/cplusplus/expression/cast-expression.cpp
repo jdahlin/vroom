@@ -935,10 +935,21 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
                          (!lvalue_reference || (referenced.cv() == cv_const &&
                                                 (kinds & cast_static)));
         if (lvalue_reference && m.category != value_category::lvalue &&
-            !xvalue_ok)
+            !xvalue_ok) {
+            if (kinds == cast_static)
+                return ill_formed(at,
+                                  "static_cast to an lvalue reference from a "
+                                  "non-lvalue",
+                                  "expr.static.cast");
+            if (kinds == cast_const)
+                return ill_formed(at,
+                                  "const_cast to an lvalue reference from a "
+                                  "non-lvalue",
+                                  "expr.const.cast");
             return not_supported_because(at, "expr.cast",
                                          "a cast to an lvalue reference from a "
                                          "value that is not an lvalue");
+        }
         if (same && m.type.cv() == referenced.cv() && m.category == category &&
             (kinds & (cast_static | cast_const)))
             /* the glvalue itself */

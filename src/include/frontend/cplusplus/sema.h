@@ -4792,6 +4792,9 @@ class semantic_analysis
     aggregate_elements(SyntaxRef list,
                        const owned_array<SyntaxElement> &clauses, size_t &next,
                        qualified_type type, initialized_value &result);
+    analysis_result parenthesized_aggregate_initialization(
+        SyntaxRef at, qualified_type type,
+        owned_array<expression_meaning> &arguments, initialized_value &result);
     /* [dcl.init.aggr]/2: an empty base class, an element with no field */
     analysis_result
     empty_base_element(SyntaxRef list,

@@ -1498,9 +1498,22 @@ analysis_result semantic_analysis::construct(
             }
         }
     }
-    VTRY(resolved,
-         best_viable_function(at, candidates, nullptr, arguments, best, nullptr,
-                              !copy, written_arguments, list_class));
+    bool no_viable = false;
+    bool try_paren_aggregate =
+        !copy && !nested_list &&
+        tokens.files.behavior.edition >= standard_edition::cplusplus_20 &&
+        is_aggregate(c) &&
+        !(written_arguments && written_arguments->size() == 1 &&
+          (*written_arguments)[0].is(syntax_kind::braced_init_list));
+    bool *no_viable_out = nullptr;
+    if (try_paren_aggregate)
+        no_viable_out = &no_viable;
+    VTRY(resolved, best_viable_function(at, candidates, nullptr, arguments,
+                                        best, no_viable_out, !copy,
+                                        written_arguments, list_class));
+    if (no_viable)
+        return parenthesized_aggregate_initialization(at, type, arguments,
+                                                      result);
     entity_index chosen = candidates[best].function;
     if (uint32_t g = candidates[best].template_index) {
         /* the chosen specialization's definition ([temp.inst]/4) */

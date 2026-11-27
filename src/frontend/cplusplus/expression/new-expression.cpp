@@ -754,6 +754,12 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                 r = construct(n, type, list, object.node, value);
             else if (list.size() == 1)
                 r = initialize_with(n, list[0], type, true, false, value);
+            else if (c &&
+                     tokens.files.behavior.edition >=
+                         standard_edition::cplusplus_20 &&
+                     is_aggregate(c))
+                r = parenthesized_aggregate_initialization(n, type, list,
+                                                           value);
             else if (c)
                 return not_supported_because(
                     n, "dcl.init",
