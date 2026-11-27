@@ -1614,9 +1614,12 @@ analysis_result semantic_analysis::default_template_arguments(
             arguments[i] = make_pack(nullptr, 0);
             continue;
         }
-        if (!form.has_default)
+        if (!form.has_default) {
+            if (substituting)
+                return analysis_result::ill_formed;
             return not_supported_because(
                 at, "temp.arg", "a parameter with no argument and no default");
+        }
         entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                                template_lexical_outer(ft));
         /* the names of the declaration that gave the default
