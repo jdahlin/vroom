@@ -146,9 +146,14 @@ deleted in the commit that gives it a table row or a generic operation.
     VEX instruction (the assembler gained the forms).  Stockfish AVX2
     (`-O3`, depth 13, node count as clang's): 465 k nodes/second, from about
     121 k (`-O2`).  clang: 1979 k.
-  - Left: the 32-byte ABI in VIR (calls that are not inlined); shifts,
-    vector-with-number operations, `vsplat` and shuffles on 256 bits (still
-    two halves); the front end's lane expansions (`madd`, `maddubs`,
+  - XV3d (done): `vsplat` of 256 bits from the set intrinsics' element
+    stores, `vmovmskps`, and the shift builtins as one VEX shift; BMI2's
+    `pext` and `pdep` are VIR's x86 operation on general registers (their
+    stencils took whole functions out of VIR).  Stockfish AVX2 `-O3`:
+    1239 k nodes/second (`USE_PEXT`).
+  - Left: the 32-byte ABI in VIR (calls that are not inlined); shift
+    operators, vector-with-number operations and shuffles on 256 bits
+    (still two halves); the front end's lane expansions (`madd`, `maddubs`,
     `mulhi`, `packus`, saturation) as instructions.
 - **XV4** The rest of SSE through AVX2, by family.
 - **XV5** AVX-512: 512 bits, mask registers, EVEX rounding and broadcast.

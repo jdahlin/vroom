@@ -129,8 +129,14 @@ VPRIV void x64_vir_x86_wide_emit(x64_vir_context *L, uint32_t code, int d,
 {
     const char *mnemonic = x64_x86_code_mnemonic(code);
     char text[128];
+    uint32_t immediate;
 
-    if (code & X64_X86_SHIFT)
+    if (!(code & (X64_X86_SHIFT | X64_X86_UNARY | X64_X86_IMMEDIATE)) &&
+        x64_x86_shift_immediate_code(code, 0, &immediate))
+        /* a shift by a count: the count in an xmm register */
+        snprintf(text, sizeof text, "\tv%s\t%%xmm%d, %%ymm%d, %%ymm%d\n",
+                 mnemonic, b - XMM0, a - XMM0, d - XMM0);
+    else if (code & X64_X86_SHIFT)
         snprintf(text, sizeof text, "\tv%s\t$%u, %%ymm%d, %%ymm%d\n", mnemonic,
                  code >> 16 & 0xff, a - XMM0, d - XMM0);
     else if (code & X64_X86_UNARY) {

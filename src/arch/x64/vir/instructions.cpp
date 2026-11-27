@@ -485,6 +485,23 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         x64_record_emit_three_registers(e, X64_OP_CRC32, 8, d, a, c);
         return;
     case VIR_OP_X86:
+        if (!vir_type_is_vector(i->type) &&
+            !vir_type_is_vector(L->function->insns[i->a].type)) {
+            /* pext, pdep: three general registers */
+            char text[96];
+            const char *const *names = x64_register_names_32;
+            char suffix = 'l';
+
+            if (i->type == VIR_TYPE_I64) {
+                names = x64_register_names_64;
+                suffix = 'q';
+            }
+            snprintf(text, sizeof text, "\t%s%c\t%%%s, %%%s, %%%s\n",
+                     x64_x86_code_mnemonic(i->c), suffix, names[c], names[a],
+                     names[d]);
+            x64_vir_text_append(L, text);
+            return;
+        }
         if (!vir_type_is_vector(i->type)) { /* movmsk: to a general register */
             char text[64];
 

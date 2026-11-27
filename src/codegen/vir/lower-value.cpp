@@ -885,6 +885,17 @@ static codegen_value virbuild_halved_builtin(codegen_context *e, uint32_t n,
     codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
                         .align = 16,
                         .offset = walk_slot_temporary(e, 32, 16)};
+    if (count && virbuild_wide_vectors(e)) {
+        /* one VEX shift of the whole vector, the count in an xmm register
+		 * (the simplifier puts a constant one in the instruction) */
+        virbuild_vector_scalar(e, VIR_OP_X86, code, VIR_TYPE_I64X4, 8, r[0],
+                               r[1], 4, false, &d, 0);
+        for (unsigned i = 0; i < 2; i++)
+            WALK_LOWER(tfree)(e, r[i]);
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number =
+                               (uint8_t)WALK_LOWER(laddr)(e, &d));
+    }
     if (!count && virbuild_wide_vectors(e)) { /* one VEX instruction */
         virbuild_vector_binary(e, VIR_OP_X86, code, VIR_TYPE_I64X4, 8, r[0],
                                r[1], &d, 0);
@@ -922,6 +933,31 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
     int crossing = 0;
     if (CODEGEN_IS_X64(c))
         crossing = x64_x86_crossing_builtin(e, n);
+    if (crossing >= 4) { /* pext and pdep of 4 or 8 bytes */
+        const uint32_t *argument = &c->lists[x->b];
+        uint32_t type = VIR_TYPE_I32, value[2];
+        const char *mnemonic = "pext";
+
+        if (crossing & 1)
+            type = VIR_TYPE_I64;
+        if (crossing >= 6)
+            mnemonic = "pdep";
+        for (unsigned i = 0; i < 2; i++) {
+            codegen_value v = walk_value_emit(e, argument[i]);
+
+            value[i] = virbuild_walker_value_get(e, &v, type);
+            if (v.kind == CODEGEN_VALUE_REGISTER)
+                virbuild_tfree(e, v.register_number);
+        }
+        int result = virbuild_treg(e);
+
+        virbuild_register_write(
+            e, result,
+            virbuild_insn_append(e, VIR_OP_X86, type, 0, value[0], value[1],
+                                 x64_x86_operator_code(mnemonic)));
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)result);
+    }
     if (crossing) {
         const uint32_t *argument = &c->lists[x->b];
         codegen_value v = walk_value_emit(e, argument[0]);

@@ -319,6 +319,21 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
         f.imm = c;
         return x64_emit(a, &f);
     }
+    /* pext/pdep mask, src, dst (BMI2: VEX f3/f2 0f38 f5; vvvv the source) */
+    if (nops == 3 && (!strncmp(mn, "pext", 4) || !strncmp(mn, "pdep", 4)) &&
+        (mn[4] == 'l' || mn[4] == 'q' || !mn[4]) && o[1].kind == XK_REG &&
+        o[1].cls == XR_GPR && o[2].kind == XK_REG && o[2].cls == XR_GPR) {
+        uint8_t ops[3] = {0x0f, 0x38, 0xf5};
+        uint8_t prefix = 0xf2;
+
+        if (mn[1] == 'e')
+            prefix = 0xf3;
+        if (o[0].kind == XK_EXPR)
+            o[0].kind = XK_MEM;
+        return x64_emit_form(a, F(.w = o[2].size == 8, .rep = prefix, .op = ops,
+                                  .nop = 3, .reg = o[2].reg, .rm = &o[0],
+                                  .vvvv = o[1].reg, .vex = 1));
+    }
     return X64_NEXT;
 }
 

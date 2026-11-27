@@ -55,6 +55,30 @@ __attribute__((noinline, target("avx2"))) static void splats(__m256i *o, int x,
     o[3] = _mm256_set1_epi64x(y);
     o[4] = _mm256_add_epi32(_mm256_set1_epi32(-1), _mm256_set1_epi16(1));
 }
+/* shifts by a constant, one instruction on the whole vector; counts at and
+   past the lane's width too */
+__attribute__((noinline, target("avx2"))) static void shifts(__m256i *o,
+                                                             const __m256i *a)
+{
+    o[0] = _mm256_add_epi16(_mm256_slli_epi16(a[0], 7),
+                            _mm256_srli_epi16(a[1], 3));
+    o[1] = _mm256_add_epi32(_mm256_srai_epi32(a[2], 5),
+                            _mm256_slli_epi32(a[3], 31));
+    o[2] = _mm256_xor_si256(_mm256_slli_epi64(a[4], 40),
+                            _mm256_srli_epi64(a[5], 64));
+    o[3] = _mm256_xor_si256(_mm256_srai_epi16(a[6], 20),
+                            _mm256_slli_epi16(a[7], 16));
+    o[4] = _mm256_srli_epi32(a[0], 0);
+}
+/* BMI2's bit gather and scatter on general registers */
+__attribute__((noinline, target("bmi2"))) static unsigned long long
+gather(unsigned long long a, unsigned long long m)
+{
+    return _pext_u64(a, m) * 3 + _pdep_u64(a, m) * 5 +
+           _pext_u32((unsigned)a, (unsigned)m) * 7ull +
+           _pdep_u32((unsigned)m, (unsigned)a) +
+           _pext_u64(a, 0xff00ff00ff00ff00ull);
+}
 __attribute__((noinline, target("avx2"))) static int signs(const __m256i *a)
 {
     return _mm256_movemask_ps(_mm256_castsi256_ps(a[0])) * 256 +
@@ -76,6 +100,13 @@ int main(void)
         printf("\n");
         for (int i = 0; i + 1 < 8; i++)
             printf("%x ", signs((const __m256i *)in + i));
+        shifts((__m256i *)out, (const __m256i *)in);
+        for (int i = 0; i < 40; i++)
+            printf("%08x ", out[i / 8][i % 8]);
+        for (int i = 0; i + 1 < 8; i++)
+            printf("%llx ", gather(0x9e3779b97f4a7c15ull * (i + 1),
+                                   0xbf58476d1ce4e5b9ull * (n + i)));
+        printf("\n");
         splats((__m256i *)out, n * 0x12345 - 0x80000, -0x123456789LL * n);
         for (int i = 0; i < 40; i++)
             printf("%08x ", out[i / 8][i % 8]);
