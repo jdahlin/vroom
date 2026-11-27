@@ -939,6 +939,29 @@ The natural alignment of x86 vectors is 32/64 bytes even without AVX, while
 ARM64 keeps the 16-byte limit. 42 variadic compile/block cases, 18 cross calls
 with clang and 12 layout comparisons pass in unity and file-by-file builds.
 
+### 2026-11-27: 512-bit and over-wide vectors (System V)
+
+The direct emitter passes and returns vectors of every width as clang:
+
+| vector (or record of one) | SSE | AVX | AVX-512F |
+|---|---|---|---|
+| 32 bytes, argument and result | memory; result in xmm0:xmm1 (record: pointer) | ymm | ymm |
+| 64 bytes, argument and result | memory; result in xmm0-3 (record: pointer) | memory; result in ymm0:ymm1 (record: pointer) | zmm |
+| 128 bytes, result | pointer | ymm0-3 | zmm0:zmm1 |
+| 256 bytes, result | pointer | pointer | zmm0-3 |
+
+Wider arguments go on the stack, aligned to the vector.  A variadic function
+takes none in ymm or zmm, named or not.  Vectors of several `__int128` (and
+records of one) are memory whatever the features.  A direct call whose caller
+and callee would place a value differently (target attributes) is an error.
+VIR still falls back to the direct emitter, per function, for any vector
+argument or result and for records in wide registers (PLAN-x86-vir.md step 1).
+Still refused: packed boolean vectors over 32 bytes with AVX, and every wide
+vector case of the Microsoft convention that was refused before.  Tests:
+`src/test/abi/avx_wide_vectors`, `avx512_vectors` (hosts with AVX-512),
+`bench/vcc-x86target.py`.  Skia's `SkOpts_ml3.cpp` and `SkOpts_ml4.cpp`
+compile.
+
 ### OPT3 integration with X5 (2026-11-11)
 
 Register locals use the same csslot/CFI as asm. Private asm snapshots

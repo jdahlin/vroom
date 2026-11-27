@@ -134,6 +134,15 @@ static bool x64_abi_classes_find(cc *c, ast_qualified_type t, uint64_t off,
     return true;
 }
 
+/* clang passes and returns a vector of several __int128 in memory, whatever
+   the features */
+static bool x64_abi_vector_of_int128(cc *c, ast_qualified_type t)
+{
+    int element = KIND(c, T(c, t)->base);
+
+    return element == AST_TYPE_INT128 || element == AST_TYPE_UINT128;
+}
+
 /* Wide records use AVX registers only for SSE followed entirely by SSEUP.
    Track all eightbytes, including union merges and padding, without changing
    the existing two-eightbyte transport classifier. */
@@ -201,6 +210,8 @@ static bool x64_abi_wide_classes_find(cc *c, ast_qualified_type t, uint64_t off,
     if (!size)
         return true;
     if (x->kind == AST_TYPE_VECTOR && size >= 16) {
+        if (size > 16 && x64_abi_vector_of_int128(c, t))
+            return false;
         if (off % 8 || size % 8)
             return false;
         for (uint64_t i = 0; i < size / 8; i++)
@@ -230,17 +241,55 @@ static bool x64_abi_type_is_wide_record(cc *c, ast_qualified_type t)
     return true;
 }
 
-static void x64_abi_vector_check(codegen_context *e, uint64_t size, bool vector,
-                                 bool wide_record, x86_features features)
+/* the bytes of the widest vector register the features give */
+static uint64_t x64_abi_vector_register_bytes(x86_features features)
 {
-    /* (32 bytes travel in a ymm register: x64_classify; 64 in a zmm are not
-       done) */
-    bool unsupported =
-        vector && size > 32 && x86_feature_has(features, X86_FEATURE_AVX);
+    if (x86_feature_has(features, X86_FEATURE_AVX512F))
+        return 64;
+    if (x86_feature_has(features, X86_FEATURE_AVX))
+        return 32;
+    return 16;
+}
 
-    unsupported |= wide_record && size == 64 &&
-                   x86_feature_has(features, X86_FEATURE_AVX512F);
-    if (unsupported)
+/* [x86-64 psABI 3.2.3] a named __m256 or __m512 (or a record of one) is SSE
+   and SSEUPs: one register, where there is one that wide */
+static bool x64_abi_in_one_register(uint64_t size, uint64_t width)
+{
+    return (size == 32 || size == 64) && size <= width;
+}
+
+/* a wider vector result is split over up to four registers, else it goes
+   through the hidden pointer (clang): the bytes in each, 0 for the pointer */
+static uint64_t x64_abi_result_split(uint64_t size, uint64_t width)
+{
+    if (size < 32 || size / width > 4)
+        return 0;
+    if (size < width)
+        return size;
+    return width;
+}
+
+/* whether caller and callee, with vector registers of these widths, would
+   place a value differently */
+static bool x64_abi_widths_differ(const walk_argument *a, bool result,
+                                  uint64_t caller, uint64_t callee)
+{
+    if (!a->is_vector && !a->is_wide_record)
+        return false;
+    if (x64_abi_in_one_register(a->size, caller) !=
+        x64_abi_in_one_register(a->size, callee))
+        return true;
+    if (!result || !a->is_vector || x64_abi_in_one_register(a->size, caller))
+        return false;
+    return x64_abi_result_split(a->size, caller) !=
+           x64_abi_result_split(a->size, callee);
+}
+
+/* LLVM's transport of a vector of more than 256 packed bools is not done */
+static void x64_abi_bool_vector_check(codegen_context *e, uint64_t size,
+                                      bool bool_vector, x86_features features)
+{
+    if (bool_vector && size > 32 && x86_feature_has(features, X86_FEATURE_AVX))
         codegen_fatal_report(e, e->current_location,
                              "x86-64: AVX vector argument or return ABI is not "
                              "supported yet (PLAN-x86.md)");
@@ -291,23 +340,30 @@ VPRIV void x64_classify(codegen_context *e, ast_qualified_type t,
     uint32_t fn = e->walk_state->inline_call
                       ? e->walk_state->inline_call->function
                       : e->walk_state->function_symbol;
+    x86_features features = cc_x86_features_get(e->compile_context, fn);
+    uint64_t width = x64_abi_vector_register_bytes(features);
+    bool bool_vector =
+        a->is_vector && (a->bool_lane_count ||
+                         codegen_type_is_bool_vector(e->compile_context, t));
     /* Unnamed wide vectors/records use the overflow area, never YMM/ZMM. */
-    if (!unnamed && ((a->is_vector && a->size > 16) || a->is_wide_record))
-        x64_abi_vector_check(e, a->size, a->is_vector, a->is_wide_record,
-                             cc_x86_features_get(e->compile_context, fn));
-    /* [x86-64 psABI 3.2.3] with AVX a named __m256 (or a record of one) is
-       SSE and three SSEUP: one ymm register */
-    if (!unnamed && a->size == 32 &&
-        ((a->is_vector && !a->bool_lane_count &&
-          !codegen_type_is_bool_vector(e->compile_context, t)) ||
-         a->is_wide_record) &&
-        x86_feature_has(cc_x86_features_get(e->compile_context, fn),
-                        X86_FEATURE_AVX)) {
+    if (!unnamed)
+        x64_abi_bool_vector_check(e, a->size, bool_vector, features);
+    bool wide_vector = a->is_vector && !bool_vector && a->size > 16 &&
+                       !x64_abi_vector_of_int128(e->compile_context, t);
+    if (!unnamed && (wide_vector || a->is_wide_record) &&
+        x64_abi_in_one_register(a->size, width)) {
         a->is_in_memory = false;
         a->is_sse_up = true;
         a->eightbyte_count = 1;
         a->classes[0] = WALK_ARGUMENT_SSE;
         a->align = 32;
+        if (a->size == 64)
+            a->align = 64;
+    } else if (wide_vector) {
+        uint64_t split = x64_abi_result_split(a->size, width);
+
+        a->is_sse_up = split != 0;
+        a->split_register_bytes = (uint8_t)split;
     }
     if (a->is_in_memory && a->is_sse_up && x64_target_has_no_simd(e))
         a->is_sse_up =
@@ -369,7 +425,8 @@ VPRIV void x64_abi_classify_named(codegen_context *e, ast_qualified_type t,
         a->bool_lane_count = (uint8_t)(blanes <= 128 ? blanes : 0);
         return;
     }
-    if (codegen_type_is_vector(c, t) && (size == 32 || size == 64)) {
+    if (codegen_type_is_vector(c, t) && (size == 32 || size == 64) &&
+        !x64_abi_vector_of_int128(c, t)) {
         /* clang without AVX: passed in memory, returned in 2 or 4 xmm registers (-Wpsabi) */
         a->is_in_memory = true, a->is_sse_up = true;
         return;
@@ -426,14 +483,21 @@ static int x64_abi_register_bytes(const walk_argument *a)
 {
     if (!a->is_sse_up)
         return 8;
-    if (a->size == 32)
-        return 32;
+    if (a->size == 32 || a->size == 64)
+        return (int)a->size;
     return 16;
 }
 
 static bool x64_abi_in_ymm(const walk_argument *a)
 {
-    return !a->is_in_memory && a->is_sse_up && a->size == 32;
+    return !a->is_in_memory && a->is_sse_up && a->size >= 32;
+}
+
+static int x64_abi_split_bytes(const walk_argument *r)
+{
+    if (r->split_register_bytes)
+        return r->split_register_bytes;
+    return 16;
 }
 
 /* once ymm registers are in memory: leave the upper halves clean for the SSE
@@ -515,33 +579,34 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
     if (CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_SYMBOL) {
         x86_features features =
             cc_x86_features_get(c, CODEGEN_REFERENCE_INDEX(ref));
-        for (int k = 0; k < n; k++)
-            if (!a[k].is_unnamed)
-                x64_abi_vector_check(e, a[k].size, a[k].is_vector,
-                                     a[k].is_wide_record, features);
-        x64_abi_vector_check(e, codegen_type_size(c, rt),
-                             codegen_type_is_vector(c, rt),
-                             x64_abi_type_is_wide_record(c, rt), features);
-        /* a 32-byte vector travels in a ymm register with AVX and in memory
-           without: caller and callee must agree (as clang) */
         uint32_t caller = e->walk_state->function_symbol;
         if (e->walk_state->inline_call)
             caller = e->walk_state->inline_call->function;
-        bool differ =
-            x86_feature_has(features, X86_FEATURE_AVX) !=
-            x86_feature_has(cc_x86_features_get(c, caller), X86_FEATURE_AVX);
-        bool wide = codegen_type_size(c, rt) == 32 &&
-                    (codegen_type_is_vector(c, rt) ||
-                     x64_abi_type_is_wide_record(c, rt));
-        for (int k = 0; k < n; k++)
-            if (!a[k].is_unnamed && a[k].size == 32 &&
-                (a[k].is_vector || a[k].is_wide_record))
-                wide = true;
-        if (differ && wide)
+        /* a wide vector's registers depend on the features: caller and callee
+           must agree (as clang) */
+        uint64_t ours = x64_abi_vector_register_bytes(
+                     cc_x86_features_get(c, caller)),
+                 theirs = x64_abi_vector_register_bytes(features);
+        walk_argument result = {};
+        result.size = codegen_type_size(c, rt);
+        result.is_vector = codegen_type_is_vector(c, rt);
+        result.is_wide_record = x64_abi_type_is_wide_record(c, rt);
+        x64_abi_bool_vector_check(e, result.size,
+                                  codegen_type_is_bool_vector(c, rt), features);
+        bool differ = x64_abi_widths_differ(&result, true, ours, theirs);
+        for (int k = 0; k < n; k++) {
+            if (a[k].is_unnamed)
+                continue;
+            x64_abi_bool_vector_check(
+                e, a[k].size, a[k].is_vector && a[k].bool_lane_count, features);
+            if (!variadic && x64_abi_widths_differ(&a[k], false, ours, theirs))
+                differ = true;
+        }
+        if (differ)
             codegen_fatal_report(
                 e, e->current_location,
                 "x86-64: AVX vector argument or return ABI differs between "
-                "caller and callee (one has 'avx', the other not)");
+                "caller and callee (their target features differ)");
     }
 
     if (variadic) {
@@ -779,6 +844,8 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         }
     } else if (r && r->is_in_memory && r->is_sse_up) {
         x64_call_xmms(e, r);
+        if (x64_abi_split_bytes(r) > 16)
+            x64_vzeroupper(e);
     } else if (r && !r->is_in_memory && r->eightbyte_count) {
         /* a record in rax, rdx / xmm0, xmm1 (by class, in order) into its slot */
         int ng = 0, nf = 0;
@@ -804,10 +871,12 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
 /* both conventions: a result in xmm0, xmm1, ... (a wide vector) to its slot */
 VPRIV void x64_call_xmms(codegen_context *e, const walk_argument *r)
 {
-    for (int w = 0; w < (int)(r->size / 16); w++) {
-        codegen_lvalue d = x64_fr(r->slot + 16 * w);
+    int bytes = x64_abi_split_bytes(r);
 
-        x64_record_emit_memory(e, X64_OP_ST, 16, XMM0 + w, &d, false);
+    for (int w = 0; w < (int)r->size / bytes; w++) {
+        codegen_lvalue d = x64_fr(r->slot + bytes * w);
+
+        x64_record_emit_memory(e, X64_OP_ST, bytes, XMM0 + w, &d, false);
     }
 }
 
@@ -1040,12 +1109,14 @@ VPRIV void x64_retrec(codegen_context *e, int raddr, const walk_argument *r,
         }
         x64_x87ld(e, &s); /* long double: in st(0) */
     } else if (r->is_in_memory && r->is_sse_up) {
-        for (int w = 0; w < (int)(r->size / 16); w++) {
+        int bytes = x64_abi_split_bytes(r);
+
+        for (int w = 0; w < (int)r->size / bytes; w++) {
             codegen_lvalue s = {.kind = CODEGEN_LVALUE_REGISTER,
                                 .register_number = (uint8_t)raddr,
-                                .offset = 16 * w};
+                                .offset = bytes * w};
 
-            x64_record_emit_memory(e, X64_OP_LD, 16, XMM0 + w, &s, false);
+            x64_record_emit_memory(e, X64_OP_LD, bytes, XMM0 + w, &s, false);
         }
     } else if (r->is_in_memory) {
         codegen_lvalue s = x64_fr(e->x64_context->result_pointer_slot);

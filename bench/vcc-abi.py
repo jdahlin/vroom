@@ -42,7 +42,7 @@ against the MinGW sysroot and run under Wine; `/* vcc-xfail-win64: ... */`
 marks a known bug there, `/* vcc-skip-win64: reason */` a test that does not
 apply (an LP64 or System V assumption).  --vir: vcc's side through VIR
 (-O2's code generator; without it -fno-vir, the direct emitter, for x86_64 and win64).  The tests under src/test/abi/avx* run only with
---target x86_64 (a host with AVX2).  The tests under src/test/abi/msabi* also run natively on an
+--target x86_64 (a host with AVX2; avx512*: a host with AVX-512).  The tests under src/test/abi/msabi* also run natively on an
 x86-64 Linux host (--target x86_64): ms_abi functions against clang.
 """
 import importlib.util, os, re, shutil, sys, tempfile
@@ -62,6 +62,11 @@ W64 = None	# the vcc-win64.py module, for --target win64
 VLINK = False
 VIRFL = []	# vcc's flags for its code generator: -fno-vir for --target x86_64/win64 without --vir
 HOSTFL = ['-O2', '-fno-stack-protector']
+
+
+def host_has(feature):
+    with open('/proc/cpuinfo') as f:
+        return feature in f.read().split()
 
 
 def compile_(cc, src, obj, inc):
@@ -103,6 +108,8 @@ def one(name, wd, verbose):
         return 'skip', 'ms_abi/sysv_abi: x86-64 only', None
     elif name.startswith('avx') and not X86:
         return 'skip', 'AVX: the System V x86-64 target only', None
+    elif name.startswith('avx512') and not host_has('avx512bw'):
+        return 'skip', 'this host has no AVX-512', None
     xf = re.search(r'/\*\s*vcc-xfail:(.*?)\*/', src, re.S) or (HOST and re.search(r'/\*\s*vcc-xfail-host:(.*?)\*/', src, re.S)) \
         or (WASM and re.search(r'/\*\s*vcc-xfail-wasm:(.*?)\*/', src, re.S)) \
         or (X86 and re.search(r'/\*\s*vcc-xfail-x86:(.*?)\*/', src, re.S)) \
