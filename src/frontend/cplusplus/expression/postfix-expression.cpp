@@ -1105,8 +1105,11 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                its point of instantiation ([temp.point]) */
             entity_index named = arguments[0].entity;
             /* (or a prvalue, whose class is made where it is) */
-            bool made =
-                !named && arguments[0].category == value_category::prvalue;
+            /* (not in a function template or a specialization, whose
+               arguments may be dependent) */
+            bool made = !named && function_state.active &&
+                        !entity_table[function_state.function].instantiation &&
+                        arguments[0].category == value_category::prvalue;
             if (!made &&
                 (!named ||
                  !entity_table[entity_table[named].enclosing].parameter_scope))

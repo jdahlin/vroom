@@ -553,11 +553,23 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
        lowering's array_temporary */
     bool no_room = object.kind == type_kind::class_type && !at_block_scope() &&
                    !binding_extends;
+    /* (an array of an incomplete class: clang's error, not claimed) */
+    if (object.kind == type_kind::array) {
+        qualified_type element = m.type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        const struct type &last = type_table[element.unqualified()];
+        if (last.kind == type_kind::class_type &&
+            !entity_table[last.entity].defined &&
+            !entity_table[last.entity].size)
+            no_room = true;
+    }
     if (aggregate_prvalue(m) && !closure_prvalue_binding(m) && !no_storage &&
         no_room)
         return not_supported_because(
             at, "class.temporary",
-            "a temporary of a call's argument at namespace scope");
+            "a temporary of a call's argument at namespace scope, or an array "
+            "of an incomplete class");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const lvalue or rvalue reference is bound to a
        temporary holding its value ([conv.lval]) */

@@ -352,7 +352,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         /* (default arguments of one declaration, which the other's
            declarator the specializations are made from has not; one that
            adds none and defines nothing leaves that declarator) */
-        if (defaults || (f.default_arguments && defines))
+        if (defaults || (f.default_arguments &&
+                         (defines || f.hidden_friend || f.friend_declaration)))
             return not_supported_because(
                 n, "dcl.fct.default",
                 "a redeclared function template with default arguments");
