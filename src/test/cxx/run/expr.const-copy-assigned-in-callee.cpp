@@ -36,14 +36,14 @@ constexpr int f()
     return use(sv, Ck(sv));
 }
 static_assert(f() == 12);
-void g()
+consteval int g()
 {
     constexpr V sv("ab", 2);
     constexpr int u = (use(sv, Ck(sv)), 0);
-    (void)u;
+    return u;
 }
+static_assert(g() == 0);
 int main()
 {
-    g();
-    return f() - 12;
+    return 0;
 }
