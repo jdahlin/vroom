@@ -439,6 +439,28 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         entity_table[q.entity].kind == entity_kind::class_type) {
         if (name == entity_table[q.entity].name)
             return inheriting_using(n, t, q.entity);
+        /* [class.qual]/2.2: "in a using-declarator of a using-declaration
+           that is a member-declaration, if the name specified after the
+           nested-name-specifier is the same as the identifier or the
+           simple-template-id's template-name in the last component of the
+           nested-name-specifier, the name is instead considered to name
+           the constructor of class C." */
+        uint32_t last_name = 0;
+        for (auto part : n.nested_name_specifier().parts()) {
+            if (part.name.is_identifier()) {
+                last_name = tokens.identifier(part.name.token());
+            } else if (part.name.is(syntax_kind::simple_template_id)) {
+                SyntaxElement first = part.name[0];
+                if (first.is_identifier())
+                    last_name = tokens.identifier(first.token());
+                else
+                    last_name = 0;
+            } else {
+                last_name = 0;
+            }
+        }
+        if (last_name == name)
+            return inheriting_using(n, t, q.entity);
         entity_index alias = entity_table.find(defining_class, name);
         if (alias && entity_table[alias].kind == entity_kind::typedef_name &&
             entity_table[alias].type.unqualified() ==
