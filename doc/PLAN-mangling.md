@@ -241,7 +241,16 @@ speed measure.
 become operator enumerators (sema side in `template/template-argument.cpp`
 and the readers).  No file split yet; the smallest diff that removes the
 duplication.
-Status: not started.
+Status: done (2026-11-27).  `abi/itanium/operators.inc` (49 rows: code,
+arity, token) is read by `operator_name` and every expression site through
+`operator_written`; `prefix_operator` keeps prefix ++/-- (the ABI's pp_,
+mm_) out of a unary expression.  `builtin-types.inc` is `builtin_type`'s,
+and the integer-literal, bool and nullptr literals take their type's
+letter from it; one keyword table (`simple_type_keyword_alone`) replaces
+two.  `dependent_value_form` in sema.h names the codes, with
+`dependent_value_operators` shared by sema and the mangler.  Identity gate:
+no difference (it now ignores the line of a refusal's vcc source site).
+Speed: +0.02% instructions.
 
 ### M2: the file split
 Mechanical: move functions into the files of 3.1, unchanged, with

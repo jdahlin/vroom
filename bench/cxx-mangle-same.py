@@ -77,8 +77,13 @@ def inputs():
     return out
 
 
+VCC_SITE = re.compile(r"(vcc's \S+?):\d+")
+
+
 def scrub(text, tmp):
-    return text.replace(tmp, '$TMP')
+    """the temporary directory, and the line of a refusal's site in vcc's
+    sources (which moves with any edit; the file and function stay)"""
+    return VCC_SITE.sub(r'\1:N', text.replace(tmp, '$TMP'))
 
 
 def one(vpp, key, src, flags, timeout):
@@ -137,6 +142,10 @@ def main():
     with open(a.against) as f:
         base = json.load(f)
     differ = 0
+    for v in base.values():
+        for field in ('dump_err', 'c_err'):
+            if isinstance(v.get(field), str):
+                v[field] = VCC_SITE.sub(r'\1:N', v[field])
     for key in sorted(results):
         if key not in base:
             continue

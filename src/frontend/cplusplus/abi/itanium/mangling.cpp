@@ -65,6 +65,110 @@ bool visible_local_class(const entities &table, entity_index c)
 namespace
 {
 
+/* [abi:mangling-operator]: one enumerator per row of operators.inc */
+enum class itanium_operator : uint8_t {
+#define ITANIUM_OPERATOR(name, code, arity, token) name,
+#include "operators.inc"
+#undef ITANIUM_OPERATOR
+    none
+};
+
+constexpr struct {
+    const char *code;
+    uint8_t arity;
+    preprocessing_op_or_punc token;
+} operator_encodings[] = {
+#define ITANIUM_OPERATOR(name, code, arity, token)                             \
+    {code, arity, preprocessing_op_or_punc::token},
+#include "operators.inc"
+#undef ITANIUM_OPERATOR
+};
+
+const char *operator_code(itanium_operator o)
+{
+    return operator_encodings[static_cast<size_t>(o)].code;
+}
+
+/* the operator written with op that has arity operands; none for another */
+itanium_operator operator_written(preprocessing_op_or_punc op, unsigned arity)
+{
+    for (size_t i = 0;
+         i < sizeof operator_encodings / sizeof *operator_encodings; i++)
+        if (operator_encodings[i].token == op &&
+            operator_encodings[i].token != preprocessing_op_or_punc::count &&
+            operator_encodings[i].arity == arity)
+            return static_cast<itanium_operator>(i);
+    return itanium_operator::none;
+}
+
+/* the same for a token of the syntax tree (an alternative token is its
+   primary one's) */
+itanium_operator operator_written(SyntaxElement op, unsigned arity)
+{
+    for (size_t i = 0;
+         i < sizeof operator_encodings / sizeof *operator_encodings; i++)
+        if (operator_encodings[i].token != preprocessing_op_or_punc::count &&
+            operator_encodings[i].arity == arity &&
+            op.is(operator_encodings[i].token))
+            return static_cast<itanium_operator>(i);
+    return itanium_operator::none;
+}
+
+/* the <unary operator-name> of a prefix operator of an expression:
+   [abi:expressions] writes prefix ++ and -- as pp_ and mm_, which are not
+   mangled yet, and co_await is a keyword */
+itanium_operator prefix_operator(itanium_operator o)
+{
+    if (o == itanium_operator::increment || o == itanium_operator::decrement)
+        return itanium_operator::none;
+    return o;
+}
+
+/* [abi:mangling-builtin]: builtin-types.inc's code of t; nullptr for a
+   type that has none */
+const char *builtin_type_code(fundamental_type t)
+{
+    switch (t) {
+#define ITANIUM_BUILTIN_TYPE(type, code)                                       \
+    case fundamental_type::type:                                               \
+        return code;
+#include "builtin-types.inc"
+#undef ITANIUM_BUILTIN_TYPE
+    default:
+        return nullptr;
+    }
+}
+
+/* [dcl.type.simple]: the type of a simple-type-specifier that is one
+   keyword alone (unsigned(4), int()); none for another keyword */
+fundamental_type simple_type_keyword_alone(standard_keyword k)
+{
+    static const struct {
+        standard_keyword keyword;
+        fundamental_type type;
+    } alone[] = {
+        {standard_keyword::void_, fundamental_type::void_},
+        {standard_keyword::bool_, fundamental_type::bool_},
+        {standard_keyword::char_, fundamental_type::char_},
+        {standard_keyword::wchar_t_, fundamental_type::wchar_t_},
+        {standard_keyword::char8_t_, fundamental_type::char8_t_},
+        {standard_keyword::char16_t_, fundamental_type::char16_t_},
+        {standard_keyword::char32_t_, fundamental_type::char32_t_},
+        {standard_keyword::short_, fundamental_type::short_int},
+        {standard_keyword::int_, fundamental_type::int_},
+        {standard_keyword::signed_, fundamental_type::int_},
+        {standard_keyword::unsigned_, fundamental_type::unsigned_int},
+        {standard_keyword::long_, fundamental_type::long_int},
+        {standard_keyword::float_, fundamental_type::float_},
+        {standard_keyword::double_, fundamental_type::double_},
+    };
+    if (k != standard_keyword::none)
+        for (const auto &a : alone)
+            if (k == a.keyword)
+                return a.type;
+    return fundamental_type::none;
+}
+
 class itanium_mangler
 {
   public:
@@ -175,6 +279,10 @@ class itanium_mangler
     {
         vbuffer_string_append(out, s);
     }
+    void text(itanium_operator o)
+    {
+        text(operator_code(o));
+    }
     /* an entity's name: token_stream::identifier's number, the
        preprocessor's plus one (0 is no identifier) */
     const char *spelling(uint32_t identifier, size_t *length) const
@@ -227,7 +335,6 @@ class itanium_mangler
     bool expression_list(SyntaxElement list);
     /* (the dependent values being mangled, dependent_value) */
     uint32_t dependent_value_depth = 0;
-    const char *binary_operator_code(SyntaxElement op) const;
     bool punctuator(SyntaxElement c, preprocessing_op_or_punc op) const
     {
         return c.is(op);
@@ -563,7 +670,8 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
         for (size_t i = 0; i < spelling.size(); i++)
             if (spelling.data()[i] < '0' || spelling.data()[i] > '9')
                 return false;
-        text("Li");
+        text("L");
+        builtin_type(fundamental_type::int_);
         vbuffer_append(out, spelling.data(), spelling.size());
         text("E");
         return true;
@@ -577,9 +685,9 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             return false;
         if (c.kind() == syntax_kind::constraint_logical_or_expression ||
             c.kind() == syntax_kind::logical_or_expression)
-            text("oo");
+            text(itanium_operator::logical_or);
         else
-            text("aa");
+            text(itanium_operator::logical_and);
         return constraint_expression(t, c[0]) && constraint_expression(t, c[2]);
     case syntax_kind::primary_expression:
         if (c.size() != 3 ||
@@ -619,7 +727,7 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
         if (c.size() != 2 ||
             !punctuator(c[0], preprocessing_op_or_punc::EXCLAMATION))
             return false;
-        text("nt");
+        text(itanium_operator::logical_not);
         return constraint_expression(t, c[1]);
     case syntax_kind::multiplicative_expression:
     case syntax_kind::additive_expression:
@@ -627,10 +735,10 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
     case syntax_kind::equality_expression: {
         if (c.size() != 3)
             return false;
-        const char *code = binary_operator_code(c[1]);
-        if (!code)
+        itanium_operator o = operator_written(c[1], 2);
+        if (o == itanium_operator::none)
             return false;
-        text(code);
+        text(o);
         return constraint_expression(t, c[0]) && constraint_expression(t, c[2]);
     }
     case syntax_kind::requires_expression: {
@@ -864,42 +972,11 @@ bool itanium_mangler::constraint_template_args(entity_index t, SyntaxElement c)
             continue;
         }
         /* a fundamental type keyword (int, long, char, ...) */
-        if (a.is_token()) {
-            standard_keyword kw = a.keyword();
-            fundamental_type ft = fundamental_type::none;
-            switch (kw) {
-            case standard_keyword::void_:
-                ft = fundamental_type::void_;
-                break;
-            case standard_keyword::bool_:
-                ft = fundamental_type::bool_;
-                break;
-            case standard_keyword::char_:
-                ft = fundamental_type::char_;
-                break;
-            case standard_keyword::short_:
-                ft = fundamental_type::short_int;
-                break;
-            case standard_keyword::int_:
-                ft = fundamental_type::int_;
-                break;
-            case standard_keyword::long_:
-                ft = fundamental_type::long_int;
-                break;
-            case standard_keyword::float_:
-                ft = fundamental_type::float_;
-                break;
-            case standard_keyword::double_:
-                ft = fundamental_type::double_;
-                break;
-            default:
-                break;
-            }
-            if (ft != fundamental_type::none) {
-                if (!builtin_type(ft))
-                    return false;
-                continue;
-            }
+        fundamental_type ft = simple_type_keyword_alone(a.keyword());
+        if (ft != fundamental_type::none) {
+            if (!builtin_type(ft))
+                return false;
+            continue;
         }
         /* a class of the template's scope, or a typedef-name there that
            no template parameter's argument gave its type */
@@ -1066,37 +1143,6 @@ bool itanium_mangler::constraint_parameter(entity_index t,
  *
  * The function parameter forms below omit the CV-qualifiers.
  */
-const char *itanium_mangler::binary_operator_code(SyntaxElement op) const
-{
-    static const struct {
-        preprocessing_op_or_punc token;
-        const char *code;
-    } table[] = {
-        {preprocessing_op_or_punc::PLUS, "pl"},
-        {preprocessing_op_or_punc::MINUS, "mi"},
-        {preprocessing_op_or_punc::STAR, "ml"},
-        {preprocessing_op_or_punc::SLASH, "dv"},
-        {preprocessing_op_or_punc::PERCENT, "rm"},
-        {preprocessing_op_or_punc::EQUAL_EQUAL, "eq"},
-        {preprocessing_op_or_punc::EXCLAMATION_EQUAL, "ne"},
-        {preprocessing_op_or_punc::LESS, "lt"},
-        {preprocessing_op_or_punc::GREATER, "gt"},
-        {preprocessing_op_or_punc::LESS_EQUAL, "le"},
-        {preprocessing_op_or_punc::GREATER_EQUAL, "ge"},
-        {preprocessing_op_or_punc::LESS_LESS, "ls"},
-        {preprocessing_op_or_punc::GREATER_GREATER, "rs"},
-        {preprocessing_op_or_punc::AMPERSAND, "an"},
-        {preprocessing_op_or_punc::BAR, "or"},
-        {preprocessing_op_or_punc::CARET, "eo"},
-        {preprocessing_op_or_punc::AMPERSAND_AMPERSAND, "aa"},
-        {preprocessing_op_or_punc::BAR_BAR, "oo"},
-    };
-    for (const auto &x : table)
-        if (punctuator(op, x.token))
-            return x.code;
-    return nullptr;
-}
-
 /* [abi:expressions]' <expr-primary> of a variable the template's scope
    declares, written unqualified: L_Z <encoding> E; false for another name */
 bool itanium_mangler::named_variable(entity_index t, SyntaxElement name)
@@ -1172,33 +1218,10 @@ bool itanium_mangler::operand_type(SyntaxElement a, qualified_type &t,
             t = b->type;
             return true;
         }
-        /* a simple-type-specifier keyword alone (unsigned(4), int()):
-           [dcl.type.simple]'s type of it */
-        static const struct {
-            standard_keyword keyword;
-            fundamental_type type;
-        } alone[] = {
-            {standard_keyword::void_, fundamental_type::void_},
-            {standard_keyword::bool_, fundamental_type::bool_},
-            {standard_keyword::char_, fundamental_type::char_},
-            {standard_keyword::wchar_t_, fundamental_type::wchar_t_},
-            {standard_keyword::char8_t_, fundamental_type::char8_t_},
-            {standard_keyword::char16_t_, fundamental_type::char16_t_},
-            {standard_keyword::char32_t_, fundamental_type::char32_t_},
-            {standard_keyword::short_, fundamental_type::short_int},
-            {standard_keyword::int_, fundamental_type::int_},
-            {standard_keyword::signed_, fundamental_type::int_},
-            {standard_keyword::unsigned_, fundamental_type::unsigned_int},
-            {standard_keyword::long_, fundamental_type::long_int},
-            {standard_keyword::float_, fundamental_type::float_},
-            {standard_keyword::double_, fundamental_type::double_},
-        };
-        if (inner.keyword() != standard_keyword::none)
-            for (const auto &k : alone)
-                if (inner.keyword() == k.keyword) {
-                    keyword_type = k.type;
-                    return true;
-                }
+        /* a simple-type-specifier keyword alone (unsigned(4), int()) */
+        keyword_type = simple_type_keyword_alone(inner.keyword());
+        if (keyword_type != fundamental_type::none)
+            return true;
         if (!inner.is_identifier())
             return false;
         entity_index pe =
@@ -1280,12 +1303,8 @@ bool itanium_mangler::dependent_fold(SyntaxElement fold)
             return false;
         pattern = fold[3];
     }
-    const char *code = binary_operator_code(op);
-    if (!code && op.is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
-        code = "aa";
-    if (!code && op.is(preprocessing_op_or_punc::BAR_BAR))
-        code = "oo";
-    if (!code || pack_element != UINT32_MAX)
+    itanium_operator code = operator_written(op, 2);
+    if (code == itanium_operator::none || pack_element != UINT32_MAX)
         return false;
     /* the elements of the packs bound (one pack, or packs of one size) */
     uint32_t count = 0;
@@ -1763,22 +1782,12 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
     /* [abi:expressions] <unary operator-name> <expression> */
     if (expression.is(syntax_kind::unary_expression) &&
         expression.size() == 2) {
-        static const struct {
-            preprocessing_op_or_punc token;
-            const char *code;
-        } unary[] = {
-            {preprocessing_op_or_punc::STAR, "de"},
-            {preprocessing_op_or_punc::AMPERSAND, "ad"},
-            {preprocessing_op_or_punc::MINUS, "ng"},
-            {preprocessing_op_or_punc::PLUS, "ps"},
-            {preprocessing_op_or_punc::EXCLAMATION, "nt"},
-            {preprocessing_op_or_punc::TILDE, "co"},
-        };
-        for (const auto &u : unary)
-            if (punctuator(expression[0], u.token)) {
-                text(u.code);
-                return dependent_expression(expression[1]);
-            }
+        itanium_operator o =
+            prefix_operator(operator_written(expression[0], 1));
+        if (o != itanium_operator::none) {
+            text(o);
+            return dependent_expression(expression[1]);
+        }
     }
     /* T(), T an alias template's parameter or the template's own type
        parameter: cv <type> _ E */
@@ -1803,14 +1812,14 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
        <expression> */
     if (expression.is(syntax_kind::conditional_expression) &&
         expression.size() == 5) {
-        text("qu");
+        text(itanium_operator::conditional);
         return dependent_expression(expression[0]) &&
                dependent_expression(expression[2]) &&
                dependent_expression(expression[4]);
     }
     if (expression.is(syntax_kind::expression) && expression.size() == 3 &&
         punctuator(expression[1], preprocessing_op_or_punc::COMMA)) {
-        text("cm");
+        text(itanium_operator::comma);
         return dependent_expression(expression[0]) &&
                dependent_expression(expression[2]);
     }
@@ -1825,8 +1834,8 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
          expression.kind() == syntax_kind::inclusive_or_expression ||
          expression.kind() == syntax_kind::logical_and_expression ||
          expression.kind() == syntax_kind::logical_or_expression)) {
-        const char *op = binary_operator_code(expression[1]);
-        if (!op)
+        itanium_operator op = operator_written(expression[1], 2);
+        if (op == itanium_operator::none)
             return false;
         text(op);
         return dependent_expression(expression[0]) &&
@@ -2095,7 +2104,7 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
             op.is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
             expression[expression.size() - 1].is(
                 preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-            text("cl");
+            text(itanium_operator::call);
             uint32_t unresolved_name = 0;
             if (base.is_token() && !written_object(base) &&
                 !analysis.function_parameter_position(encoding_template,
@@ -2116,7 +2125,7 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         if (expression.size() == 4 &&
             op.is(preprocessing_op_or_punc::LEFT_BRACKET) &&
             expression[3].is(preprocessing_op_or_punc::RIGHT_BRACKET)) {
-            text("ix");
+            text(itanium_operator::subscript);
             return dependent_expression(base) &&
                    dependent_expression(expression[2]);
         }
@@ -2133,7 +2142,7 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
             if (dot)
                 text("dt");
             else
-                text("pt");
+                text(itanium_operator::arrow);
             bool dependent = false;
             return dependent_expression(base) &&
                    source_name(analysis.token_identifier(member[0].token())) &&
@@ -2144,7 +2153,7 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
             if (dot)
                 text("dt");
             else
-                text("pt");
+                text(itanium_operator::arrow);
             return dependent_expression(base) &&
                    source_name(
                        analysis.token_identifier(expression[2].token()));
@@ -2166,7 +2175,7 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
        [abi:expressions] [ad] L _Z <encoding> E */
     if (const auto *b = written_object(expression)) {
         if (record(b->type).kind != type_kind::lvalue_reference)
-            text("ad");
+            text(itanium_operator::address_of);
         text("L_Z");
         if (!encoding(b->specialization))
             return false;
@@ -2189,17 +2198,19 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
     }
 
     /* [abi:expressions] true and false: L b 1 E, L b 0 E */
-    if (expression.is(standard_keyword::true_)) {
-        text("Lb1E");
-        return true;
-    }
-    if (expression.is(standard_keyword::false_)) {
-        text("Lb0E");
+    if (expression.is(standard_keyword::true_) ||
+        expression.is(standard_keyword::false_)) {
+        text("L");
+        builtin_type(fundamental_type::bool_);
+        number(expression.is(standard_keyword::true_));
+        text("E");
         return true;
     }
     /* [abi:mangling.literal]: nullptr is its type alone */
     if (expression.is(standard_keyword::nullptr_)) {
-        text("LDnE");
+        text("L");
+        builtin_type(fundamental_type::std_nullptr_t);
+        text("E");
         return true;
     }
     return integer_literal(expression.token());
@@ -2274,7 +2285,14 @@ bool itanium_mangler::integer_literal(token_index token)
     if (!digits || longs > 2)
         return false;
     /* int, unsigned, long, unsigned long, long long, unsigned long long */
-    static const char codes[] = "ijlmxy";
+    static const fundamental_type ranks[] = {
+        fundamental_type::int_,
+        fundamental_type::unsigned_int,
+        fundamental_type::long_int,
+        fundamental_type::unsigned_long_int,
+        fundamental_type::long_long_int,
+        fundamental_type::unsigned_long_long_int,
+    };
     unsigned long_bits = static_cast<unsigned>(analysis.pointer_size()) * 8;
     const unsigned widths[] = {32, long_bits, 64};
     for (unsigned rank = longs; rank < 3; rank++) {
@@ -2286,7 +2304,7 @@ bool itanium_mangler::integer_literal(token_index token)
             if (bits < 64 && value >> bits)
                 continue;
             text("L");
-            vbuffer_append(out, &codes[rank * 2 + u], 1);
+            builtin_type(ranks[rank * 2 + u]);
             number(value);
             text("E");
             return true;
@@ -3093,40 +3111,35 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
     const entity &x = analysis.entity_table[d];
     if (!x.value)
         return false;
-    static const struct {
-        uint64_t value;
-        const char *code;
-    } binary[] = {
-        {8, "aa"},  {9, "oo"},  {10, "gt"}, {15, "lt"},
-        {16, "le"}, {17, "ge"}, {18, "eq"}, {19, "ne"},
+    using form = dependent_value_form;
+    auto is = [&](dependent_value_form f) {
+        return x.value == dependent_value_code(f);
     };
-    const char *code = nullptr;
-    for (const auto &b : binary)
-        if (x.value == b.value)
-            code = b.code;
-    if (code) {
-        text(code);
-        return dependent_value_expr(x.enclosing) &&
-               dependent_value_expr(x.name);
-    }
-    if (x.value == 11) {
+    for (const auto &b : dependent_value_operators)
+        if (is(b.form)) {
+            text(operator_written(b.op, 2));
+            return dependent_value_expr(x.enclosing) &&
+                   dependent_value_expr(x.name);
+        }
+    if (is(form::sizeof_type)) {
         text("st");
         return type(x.type);
     }
-    if (x.value == 12) {
-        text("Li");
+    if (is(form::integer_literal)) {
+        text("L");
+        builtin_type(fundamental_type::int_);
         number(x.name);
         text("E");
         return true;
     }
-    if (x.value == 13) {
+    if (is(form::member_call)) {
         text("clsr");
         if (!type(x.type) || !source_name(x.name))
             return false;
         text("E");
         return true;
     }
-    if (x.value == 20) {
+    if (is(form::static_member)) {
         /* a static data member: an external name, L_Z <encoding> E */
         text("L_Z");
         if (!encoding(x.name))
@@ -3134,8 +3147,8 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
         text("E");
         return true;
     }
-    if (x.value == 14) {
-        text("nt");
+    if (is(form::logical_not)) {
+        text(itanium_operator::logical_not);
         return dependent_value_expr(x.enclosing);
     }
     auto written_arguments = [&]() {
@@ -3146,7 +3159,7 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
         text("E");
         return true;
     };
-    if (x.value == 21) {
+    if (is(form::member_template_call)) {
         /* [abi:expressions] Q::template f<args>(), Q a class template's
            specialization:
 
@@ -3164,15 +3177,19 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
         text("E");
         return true;
     }
-    if ((x.value & 0xffffffffu & ~0xff00u) == 0x10001 ||
-        (x.value & 0xffffffffu & ~0xff00u) == 0x10003) {
+    bool negated = x.value & dependent_value_negated;
+    /* (the low half but the namespaces' number) */
+    uint64_t low = x.value & 0xffff00ffu;
+    if (low == (dependent_value_alias | dependent_value_code(form::member)) ||
+        low == (dependent_value_alias |
+                dependent_value_code(form::negated_member))) {
         /* [!] [ns::] A<args>::name, A an alias template: its name and
            arguments as written (clang) */
-        if (x.value & 2)
-            text("nt");
+        if (negated)
+            text(itanium_operator::logical_not);
         text("sr");
         if (x.enclosing) {
-            uint32_t depth = static_cast<uint32_t>((x.value >> 8) & 0xff);
+            uint32_t depth = dependent_value_namespaces(x.value);
             if (!depth)
                 depth = 1;
             owned_array<entity_index> chain;
@@ -3185,7 +3202,7 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
                 if (!source_name(analysis.entity_table[chain[i]].name))
                     return false;
         }
-        if (!source_name(static_cast<uint32_t>(x.value >> 32) - 1) ||
+        if (!source_name(dependent_value_identifier(x.value) - 1) ||
             !written_arguments())
             return false;
         text("E");
@@ -3193,11 +3210,12 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
     }
     entity_index q = record(x.type).entity;
     const entity &spec = analysis.entity_table[q];
-    if (x.value == 4 || x.value == 6) {
+    if (is(form::variable_specialization) ||
+        is(form::negated_variable_specialization)) {
         /* a variable template's specialization, [!] [ns::] v<args>:
            [abi:expressions]' unresolved-name */
-        if (x.value & 2)
-            text("nt");
+        if (negated)
+            text(itanium_operator::logical_not);
         if (x.enclosing) {
             text("sr");
             if (!source_name(analysis.entity_table[x.enclosing].name))
@@ -3206,22 +3224,23 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
         }
         return source_name(spec.name) && template_args(q, 0, false);
     }
-    if (!x.enclosing && !(x.value >> 32) && spec.instantiation &&
+    if (!x.enclosing && !dependent_value_identifier(x.value) &&
+        spec.instantiation &&
         analysis.template_template_parameter(
             analysis.specialized_template(q))) {
         /* D<args>::name with D a template template-parameter: clang
            spells the qualifier as an <unresolved-type>, sr T_ I <args> E
            name, with no E closing a level */
-        if (x.value & 2)
-            text("nt");
+        if (negated)
+            text(itanium_operator::logical_not);
         text("sr");
         return class_enum_type(x.type) && source_name(x.name);
     }
-    if (x.value & 2)
-        text("nt");
+    if (negated)
+        text(itanium_operator::logical_not);
     text("sr");
     if (x.enclosing) {
-        uint32_t depth = static_cast<uint32_t>((x.value >> 8) & 0xff);
+        uint32_t depth = dependent_value_namespaces(x.value);
         if (!depth)
             depth = 1;
         owned_array<entity_index> chain;
@@ -3242,8 +3261,9 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
     if (!source_name(spec.name) || !template_args(q, 0, false, written))
         return false;
     /* a member class between the specialization and the name */
-    if (x.value >> 32 && !source_name(static_cast<uint32_t>(x.value >> 32) - 1))
-        return false;
+    if (uint32_t member_class = dependent_value_identifier(x.value))
+        if (!source_name(member_class - 1))
+            return false;
     text("E");
     return source_name(x.name);
 }
@@ -3340,8 +3360,10 @@ bool itanium_mangler::template_arg_of(entity_index c, uint32_t i,
             !reference && object.kind == type_kind::array &&
             parameter_type.kind == type_kind::pointer &&
             record(parameter_type.operand).kind != type_kind::array;
-        if (!reference)
-            text("Xad");
+        if (!reference) {
+            text("X");
+            text(itanium_operator::address_of);
+        }
         if (element_of) {
             text("so");
             if (!type(object.operand))
@@ -3378,7 +3400,9 @@ bool itanium_mangler::template_arg_of(entity_index c, uint32_t i,
            the member, member_pointer_argument): the address of the
            member's external name, X ad L _Z <encoding> E E; a null one is
            the <expr-primary> below, L <type> 0 E */
-        text("XadL_Z");
+        text("X");
+        text(itanium_operator::address_of);
+        text("L_Z");
         if (!encoding(static_cast<entity_index>(v)))
             return false;
         text("EE");
@@ -3681,177 +3705,40 @@ bool itanium_mangler::source_name(uint32_t identifier)
  *                     ::= cl  # ()
  *                     ::= ix  # []
  *
- * The switch also includes rs (>>), rS (>>=), gt (>), and ge (>=).
- * The operand count includes the implicit object ([over.unary]/1).
+ * and rs (>>), rS (>>=), gt (>), and ge (>=) (operators.inc).  The
+ * operand count includes the implicit object ([over.unary]/1).
  */
 bool itanium_mangler::operator_name(const entity &x)
 {
     switch (x.allocation) {
     case allocation_function::new_:
-        text("nw");
+        text(itanium_operator::new_);
         return true;
     case allocation_function::new_array:
-        text("na");
+        text(itanium_operator::new_array);
         return true;
     case allocation_function::delete_:
-        text("dl");
+        text(itanium_operator::delete_);
         return true;
     case allocation_function::delete_array:
-        text("da");
+        text(itanium_operator::delete_array);
         return true;
     default:
         break;
     }
-
-    using enum preprocessing_op_or_punc;
+    /* the operator of the function's operand count, else the one row of
+       its token (++, ->, (), [] whatever their count) */
     const struct type &function = analysis.type_table[x.type.unqualified()];
-    bool unary = function.parameter_count + unsigned(x.nonstatic_member) == 1;
-    const char *code = nullptr;
-    if (unary) {
-        switch (x.implemented) {
-        case PLUS:
-            code = "ps";
-            break;
-        case MINUS:
-            code = "ng";
-            break;
-        case AMPERSAND:
-            code = "ad";
-            break;
-        case STAR:
-            code = "de";
-            break;
-        default:
-            break;
-        }
-        if (code) {
-            text(code);
-            return true;
-        }
-    }
-
-    switch (x.implemented) {
-    case TILDE:
-        code = "co";
-        break;
-    case PLUS:
-        code = "pl";
-        break;
-    case MINUS:
-        code = "mi";
-        break;
-    case STAR:
-        code = "ml";
-        break;
-    case SLASH:
-        code = "dv";
-        break;
-    case PERCENT:
-        code = "rm";
-        break;
-    case AMPERSAND:
-        code = "an";
-        break;
-    case BAR:
-        code = "or";
-        break;
-    case CARET:
-        code = "eo";
-        break;
-    case EQUAL:
-        code = "aS";
-        break;
-    case PLUS_EQUAL:
-        code = "pL";
-        break;
-    case MINUS_EQUAL:
-        code = "mI";
-        break;
-    case STAR_EQUAL:
-        code = "mL";
-        break;
-    case SLASH_EQUAL:
-        code = "dV";
-        break;
-    case PERCENT_EQUAL:
-        code = "rM";
-        break;
-    case AMPERSAND_EQUAL:
-        code = "aN";
-        break;
-    case BAR_EQUAL:
-        code = "oR";
-        break;
-    case CARET_EQUAL:
-        code = "eO";
-        break;
-    case LESS_LESS:
-        code = "ls";
-        break;
-    case GREATER_GREATER:
-        code = "rs";
-        break;
-    case LESS_LESS_EQUAL:
-        code = "lS";
-        break;
-    case GREATER_GREATER_EQUAL:
-        code = "rS";
-        break;
-    case EQUAL_EQUAL:
-        code = "eq";
-        break;
-    case EXCLAMATION_EQUAL:
-        code = "ne";
-        break;
-    case LESS:
-        code = "lt";
-        break;
-    case GREATER:
-        code = "gt";
-        break;
-    case LESS_EQUAL:
-        code = "le";
-        break;
-    case GREATER_EQUAL:
-        code = "ge";
-        break;
-    case SPACESHIP:
-        code = "ss";
-        break;
-    case EXCLAMATION:
-        code = "nt";
-        break;
-    case AMPERSAND_AMPERSAND:
-        code = "aa";
-        break;
-    case BAR_BAR:
-        code = "oo";
-        break;
-    case PLUS_PLUS:
-        code = "pp";
-        break;
-    case MINUS_MINUS:
-        code = "mm";
-        break;
-    case COMMA:
-        code = "cm";
-        break;
-    case ARROW_STAR:
-        code = "pm";
-        break;
-    case ARROW:
-        code = "pt";
-        break;
-    case LEFT_PARENTHESIS:
-        code = "cl";
-        break;
-    case LEFT_BRACKET:
-        code = "ix";
-        break;
-    default:
+    unsigned operands = function.parameter_count + unsigned(x.nonstatic_member);
+    unsigned arity = 2;
+    if (operands == 1)
+        arity = 1;
+    itanium_operator o = operator_written(x.implemented, arity);
+    for (unsigned other = 0; o == itanium_operator::none && other < 4; other++)
+        o = operator_written(x.implemented, other);
+    if (o == itanium_operator::none)
         return false;
-    }
-    text(code);
+    text(o);
     return true;
 }
 
@@ -4599,95 +4486,17 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
  */
 bool itanium_mangler::builtin_type(fundamental_type t)
 {
-    switch (t) {
-    case fundamental_type::void_:
-        text("v");
+    /* [impl.clang] __bf16 on arm64: AAPCS64's vendor type, u <source-name>
+       ([abi:mangling-builtin]'s vendor extended type) */
+    if (t == fundamental_type::bfloat16 && !analysis.x86_64_target()) {
+        text("u6__bf16");
         return true;
-    case fundamental_type::wchar_t_:
-        text("w");
-        return true;
-    case fundamental_type::bool_:
-        text("b");
-        return true;
-    case fundamental_type::char_:
-        text("c");
-        return true;
-    case fundamental_type::signed_char:
-        text("a");
-        return true;
-    case fundamental_type::unsigned_char:
-        text("h");
-        return true;
-    case fundamental_type::short_int:
-        text("s");
-        return true;
-    case fundamental_type::unsigned_short_int:
-        text("t");
-        return true;
-    case fundamental_type::int_:
-        text("i");
-        return true;
-    case fundamental_type::unsigned_int:
-        text("j");
-        return true;
-    case fundamental_type::long_int:
-        text("l");
-        return true;
-    case fundamental_type::unsigned_long_int:
-        text("m");
-        return true;
-    case fundamental_type::long_long_int:
-        text("x");
-        return true;
-    case fundamental_type::unsigned_long_long_int:
-        text("y");
-        return true;
-    case fundamental_type::int128:
-        text("n");
-        return true;
-    case fundamental_type::unsigned_int128:
-        text("o");
-        return true;
-    case fundamental_type::float_:
-        text("f");
-        return true;
-    case fundamental_type::double_:
-        text("d");
-        return true;
-    case fundamental_type::long_double:
-        text("e");
-        return true;
-    case fundamental_type::float128:
-        text("g");
-        return true;
-    case fundamental_type::char32_t_:
-        text("Di");
-        return true;
-    case fundamental_type::char16_t_:
-        text("Ds");
-        return true;
-    case fundamental_type::char8_t_:
-        text("Du");
-        return true;
-    case fundamental_type::std_nullptr_t:
-        text("Dn");
-        return true;
-    case fundamental_type::float16:
-        text("DF");
-        number(16);
-        text("_");
-        return true;
-    case fundamental_type::bfloat16:
-        /* [impl.clang] clang's: DF16b, as the Itanium ABI's extended
-           floating-point types have it, on x86-64; AAPCS64's vendor type u6__bf16 on arm64 */
-        if (analysis.x86_64_target())
-            text("DF16b");
-        else
-            text("u6__bf16");
-        return true;
-    default:
-        return false;
     }
+    const char *code = builtin_type_code(t);
+    if (!code)
+        return false;
+    text(code);
+    return true;
 }
 
 /*
@@ -4819,38 +4628,6 @@ bool itanium_mangler::structure_expression(uint32_t s)
         c = cb;
     }
     syntax_kind kind = static_cast<syntax_kind>(word);
-    static const struct {
-        preprocessing_op_or_punc op;
-        const char *code;
-    } binary[] = {
-        {preprocessing_op_or_punc::PLUS, "pl"},
-        {preprocessing_op_or_punc::MINUS, "mi"},
-        {preprocessing_op_or_punc::STAR, "ml"},
-        {preprocessing_op_or_punc::SLASH, "dv"},
-        {preprocessing_op_or_punc::PERCENT, "rm"},
-        {preprocessing_op_or_punc::LESS_LESS, "ls"},
-        {preprocessing_op_or_punc::GREATER_GREATER, "rs"},
-        {preprocessing_op_or_punc::AMPERSAND, "an"},
-        {preprocessing_op_or_punc::BAR, "or"},
-        {preprocessing_op_or_punc::CARET, "eo"},
-        {preprocessing_op_or_punc::AMPERSAND_AMPERSAND, "aa"},
-        {preprocessing_op_or_punc::BAR_BAR, "oo"},
-        {preprocessing_op_or_punc::EQUAL_EQUAL, "eq"},
-        {preprocessing_op_or_punc::EXCLAMATION_EQUAL, "ne"},
-        {preprocessing_op_or_punc::LESS, "lt"},
-        {preprocessing_op_or_punc::GREATER, "gt"},
-        {preprocessing_op_or_punc::LESS_EQUAL, "le"},
-        {preprocessing_op_or_punc::GREATER_EQUAL, "ge"},
-    };
-    static const struct {
-        preprocessing_op_or_punc op;
-        const char *code;
-    } unary[] = {
-        {preprocessing_op_or_punc::MINUS, "ng"},
-        {preprocessing_op_or_punc::PLUS, "ps"},
-        {preprocessing_op_or_punc::EXCLAMATION, "nt"},
-        {preprocessing_op_or_punc::TILDE, "co"},
-    };
     if (kind == syntax_kind::primary_expression && count == 3 &&
         ops[0] == preprocessing_op_or_punc::LEFT_PARENTHESIS &&
         ops[2] == preprocessing_op_or_punc::RIGHT_PARENTHESIS)
@@ -4858,17 +4635,18 @@ bool itanium_mangler::structure_expression(uint32_t s)
     if (kind == syntax_kind::conditional_expression && count == 5 &&
         ops[1] == preprocessing_op_or_punc::QUESTION &&
         ops[3] == preprocessing_op_or_punc::COLON) {
-        text("qu");
+        text(itanium_operator::conditional);
         return structure_expression(children[0]) &&
                structure_expression(children[2]) &&
                structure_expression(children[4]);
     }
-    if (kind == syntax_kind::unary_expression && count == 2)
-        for (const auto &u : unary)
-            if (ops[0] == u.op) {
-                text(u.code);
-                return structure_expression(children[1]);
-            }
+    if (kind == syntax_kind::unary_expression && count == 2) {
+        itanium_operator o = prefix_operator(operator_written(ops[0], 1));
+        if (o != itanium_operator::none) {
+            text(o);
+            return structure_expression(children[1]);
+        }
+    }
     bool binary_kind = kind == syntax_kind::additive_expression ||
                        kind == syntax_kind::multiplicative_expression ||
                        kind == syntax_kind::shift_expression ||
@@ -4879,13 +4657,14 @@ bool itanium_mangler::structure_expression(uint32_t s)
                        kind == syntax_kind::inclusive_or_expression ||
                        kind == syntax_kind::logical_and_expression ||
                        kind == syntax_kind::logical_or_expression;
-    if (binary_kind && count == 3)
-        for (const auto &o : binary)
-            if (ops[1] == o.op) {
-                text(o.code);
-                return structure_expression(children[0]) &&
-                       structure_expression(children[2]);
-            }
+    if (binary_kind && count == 3) {
+        itanium_operator o = operator_written(ops[1], 2);
+        if (o != itanium_operator::none) {
+            text(o);
+            return structure_expression(children[0]) &&
+                   structure_expression(children[2]);
+        }
+    }
     return false;
 }
 
