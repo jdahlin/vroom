@@ -1110,6 +1110,9 @@ class parser
     node_index clang_atomic_type_specifier();
     /* ---- ext/clang/bit-int.cpp: _BitInt(N) */
     node_index clang_bit_int_type_specifier();
+    /* [ext:clang_pack_indexing] identifier ... [ constant-expression ] */
+    bool pack_index_follows();
+    node_index clang_pack_index(syntax_kind kind);
     /* ---- ext/gnu/asm-label.cpp: declarator asm ( "name" ) attributes */
     bool gnu_declarator_suffix_follows(const declarator_facts &facts);
     node_index gnu_declarator_suffix(size_t mark, token_index first,

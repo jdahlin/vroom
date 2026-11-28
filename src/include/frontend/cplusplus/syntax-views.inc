@@ -45,6 +45,8 @@ struct ClangAtomicTypeSpecifier;
 struct ClangBitCastExpression;
 struct ClangBitIntTypeSpecifier;
 struct ClangConvertvectorExpression;
+struct ClangPackIndexExpression;
+struct ClangPackIndexSpecifier;
 struct ClangSourceLocationExpression;
 struct ClangTypeTraitArgument;
 struct ClangTypeTraitArgumentList;
@@ -339,6 +341,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, AdditiveExpre
 template <> inline constexpr bool syntax_converts<CastNotation, AdditiveExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, AdditiveExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, AdditiveExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, AdditiveExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, AdditiveExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, AdditiveExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, AdditiveExpression> = true;
@@ -379,6 +382,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, AndExpression
 template <> inline constexpr bool syntax_converts<CastNotation, AndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, AndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, AndExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, AndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, AndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, AndExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, AndExpression> = true;
@@ -429,6 +433,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, AssignmentExp
 template <> inline constexpr bool syntax_converts<CastNotation, AssignmentExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, AssignmentExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, AssignmentExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, AssignmentExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, AssignmentExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, AssignmentExpression> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, AssignmentExpression> = true;
@@ -539,6 +544,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, CastExpressio
 template <> inline constexpr bool syntax_converts<CastNotation, CastExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, CastExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, CastExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, CastExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, CastExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, CastExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, CastExpression> = true;
@@ -575,6 +581,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, ClangTypeTrai
 template <> inline constexpr bool syntax_converts<CastNotation, ClangTypeTraitArgument> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ClangTypeTraitArgument> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ClangTypeTraitArgument> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ClangTypeTraitArgument> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ClangTypeTraitArgument> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, ClangTypeTraitArgument> = true;
@@ -643,6 +650,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, ClangTypeTrai
 template <> inline constexpr bool syntax_converts<CastNotation, ClangTypeTraitArgumentList> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ClangTypeTraitArgumentList> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ClangTypeTraitArgumentList> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ClangTypeTraitArgumentList> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ClangTypeTraitArgumentList> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, ClangTypeTraitArgumentList> = true;
@@ -714,6 +722,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, CompareExpres
 template <> inline constexpr bool syntax_converts<CastNotation, CompareExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, CompareExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, CompareExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, CompareExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, CompareExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, CompareExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, CompareExpression> = true;
@@ -759,6 +768,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, Condition> = 
 template <> inline constexpr bool syntax_converts<CastNotation, Condition> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, Condition> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, Condition> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, Condition> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, Condition> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, Condition> = true;
 template <> inline constexpr bool syntax_converts<CommaExpression, Condition> = true;
@@ -827,6 +837,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, ConditionalEx
 template <> inline constexpr bool syntax_converts<CastNotation, ConditionalExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ConditionalExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ConditionalExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ConditionalExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ConditionalExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ConditionalExpression> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, ConditionalExpression> = true;
@@ -887,6 +898,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, ConstantExpre
 template <> inline constexpr bool syntax_converts<CastNotation, ConstantExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ConstantExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ConstantExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ConstantExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ConstantExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ConstantExpression> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, ConstantExpression> = true;
@@ -947,6 +959,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, ConstraintExp
 template <> inline constexpr bool syntax_converts<CastNotation, ConstraintExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ConstraintExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ConstraintExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ConstraintExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ConstraintExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ConstraintExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, ConstraintExpression> = true;
@@ -1000,6 +1013,7 @@ template <> inline constexpr bool syntax_converts<UnaryExpression, ConstraintExp
 template <> inline constexpr bool syntax_converts<UnqualifiedId, ConstraintExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ConstraintLogicalAndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ConstraintLogicalAndExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ConstraintLogicalAndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ConstraintLogicalAndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ConstraintLogicalAndExpression> = true;
 template <> inline constexpr bool syntax_converts<ConstraintConjunction, ConstraintLogicalAndExpression> = true;
@@ -1022,6 +1036,7 @@ template <> inline constexpr bool syntax_converts<TemplateId, ConstraintLogicalA
 template <> inline constexpr bool syntax_converts<UnqualifiedId, ConstraintLogicalAndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ConstraintLogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ConstraintLogicalOrExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ConstraintLogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ConstraintLogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ConstraintLogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ConstraintConjunction, ConstraintLogicalOrExpression> = true;
@@ -1050,6 +1065,7 @@ template <> inline constexpr bool syntax_converts<ConversionTypeWithDeclarator, 
 template <> inline constexpr bool syntax_converts<TypeSpecifierSeq, ConversionTypeId> = true;
 template <> inline constexpr bool syntax_converts<ClangAtomicTypeSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangBitIntTypeSpecifier, DeclSpecifier> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTransformation, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClassSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<DecltypeSpecifier, DeclSpecifier> = true;
@@ -1161,6 +1177,7 @@ template <> inline constexpr bool syntax_converts<TemplateId, DeclaratorId> = tr
 template <> inline constexpr bool syntax_converts<UnqualifiedId, DeclaratorId> = true;
 template <> inline constexpr bool syntax_converts<ClangAtomicTypeSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangBitIntTypeSpecifier, DefiningTypeSpecifier> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTransformation, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClassSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<DecltypeSpecifier, DefiningTypeSpecifier> = true;
@@ -1190,6 +1207,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, EqualityExpre
 template <> inline constexpr bool syntax_converts<CastNotation, EqualityExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, EqualityExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, EqualityExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, EqualityExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, EqualityExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, EqualityExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, EqualityExpression> = true;
@@ -1238,6 +1256,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, ExclusiveOrEx
 template <> inline constexpr bool syntax_converts<CastNotation, ExclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ExclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ExclusiveOrExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ExclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ExclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ExclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, ExclusiveOrExpression> = true;
@@ -1291,6 +1310,7 @@ template <> inline constexpr bool syntax_converts<BracedInitList, ExprOrBracedIn
 template <> inline constexpr bool syntax_converts<CastNotation, ExprOrBracedInitList> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ExprOrBracedInitList> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ExprOrBracedInitList> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ExprOrBracedInitList> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ExprOrBracedInitList> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ExprOrBracedInitList> = true;
 template <> inline constexpr bool syntax_converts<CommaExpression, ExprOrBracedInitList> = true;
@@ -1360,6 +1380,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, Expression> =
 template <> inline constexpr bool syntax_converts<CastNotation, Expression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, Expression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, Expression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, Expression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, Expression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, Expression> = true;
 template <> inline constexpr bool syntax_converts<CommaExpression, Expression> = true;
@@ -1428,6 +1449,7 @@ template <> inline constexpr bool syntax_converts<BracedInitList, ExpressionList
 template <> inline constexpr bool syntax_converts<CastNotation, ExpressionList> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ExpressionList> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ExpressionList> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ExpressionList> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ExpressionList> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, ExpressionList> = true;
@@ -1497,6 +1519,7 @@ template <> inline constexpr bool syntax_converts<BracedInitList, ForRangeInitia
 template <> inline constexpr bool syntax_converts<CastNotation, ForRangeInitializer> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ForRangeInitializer> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ForRangeInitializer> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ForRangeInitializer> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ForRangeInitializer> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ForRangeInitializer> = true;
 template <> inline constexpr bool syntax_converts<CommaExpression, ForRangeInitializer> = true;
@@ -1569,6 +1592,7 @@ template <> inline constexpr bool syntax_converts<BracedInitList, GnuAttributeAr
 template <> inline constexpr bool syntax_converts<CastNotation, GnuAttributeArguments> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, GnuAttributeArguments> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, GnuAttributeArguments> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, GnuAttributeArguments> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, GnuAttributeArguments> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, GnuAttributeArguments> = true;
@@ -1642,6 +1666,7 @@ template <> inline constexpr bool syntax_converts<BracedInitList, GnuInitializer
 template <> inline constexpr bool syntax_converts<CastNotation, GnuInitializerList> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, GnuInitializerList> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, GnuInitializerList> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, GnuInitializerList> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, GnuInitializerList> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, GnuInitializerList> = true;
@@ -1720,6 +1745,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, InclusiveOrEx
 template <> inline constexpr bool syntax_converts<CastNotation, InclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, InclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, InclusiveOrExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, InclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, InclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, InclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, InclusiveOrExpression> = true;
@@ -1821,6 +1847,7 @@ template <> inline constexpr bool syntax_converts<BracedInitList, InitializerCla
 template <> inline constexpr bool syntax_converts<CastNotation, InitializerClause> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, InitializerClause> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, InitializerClause> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, InitializerClause> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, InitializerClause> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, InitializerClause> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, InitializerClause> = true;
@@ -1888,6 +1915,7 @@ template <> inline constexpr bool syntax_converts<BracedInitList, InitializerLis
 template <> inline constexpr bool syntax_converts<CastNotation, InitializerList> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, InitializerList> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, InitializerList> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, InitializerList> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, InitializerList> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, InitializerList> = true;
@@ -1964,6 +1992,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, LogicalAndExp
 template <> inline constexpr bool syntax_converts<CastNotation, LogicalAndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, LogicalAndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, LogicalAndExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, LogicalAndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, LogicalAndExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, LogicalAndExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, LogicalAndExpression> = true;
@@ -2019,6 +2048,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, LogicalOrExpr
 template <> inline constexpr bool syntax_converts<CastNotation, LogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, LogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, LogicalOrExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, LogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, LogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, LogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, LogicalOrExpression> = true;
@@ -2131,6 +2161,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, Multiplicativ
 template <> inline constexpr bool syntax_converts<CastNotation, MultiplicativeExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, MultiplicativeExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, MultiplicativeExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, MultiplicativeExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, MultiplicativeExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, MultiplicativeExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, MultiplicativeExpression> = true;
@@ -2223,6 +2254,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, PmExpression>
 template <> inline constexpr bool syntax_converts<CastNotation, PmExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, PmExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, PmExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, PmExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, PmExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, PmExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, PmExpression> = true;
@@ -2256,6 +2288,7 @@ template <> inline constexpr bool syntax_converts<UnaryExpression, PmExpression>
 template <> inline constexpr bool syntax_converts<UnqualifiedId, PmExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, PostfixExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, PostfixExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, PostfixExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, PostfixExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, PostfixExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, PostfixExpression> = true;
@@ -2279,6 +2312,7 @@ template <> inline constexpr bool syntax_converts<TemplateId, PostfixExpression>
 template <> inline constexpr bool syntax_converts<UnqualifiedId, PostfixExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, PrimaryExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, PrimaryExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, PrimaryExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, PrimaryExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, PrimaryExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, PrimaryExpression> = true;
@@ -2320,6 +2354,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, RelationalExp
 template <> inline constexpr bool syntax_converts<CastNotation, RelationalExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, RelationalExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, RelationalExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, RelationalExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, RelationalExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, RelationalExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, RelationalExpression> = true;
@@ -2375,6 +2410,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, ShiftExpressi
 template <> inline constexpr bool syntax_converts<CastNotation, ShiftExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ShiftExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ShiftExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, ShiftExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ShiftExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ShiftExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, ShiftExpression> = true;
@@ -2413,6 +2449,7 @@ template <> inline constexpr bool syntax_converts<UnaryExpression, ShiftExpressi
 template <> inline constexpr bool syntax_converts<UnqualifiedId, ShiftExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangAtomicTypeSpecifier, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangBitIntTypeSpecifier, SimpleTypeSpecifier> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexSpecifier, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTransformation, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<DecltypeSpecifier, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<GnuTypeofSpecifier, SimpleTypeSpecifier> = true;
@@ -2477,6 +2514,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, TemplateArgum
 template <> inline constexpr bool syntax_converts<CastNotation, TemplateArgument> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, TemplateArgument> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, TemplateArgument> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, TemplateArgument> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, TemplateArgument> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, TemplateArgument> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, TemplateArgument> = true;
@@ -2540,6 +2578,7 @@ template <> inline constexpr bool syntax_converts<AwaitExpression, TemplateArgum
 template <> inline constexpr bool syntax_converts<CastNotation, TemplateArgumentList> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, TemplateArgumentList> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, TemplateArgumentList> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, TemplateArgumentList> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, TemplateArgumentList> = true;
 template <> inline constexpr bool syntax_converts<ConditionalOperation, TemplateArgumentList> = true;
@@ -2609,6 +2648,7 @@ template <> inline constexpr bool syntax_converts<TypeParameter, TemplateParamet
 template <> inline constexpr bool syntax_converts<TemplateParameter, TemplateParameterList> = true;
 template <> inline constexpr bool syntax_converts<ClangAtomicTypeSpecifier, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangBitIntTypeSpecifier, TypeSpecifier> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexSpecifier, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTransformation, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<DecltypeSpecifier, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ElaboratedClassSpecifier, TypeSpecifier> = true;
@@ -2623,6 +2663,7 @@ template <> inline constexpr bool syntax_converts<SimpleTypeSpecifier, TypeSpeci
 template <> inline constexpr bool syntax_converts<AwaitExpression, UnaryExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, UnaryExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, UnaryExpression> = true;
+template <> inline constexpr bool syntax_converts<ClangPackIndexExpression, UnaryExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, UnaryExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, UnaryExpression> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, UnaryExpression> = true;
@@ -2696,6 +2737,8 @@ ClangAtomicTypeSpecifier clang_atomic_type_specifier() const;
 ClangBitCastExpression clang_bit_cast_expression() const;
 ClangBitIntTypeSpecifier clang_bit_int_type_specifier() const;
 ClangConvertvectorExpression clang_convertvector_expression() const;
+ClangPackIndexExpression clang_pack_index_expression() const;
+ClangPackIndexSpecifier clang_pack_index_specifier() const;
 ClangSourceLocationExpression clang_source_location_expression() const;
 ClangTypeTraitArgument clang_type_trait_argument() const;
 ClangTypeTraitArgumentList clang_type_trait_argument_list() const;
@@ -3021,7 +3064,7 @@ struct AbstractDeclarator : SyntaxExtra<AbstractDeclarator> {
     }
 };
 
-/* additive-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* additive-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct AdditiveExpression : SyntaxExtra<AdditiveExpression> {
     using SyntaxExtra<AdditiveExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -3118,7 +3161,7 @@ struct AlignmentSpecifier : SyntaxExtra<AlignmentSpecifier> {
     SyntaxElement identifier() const;
 };
 
-/* and-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* and-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct AndExpression : SyntaxExtra<AndExpression> {
     using SyntaxExtra<AndExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -3234,7 +3277,7 @@ struct Assignment : SyntaxExtra<Assignment> {
     static bool accepts(syntax_kind k);
 };
 
-/* assignment-expression: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+/* assignment-expression: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct AssignmentExpression : SyntaxExtra<AssignmentExpression> {
     using SyntaxExtra<AssignmentExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -3929,7 +3972,7 @@ struct Captures : SyntaxExtra<Captures> {
     static bool accepts(syntax_kind k);
 };
 
-/* cast-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* cast-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct CastExpression : SyntaxExtra<CastExpression> {
     using SyntaxExtra<CastExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -4072,6 +4115,48 @@ struct ClangConvertvectorExpression : SyntaxExtra<ClangConvertvectorExpression> 
     SyntaxElement identifier() const;
 };
 
+/* the clang-pack-index-expression node */
+struct ClangPackIndexExpression : SyntaxExtra<ClangPackIndexExpression> {
+    using SyntaxExtra<ClangPackIndexExpression>::SyntaxExtra;
+    ClangPackIndexExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangPackIndexExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangPackIndexExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangPackIndexExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangPackIndexExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
+    static bool accepts(syntax_kind k);
+    ConstantExpression constant_expression() const;
+};
+
+/* the clang-pack-index-specifier node */
+struct ClangPackIndexSpecifier : SyntaxExtra<ClangPackIndexSpecifier> {
+    using SyntaxExtra<ClangPackIndexSpecifier>::SyntaxExtra;
+    ClangPackIndexSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangPackIndexSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangPackIndexSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangPackIndexSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangPackIndexSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
+    static bool accepts(syntax_kind k);
+    ConstantExpression constant_expression() const;
+};
+
 /* the clang-source-location-expression node */
 struct ClangSourceLocationExpression : SyntaxExtra<ClangSourceLocationExpression> {
     using SyntaxExtra<ClangSourceLocationExpression>::SyntaxExtra;
@@ -4092,7 +4177,7 @@ struct ClangSourceLocationExpression : SyntaxExtra<ClangSourceLocationExpression
     static bool accepts(syntax_kind k);
 };
 
-/* clang-type-trait-argument: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, type_id, unary_expression, unqualified_id, yield_expression */
+/* clang-type-trait-argument: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, type_id, unary_expression, unqualified_id, yield_expression */
 struct ClangTypeTraitArgument : SyntaxExtra<ClangTypeTraitArgument> {
     using SyntaxExtra<ClangTypeTraitArgument>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -4123,7 +4208,7 @@ struct ClangTypeTraitArgument : SyntaxExtra<ClangTypeTraitArgument> {
     }
 };
 
-/* clang-type-trait-argument-list: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, type_id, unary_expression, unqualified_id, yield_expression */
+/* clang-type-trait-argument-list: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, type_id, unary_expression, unqualified_id, yield_expression */
 struct ClangTypeTraitArgumentList : SyntaxExtra<ClangTypeTraitArgumentList> {
     using SyntaxExtra<ClangTypeTraitArgumentList>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -4325,7 +4410,7 @@ struct CommaExpression : SyntaxExtra<CommaExpression> {
     static bool accepts(syntax_kind k);
 };
 
-/* compare-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* compare-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct CompareExpression : SyntaxExtra<CompareExpression> {
     using SyntaxExtra<CompareExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -4421,7 +4506,7 @@ struct ConceptDefinition : SyntaxExtra<ConceptDefinition> {
     ConstraintExpression constraint_expression() const;
 };
 
-/* condition: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, condition, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+/* condition: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, condition, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct Condition : SyntaxExtra<Condition> {
     using SyntaxExtra<Condition>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -4477,7 +4562,7 @@ struct ConditionDeclaration : SyntaxExtra<ConditionDeclaration> {
     SyntaxElement identifier() const;
 };
 
-/* conditional-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* conditional-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct ConditionalExpression : SyntaxExtra<ConditionalExpression> {
     using SyntaxExtra<ConditionalExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -4528,7 +4613,7 @@ struct ConditionalOperation : SyntaxExtra<ConditionalOperation> {
     static bool accepts(syntax_kind k);
 };
 
-/* constant-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* constant-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct ConstantExpression : SyntaxExtra<ConstantExpression> {
     using SyntaxExtra<ConstantExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -4599,7 +4684,7 @@ struct ConstraintDisjunction : SyntaxExtra<ConstraintDisjunction> {
     static bool accepts(syntax_kind k);
 };
 
-/* constraint-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* constraint-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct ConstraintExpression : SyntaxExtra<ConstraintExpression> {
     using SyntaxExtra<ConstraintExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -4630,7 +4715,7 @@ struct ConstraintExpression : SyntaxExtra<ConstraintExpression> {
     }
 };
 
-/* constraint-logical-and-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, constraint_logical_and_expression, conversion_function_id, fold_expression, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, operator_function_id, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
+/* constraint-logical-and-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, constraint_logical_and_expression, conversion_function_id, fold_expression, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, operator_function_id, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
 struct ConstraintLogicalAndExpression : SyntaxExtra<ConstraintLogicalAndExpression> {
     using SyntaxExtra<ConstraintLogicalAndExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -4661,7 +4746,7 @@ struct ConstraintLogicalAndExpression : SyntaxExtra<ConstraintLogicalAndExpressi
     }
 };
 
-/* constraint-logical-or-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, constraint_logical_and_expression, constraint_logical_or_expression, conversion_function_id, fold_expression, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, operator_function_id, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
+/* constraint-logical-or-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, constraint_logical_and_expression, constraint_logical_or_expression, conversion_function_id, fold_expression, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, operator_function_id, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
 struct ConstraintLogicalOrExpression : SyntaxExtra<ConstraintLogicalOrExpression> {
     using SyntaxExtra<ConstraintLogicalOrExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -4861,7 +4946,7 @@ struct CvQualifierSeq : SyntaxExtra<CvQualifierSeq> {
     CvQualifierSeq cv_qualifier_seq() const;
 };
 
-/* decl-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, explicit_specifier, gnu_attribute_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
+/* decl-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_pack_index_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, explicit_specifier, gnu_attribute_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct DeclSpecifier : SyntaxExtra<DeclSpecifier> {
     using SyntaxExtra<DeclSpecifier>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -5205,7 +5290,7 @@ struct DefiningTypeId : SyntaxExtra<DefiningTypeId> {
     DefiningTypeSpecifierSeq defining_type_specifier_seq() const;
 };
 
-/* defining-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
+/* defining-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_pack_index_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct DefiningTypeSpecifier : SyntaxExtra<DefiningTypeSpecifier> {
     using SyntaxExtra<DefiningTypeSpecifier>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -5803,7 +5888,7 @@ struct EqualInitializer : SyntaxExtra<EqualInitializer> {
     SyntaxElement identifier() const;
 };
 
-/* equality-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* equality-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct EqualityExpression : SyntaxExtra<EqualityExpression> {
     using SyntaxExtra<EqualityExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -5899,7 +5984,7 @@ struct ExceptionDeclaration : SyntaxExtra<ExceptionDeclaration> {
     SyntaxElement identifier() const;
 };
 
-/* exclusive-or-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* exclusive-or-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct ExclusiveOrExpression : SyntaxExtra<ExclusiveOrExpression> {
     using SyntaxExtra<ExclusiveOrExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -6034,7 +6119,7 @@ struct ExportDeclaration : SyntaxExtra<ExportDeclaration> {
     static bool accepts(syntax_kind k);
 };
 
-/* expr-or-braced-init-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+/* expr-or-braced-init-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct ExprOrBracedInitList : SyntaxExtra<ExprOrBracedInitList> {
     using SyntaxExtra<ExprOrBracedInitList>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -6065,7 +6150,7 @@ struct ExprOrBracedInitList : SyntaxExtra<ExprOrBracedInitList> {
     }
 };
 
-/* expression: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+/* expression: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct Expression : SyntaxExtra<Expression> {
     using SyntaxExtra<Expression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -6096,7 +6181,7 @@ struct Expression : SyntaxExtra<Expression> {
     }
 };
 
-/* expression-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+/* expression-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct ExpressionList : SyntaxExtra<ExpressionList> {
     using SyntaxExtra<ExpressionList>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -6194,7 +6279,7 @@ struct ForRangeDeclaration : SyntaxExtra<ForRangeDeclaration> {
     SyntaxElement identifier() const;
 };
 
-/* for-range-initializer: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+/* for-range-initializer: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct ForRangeInitializer : SyntaxExtra<ForRangeInitializer> {
     using SyntaxExtra<ForRangeInitializer>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -6412,7 +6497,7 @@ struct GnuAttribute : SyntaxExtra<GnuAttribute> {
     GnuAttributeArguments gnu_attribute_arguments() const;
 };
 
-/* gnu-attribute-arguments: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+/* gnu-attribute-arguments: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct GnuAttributeArguments : SyntaxExtra<GnuAttributeArguments> {
     using SyntaxExtra<GnuAttributeArguments>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -6672,7 +6757,7 @@ struct GnuInitializerClauses : SyntaxExtra<GnuInitializerClauses> {
     GnuDesignation gnu_designation() const;
 };
 
-/* gnu-initializer-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_initializer_list, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+/* gnu-initializer-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_initializer_list, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct GnuInitializerList : SyntaxExtra<GnuInitializerList> {
     using SyntaxExtra<GnuInitializerList>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -6940,7 +7025,7 @@ struct IdentifierList : SyntaxExtra<IdentifierList> {
     IdentifierList identifier_list() const;
 };
 
-/* inclusive-or-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* inclusive-or-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct InclusiveOrExpression : SyntaxExtra<InclusiveOrExpression> {
     using SyntaxExtra<InclusiveOrExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -7158,7 +7243,7 @@ struct Initializer : SyntaxExtra<Initializer> {
     }
 };
 
-/* initializer-clause: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+/* initializer-clause: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct InitializerClause : SyntaxExtra<InitializerClause> {
     using SyntaxExtra<InitializerClause>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -7209,7 +7294,7 @@ struct InitializerClauses : SyntaxExtra<InitializerClauses> {
     static bool accepts(syntax_kind k);
 };
 
-/* initializer-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+/* initializer-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct InitializerList : SyntaxExtra<InitializerList> {
     using SyntaxExtra<InitializerList>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -7486,7 +7571,7 @@ struct LiteralOperatorId : SyntaxExtra<LiteralOperatorId> {
     SyntaxElement string_literal() const;
 };
 
-/* logical-and-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* logical-and-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct LogicalAndExpression : SyntaxExtra<LogicalAndExpression> {
     using SyntaxExtra<LogicalAndExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -7537,7 +7622,7 @@ struct LogicalAndOperation : SyntaxExtra<LogicalAndOperation> {
     static bool accepts(syntax_kind k);
 };
 
-/* logical-or-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* logical-or-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct LogicalOrExpression : SyntaxExtra<LogicalOrExpression> {
     using SyntaxExtra<LogicalOrExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -7994,7 +8079,7 @@ struct ModulePartition : SyntaxExtra<ModulePartition> {
     SyntaxElement identifier() const;
 };
 
-/* multiplicative-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* multiplicative-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct MultiplicativeExpression : SyntaxExtra<MultiplicativeExpression> {
     using SyntaxExtra<MultiplicativeExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -8820,7 +8905,7 @@ struct PlaceholderTypeSpecifier : SyntaxExtra<PlaceholderTypeSpecifier> {
     SyntaxElement identifier() const;
 };
 
-/* pm-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* pm-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct PmExpression : SyntaxExtra<PmExpression> {
     using SyntaxExtra<PmExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -8954,7 +9039,7 @@ struct PointerToMemberOperation : SyntaxExtra<PointerToMemberOperation> {
     static bool accepts(syntax_kind k);
 };
 
-/* postfix-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, fold_expression, gnu_compound_literal, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, operator_function_id, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
+/* postfix-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, fold_expression, gnu_compound_literal, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, operator_function_id, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
 struct PostfixExpression : SyntaxExtra<PostfixExpression> {
     using SyntaxExtra<PostfixExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -9021,7 +9106,7 @@ struct PostfixOperation : SyntaxExtra<PostfixOperation> {
     PostfixOperationTypeidOperation typeid_operation() const;
 };
 
-/* primary-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, fold_expression, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, operator_function_id, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
+/* primary-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, fold_expression, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, operator_function_id, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
 struct PrimaryExpression : SyntaxExtra<PrimaryExpression> {
     using SyntaxExtra<PrimaryExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -9268,7 +9353,7 @@ struct QualifiedNamespaceSpecifier : SyntaxExtra<QualifiedNamespaceSpecifier> {
     SyntaxElement identifier() const;
 };
 
-/* relational-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* relational-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct RelationalExpression : SyntaxExtra<RelationalExpression> {
     using SyntaxExtra<RelationalExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -9532,7 +9617,7 @@ struct SelectionStatement : SyntaxExtra<SelectionStatement> {
     SyntaxElement identifier() const;
 };
 
-/* shift-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* shift-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct ShiftExpression : SyntaxExtra<ShiftExpression> {
     using SyntaxExtra<ShiftExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -9695,7 +9780,7 @@ struct SimpleTypeName : SyntaxExtra<SimpleTypeName> {
     SyntaxElement identifier() const;
 };
 
-/* simple-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier */
+/* simple-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_pack_index_specifier, clang_type_transformation, decltype_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier */
 struct SimpleTypeSpecifier : SyntaxExtra<SimpleTypeSpecifier> {
     using SyntaxExtra<SimpleTypeSpecifier>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -9877,7 +9962,7 @@ struct SuffixedDeclarator : SyntaxExtra<SuffixedDeclarator> {
     ParametersAndQualifiers parameters_and_qualifiers() const;
 };
 
-/* template-argument: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, type_id, unary_expression, unqualified_id */
+/* template-argument: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, type_id, unary_expression, unqualified_id */
 struct TemplateArgument : SyntaxExtra<TemplateArgument> {
     using SyntaxExtra<TemplateArgument>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -9908,7 +9993,7 @@ struct TemplateArgument : SyntaxExtra<TemplateArgument> {
     }
 };
 
-/* template-argument-list: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_argument_list, template_id, type_id, unary_expression, unqualified_id */
+/* template-argument-list: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_argument_list, template_id, type_id, unary_expression, unqualified_id */
 struct TemplateArgumentList : SyntaxExtra<TemplateArgumentList> {
     using SyntaxExtra<TemplateArgumentList>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -10386,7 +10471,7 @@ struct TypeRequirement : SyntaxExtra<TypeRequirement> {
     SyntaxElement identifier() const;
 };
 
-/* type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
+/* type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_pack_index_specifier, clang_type_transformation, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct TypeSpecifier : SyntaxExtra<TypeSpecifier> {
     using SyntaxExtra<TypeSpecifier>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -10464,7 +10549,7 @@ struct TypenameSpecifier : SyntaxExtra<TypenameSpecifier> {
     SyntaxElement identifier() const;
 };
 
-/* unary-expression: one of await_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
+/* unary-expression: one of await_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_pack_index_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct UnaryExpression : SyntaxExtra<UnaryExpression> {
     using SyntaxExtra<UnaryExpression>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -10787,7 +10872,7 @@ template <class F> decltype(auto) AbstractDeclarator::visit(F &&f) const
 
 inline bool AdditiveExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -10843,7 +10928,7 @@ inline SyntaxElement AlignmentSpecifier::identifier() const
 
 inline bool AndExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -10899,7 +10984,7 @@ inline bool Assignment::accepts(syntax_kind k)
 
 inline bool AssignmentExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11229,7 +11314,7 @@ inline bool Captures::accepts(syntax_kind k)
 
 inline bool CastExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11323,6 +11408,26 @@ inline SyntaxElement ClangConvertvectorExpression::identifier() const
     return token_of_kind(token_kind::identifier);
 }
 
+inline bool ClangPackIndexExpression::accepts(syntax_kind k)
+{
+    return k == syntax_kind::clang_pack_index_expression;
+}
+
+inline ConstantExpression ClangPackIndexExpression::constant_expression() const
+{
+    return first<ConstantExpression>();
+}
+
+inline bool ClangPackIndexSpecifier::accepts(syntax_kind k)
+{
+    return k == syntax_kind::clang_pack_index_specifier;
+}
+
+inline ConstantExpression ClangPackIndexSpecifier::constant_expression() const
+{
+    return first<ConstantExpression>();
+}
+
 inline bool ClangSourceLocationExpression::accepts(syntax_kind k)
 {
     return k == syntax_kind::clang_source_location_expression;
@@ -11330,7 +11435,7 @@ inline bool ClangSourceLocationExpression::accepts(syntax_kind k)
 
 inline bool ClangTypeTraitArgument::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11341,7 +11446,7 @@ template <class F> decltype(auto) ClangTypeTraitArgument::visit(F &&f) const
 
 inline bool ClangTypeTraitArgumentList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11444,7 +11549,7 @@ inline bool CommaExpression::accepts(syntax_kind k)
 
 inline bool CompareExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11495,7 +11600,7 @@ inline ConstraintExpression ConceptDefinition::constraint_expression() const
 
 inline bool Condition::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x11c000000000003u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x11c000000000003u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11536,7 +11641,7 @@ inline SyntaxElement ConditionDeclaration::identifier() const
 
 inline bool ConditionalExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11552,7 +11657,7 @@ inline bool ConditionalOperation::accepts(syntax_kind k)
 
 inline bool ConstantExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11573,7 +11678,7 @@ inline bool ConstraintDisjunction::accepts(syntax_kind k)
 
 inline bool ConstraintExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11584,7 +11689,7 @@ template <class F> decltype(auto) ConstraintExpression::visit(F &&f) const
 
 inline bool ConstraintLogicalAndExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0x7b000u};
+    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0x87b000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11595,7 +11700,7 @@ template <class F> decltype(auto) ConstraintLogicalAndExpression::visit(F &&f) c
 
 inline bool ConstraintLogicalOrExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0x7b000u};
+    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0x87b000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11688,7 +11793,7 @@ inline CvQualifierSeq CvQualifierSeq::cv_qualifier_seq() const
 
 inline bool DeclSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1fc00u, 0x2000000000000u, 0x4000009000000000u, 0x384000u};
+    static const uint64_t kinds[] = {0x1fc00u, 0x2000000000000u, 0x4000009000000000u, 0x784000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11883,7 +11988,7 @@ inline DefiningTypeSpecifierSeq DefiningTypeId::defining_type_specifier_seq() co
 
 inline bool DefiningTypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1fc00u, 0x0u, 0x9000000000u, 0x384000u};
+    static const uint64_t kinds[] = {0x1fc00u, 0x0u, 0x9000000000u, 0x784000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12231,7 +12336,7 @@ inline SyntaxElement EqualInitializer::identifier() const
 
 inline bool EqualityExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12282,7 +12387,7 @@ inline SyntaxElement ExceptionDeclaration::identifier() const
 
 inline bool ExclusiveOrExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12338,7 +12443,7 @@ inline bool ExportDeclaration::accepts(syntax_kind k)
 
 inline bool ExprOrBracedInitList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12349,7 +12454,7 @@ template <class F> decltype(auto) ExprOrBracedInitList::visit(F &&f) const
 
 inline bool Expression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12360,7 +12465,7 @@ template <class F> decltype(auto) Expression::visit(F &&f) const
 
 inline bool ExpressionList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12421,7 +12526,7 @@ inline SyntaxElement ForRangeDeclaration::identifier() const
 
 inline bool ForRangeInitializer::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12558,7 +12663,7 @@ inline GnuAttributeArguments GnuAttribute::gnu_attribute_arguments() const
 
 inline bool GnuAttributeArguments::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12666,7 +12771,7 @@ inline GnuDesignation GnuInitializerClauses::gnu_designation() const
 
 inline bool GnuInitializerList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x7b5c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x87b5c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12814,7 +12919,7 @@ inline IdentifierList IdentifierList::identifier_list() const
 
 inline bool InclusiveOrExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12903,7 +13008,7 @@ template <class F> decltype(auto) Initializer::visit(F &&f) const
 
 inline bool InitializerClause::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12919,7 +13024,7 @@ inline bool InitializerClauses::accepts(syntax_kind k)
 
 inline bool InitializerList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13112,7 +13217,7 @@ inline SyntaxElement LiteralOperatorId::string_literal() const
 
 inline bool LogicalAndExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13128,7 +13233,7 @@ inline bool LogicalAndOperation::accepts(syntax_kind k)
 
 inline bool LogicalOrExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13393,7 +13498,7 @@ inline SyntaxElement ModulePartition::identifier() const
 
 inline bool MultiplicativeExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13905,7 +14010,7 @@ inline SyntaxElement PlaceholderTypeSpecifier::identifier() const
 
 inline bool PmExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13956,7 +14061,7 @@ inline bool PointerToMemberOperation::accepts(syntax_kind k)
 
 inline bool PostfixExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1078000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b080u};
+    static const uint64_t kinds[] = {0x1078000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b080u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13982,7 +14087,7 @@ inline TypenameSpecifier PostfixOperation::typename_specifier() const
 
 inline bool PrimaryExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b000u};
+    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14120,7 +14225,7 @@ inline SyntaxElement QualifiedNamespaceSpecifier::identifier() const
 
 inline bool RelationalExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14252,7 +14357,7 @@ inline SyntaxElement SelectionStatement::identifier() const
 
 inline bool ShiftExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14353,7 +14458,7 @@ inline SyntaxElement SimpleTypeName::identifier() const
 
 inline bool SimpleTypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x6400u, 0x0u, 0x1000000000u, 0x384000u};
+    static const uint64_t kinds[] = {0x6400u, 0x0u, 0x1000000000u, 0x784000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14455,7 +14560,7 @@ inline ParametersAndQualifiers SuffixedDeclarator::parameters_and_qualifiers() c
 
 inline bool TemplateArgument::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14466,7 +14571,7 @@ template <class F> decltype(auto) TemplateArgument::visit(F &&f) const
 
 inline bool TemplateArgumentList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14764,7 +14869,7 @@ inline SyntaxElement TypeRequirement::identifier() const
 
 inline bool TypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7c00u, 0x0u, 0x9000000000u, 0x384000u};
+    static const uint64_t kinds[] = {0x7c00u, 0x0u, 0x9000000000u, 0x784000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14820,7 +14925,7 @@ inline SyntaxElement TypenameSpecifier::identifier() const
 
 inline bool UnaryExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x20813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
+    static const uint64_t kinds[] = {0x20813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x87b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -16121,7 +16226,7 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
         break;
     case syntax_kind::simple_template_id:
         if constexpr (syntax_converts<SimpleTemplateId, S>)
-            return syntax_call<ClassHeadName, TemplateId, ClassOrDecltype, MemInitializerId, BaseSpecifier, BaseSpecifierList, UnqualifiedId, IdExpression, DeclaratorId, SimpleTypeSpecifier, NoptrDeclarator, PtrDeclarator, Declarator, TypeSpecifier, InitDeclarator, MemberDeclarator, DefiningTypeSpecifier, InitDeclaratorList, MemberDeclaratorList, DeclSpecifier, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, SimpleTemplateId(s.index()));
+            return syntax_call<ClassHeadName, TemplateId, ClassOrDecltype, MemInitializerId, BaseSpecifier, BaseSpecifierList, UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, SimpleTypeSpecifier, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, TypeSpecifier, InitDeclaratorList, MemberDeclaratorList, DefiningTypeSpecifier, DeclSpecifier, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, SimpleTemplateId(s.index()));
         break;
     case syntax_kind::template_id:
         if constexpr (syntax_converts<OperatorTemplateId, S>)
@@ -16319,6 +16424,14 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
         if constexpr (syntax_converts<ClangBitIntTypeSpecifier, S>)
             return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ClangBitIntTypeSpecifier(s.index()));
         break;
+    case syntax_kind::clang_pack_index_specifier:
+        if constexpr (syntax_converts<ClangPackIndexSpecifier, S>)
+            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ClangPackIndexSpecifier(s.index()));
+        break;
+    case syntax_kind::clang_pack_index_expression:
+        if constexpr (syntax_converts<ClangPackIndexExpression, S>)
+            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ClangPackIndexExpression(s.index()));
+        break;
     case syntax_kind::unparsed:
         if constexpr (syntax_converts<Unparsed, S>)
             return syntax_call<>(f, Unparsed(s.index()));
@@ -16492,6 +16605,16 @@ inline ClangBitIntTypeSpecifier SyntaxRef::clang_bit_int_type_specifier() const
 inline ClangConvertvectorExpression SyntaxRef::clang_convertvector_expression() const
 {
     return as<ClangConvertvectorExpression>();
+}
+
+inline ClangPackIndexExpression SyntaxRef::clang_pack_index_expression() const
+{
+    return as<ClangPackIndexExpression>();
+}
+
+inline ClangPackIndexSpecifier SyntaxRef::clang_pack_index_specifier() const
+{
+    return as<ClangPackIndexSpecifier>();
 }
 
 inline ClangSourceLocationExpression SyntaxRef::clang_source_location_expression() const
@@ -17949,222 +18072,224 @@ inline UsingDeclarators SyntaxRef::using_declarators() const
 /* per node kind, the kinds its productions allow as a child node
    ((unparsed) and (erroneous) anywhere) */
 static const uint64_t syntax_allowed_children[][4] = {
-    {0x208007eu, 0x40000000u, 0xf1e00100275c0u, 0xc00020u}, /* translation_unit */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc00020u}, /* declaration_seq */
-    {0x18000080u, 0x1c0002038000fcu, 0x40000030801c0000u, 0xc00010u}, /* simple_declaration */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* empty_declaration */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* static_assert_declaration */
-    {0x0u, 0x2000u, 0x40000000001c0000u, 0xc00000u}, /* alias_declaration */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* attribute_declaration */
-    {0x1fc80u, 0x2000000000000u, 0x40000090001c0000u, 0xf84000u}, /* decl_specifier_seq */
-    {0x7d00u, 0x0u, 0x40000090001c0000u, 0xf84000u}, /* type_specifier_seq */
-    {0x1fe00u, 0x0u, 0x40000090001c0000u, 0xf84000u}, /* defining_type_specifier_seq */
-    {0x4000000u, 0x0u, 0x1000000000u, 0xc00000u}, /* simple_type_specifier */
-    {0x4000000u, 0x0u, 0x40000010001c0000u, 0xc00000u}, /* elaborated_type_specifier */
-    {0x4040000u, 0x0u, 0x0u, 0xc00000u}, /* elaborated_enum_specifier */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* decltype_specifier */
-    {0x4000u, 0x0u, 0x800000000u, 0xc00000u}, /* placeholder_type_specifier */
-    {0x0u, 0x1400000000u, 0x0u, 0xc00000u}, /* class_specifier */
-    {0x1c20000u, 0x0u, 0x0u, 0xc00000u}, /* enum_specifier */
-    {0x340000u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* enum_head */
-    {0x4000000u, 0x0u, 0x0u, 0xc00000u}, /* enum_head_name */
-    {0x340000u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* opaque_enum_declaration */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* enum_key */
-    {0x100u, 0x0u, 0x0u, 0xc00000u}, /* enum_base */
-    {0x1c00000u, 0x0u, 0x0u, 0xc00000u}, /* enumerator_list */
-    {0xfffe0813f9000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* enumerator_definition */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* enumerator */
-    {0x1000u, 0x0u, 0x0u, 0xc00000u}, /* using_enum_declaration */
-    {0x4002000u, 0x0u, 0x1000000000u, 0xc00000u}, /* nested_name_specifier */
-    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0xc00000u}, /* qualified_id */
-    {0x6000u, 0x0u, 0x1000000000u, 0xc00000u}, /* unqualified_id */
-    {0xfffe081ff8000000u, 0x81c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* primary_expression */
-    {0xfffe081ff8006400u, 0x1c000006001003u, 0x3000b000000000u, 0xfff1c0u}, /* postfix_expression */
-    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xc7b1c0u}, /* unary_expression */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* noexcept_expression */
-    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* await_expression */
-    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xc7b1c0u}, /* yield_expression */
-    {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0xc7b1c0u}, /* throw_expression */
-    {0x6000000000u, 0x800000000080000u, 0x40000004c01c0000u, 0xc00000u}, /* lambda_expression */
-    {0x78000000000u, 0x0u, 0x0u, 0xc00000u}, /* lambda_introducer */
-    {0x80u, 0x1e0800u, 0x40000000801c0000u, 0xc00000u}, /* lambda_declarator */
-    {0x70000000000u, 0x0u, 0x0u, 0xc00000u}, /* lambda_capture */
-    {0x70000000000u, 0x0u, 0x0u, 0xc00000u}, /* capture_list */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* simple_capture */
-    {0x0u, 0x3800000u, 0x0u, 0xc00000u}, /* init_capture */
-    {0x1300000000000u, 0x2001000u, 0x0u, 0xc00000u}, /* new_expression */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xc7b1c0u}, /* new_placement */
-    {0xc00000000100u, 0x100u, 0x0u, 0xc00000u}, /* new_type_id */
-    {0xc00000000000u, 0x100u, 0x0u, 0xc00000u}, /* new_declarator */
-    {0xfffe881ff8000000u, 0x1c000000000003u, 0x40300030001c0000u, 0xc7b1c0u}, /* noptr_new_declarator */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xc7b1c0u}, /* new_initializer */
-    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* delete_expression */
-    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xc7b1c0u}, /* cast_expression */
-    {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* pm_expression */
-    {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* multiplicative_expression */
-    {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* additive_expression */
-    {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* shift_expression */
-    {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* compare_expression */
-    {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* relational_expression */
-    {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* equality_expression */
-    {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* and_expression */
-    {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* exclusive_or_expression */
-    {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* inclusive_or_expression */
-    {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* logical_and_expression */
-    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* logical_or_expression */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* conditional_expression */
-    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xc7b1c0u}, /* assignment_expression */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* expression */
-    {0x18000000u, 0x1c0000000000fcu, 0x3000000000u, 0xc00000u}, /* init_declarator_list */
-    {0x18000000u, 0x1c0000038000f0u, 0x3080000000u, 0xc00010u}, /* init_declarator */
-    {0x18000000u, 0x1c000000000ce0u, 0x4000003000000000u, 0xc00002u}, /* declarator */
-    {0x18000000u, 0x1c0000000001e0u, 0x3000000000u, 0xc00000u}, /* ptr_declarator */
-    {0xfffe0813f8000000u, 0x1c0000000004e0u, 0x40300030001c0000u, 0xc7b1c0u}, /* noptr_declarator */
-    {0x18000000u, 0x1c000000000000u, 0x3000000000u, 0xc00000u}, /* declarator_id */
-    {0x4000000u, 0x200u, 0x40000000001c0000u, 0xc00000u}, /* ptr_operator */
-    {0x0u, 0x200u, 0x0u, 0xc00000u}, /* cv_qualifier_seq */
-    {0x0u, 0x3e0200u, 0x40000000001c0000u, 0xc00000u}, /* parameters_and_qualifiers */
-    {0x0u, 0x1000u, 0x0u, 0xc00000u}, /* trailing_return_type */
-    {0x100u, 0x1c100u, 0x0u, 0xc00000u}, /* type_id */
-    {0x200u, 0x1c100u, 0x0u, 0xc00000u}, /* defining_type_id */
-    {0x0u, 0x10c00u, 0x0u, 0xc00000u}, /* abstract_declarator */
-    {0x0u, 0x18100u, 0x0u, 0xc00000u}, /* ptr_abstract_declarator */
-    {0xfffe0813f8000000u, 0x1c000000018500u, 0x40300030001c0000u, 0xc7b1c0u}, /* noptr_abstract_declarator */
-    {0x0u, 0xc0000u, 0x0u, 0xc00000u}, /* parameter_declaration_clause */
-    {0x0u, 0xc0000u, 0x0u, 0xc00000u}, /* parameter_declaration_list */
-    {0xfffe081ff8000080u, 0x1c00000201c1f1u, 0x40300030001c0000u, 0xc7b1c0u}, /* parameter_declaration */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* noexcept_specifier */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* dynamic_exception_specification */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* type_id_list */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xc7b1c0u}, /* initializer */
-    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xc7b1c0u}, /* brace_or_equal_initializer */
-    {0xfffe081ff8000000u, 0x1c00001e000001u, 0x30003000000000u, 0xc7b5c0u}, /* braced_init_list */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xc7b1c0u}, /* initializer_list */
-    {0x0u, 0x18000000u, 0x0u, 0xc00000u}, /* designated_initializer_list */
-    {0x0u, 0x23000000u, 0x0u, 0xc00000u}, /* designated_initializer_clause */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* designator */
-    {0x18000080u, 0x1c0101800000f0u, 0x40000030801c0000u, 0xc00000u}, /* function_definition */
-    {0x0u, 0x800400000000000u, 0x0u, 0xc00000u}, /* function_body */
-    {0x0u, 0x800400000000000u, 0x18u, 0xc00000u}, /* function_try_block */
-    {0x0u, 0x200000000u, 0x0u, 0xc00000u}, /* identifier_list */
-    {0x0u, 0x40800000000u, 0x40000010001c0000u, 0xc00000u}, /* class_head */
-    {0x4000000u, 0x0u, 0x1000000000u, 0xc00000u}, /* class_head_name */
-    {0x2080038u, 0x3040000000u, 0xe0010004000u, 0xc00020u}, /* member_specification */
-    {0x1a0800b8u, 0x1c00e0400000f0u, 0x40000c30901c4000u, 0xc00020u}, /* member_declaration */
-    {0x18000000u, 0x1c00c0000000f0u, 0x3080000000u, 0xc00000u}, /* member_declarator_list */
-    {0xfffe0813f8000000u, 0x1c0300030000f0u, 0x40300030801c0000u, 0xc7b1c0u}, /* member_declarator */
-    {0x0u, 0x10000000000u, 0x4000000000000000u, 0xc00000u}, /* virt_specifier_seq */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* pure_specifier */
-    {0x6000u, 0x380000000000u, 0x1000000000u, 0xc00000u}, /* base_clause */
-    {0x2000u, 0x380000000000u, 0x1000000000u, 0xc00000u}, /* base_specifier_list */
-    {0x2000u, 0x200000000000u, 0x40000010001c0000u, 0xc00000u}, /* base_specifier */
-    {0x4000000u, 0x0u, 0x1000000000u, 0xc00000u}, /* class_or_decltype */
-    {0x0u, 0x1800000000000u, 0x0u, 0xc00000u}, /* ctor_initializer */
-    {0x0u, 0x1800000000000u, 0x0u, 0xc00000u}, /* mem_initializer_list */
-    {0xfffe081ff8006000u, 0x1c200006000001u, 0x30003000000000u, 0xc7b1c0u}, /* mem_initializer */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* explicit_specifier */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* operator_function_id */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* literal_operator_id */
-    {0x100u, 0x20000000000000u, 0x0u, 0xc00000u}, /* conversion_function_id */
-    {0x100u, 0x40000000000100u, 0x0u, 0xc00000u}, /* conversion_type_id */
-    {0x0u, 0x40000000000100u, 0x0u, 0xc00000u}, /* conversion_declarator */
-    {0x0u, 0x6c00000000000000u, 0x40000000001c0007u, 0xc00200u}, /* statement */
-    {0x18000080u, 0x1c0000030000f0u, 0x40000030001c0000u, 0xc00000u}, /* condition */
-    {0xfffe0813fa080034u, 0x6e9c000000000000u, 0x40300030001e5407u, 0xc7b3e4u}, /* labeled_statement */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* expression_statement */
-    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0xc00224u}, /* compound_statement */
-    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0xc00224u}, /* statement_seq */
-    {0xfffe081ffa080034u, 0x6f9c000000000003u, 0x30003000025407u, 0xc7b3e4u}, /* selection_statement */
-    {0xfffe081ffa080034u, 0xef9c000002000003u, 0x30003000025407u, 0xc7b3e4u}, /* iteration_statement */
-    {0x18000080u, 0x1c0002000000f0u, 0x40000030001c0000u, 0xc00000u}, /* for_range_declaration */
-    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0xc7b1c0u}, /* jump_statement */
-    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0xc7b1c0u}, /* coroutine_return_statement */
-    {0x0u, 0x800000000000000u, 0x18u, 0xc00000u}, /* try_block */
-    {0x0u, 0x0u, 0x18u, 0xc00000u}, /* handler_seq */
-    {0x0u, 0x800000000000000u, 0x20u, 0xc00000u}, /* handler */
-    {0x18000100u, 0x1c00000001c1f0u, 0x40000030001c0000u, 0xc00000u}, /* exception_declaration */
-    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0xc00020u}, /* named_namespace_definition */
-    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0xc00020u}, /* unnamed_namespace_definition */
-    {0x208007eu, 0x40000000u, 0x30e00100277c0u, 0xc00020u}, /* nested_namespace_definition */
-    {0x0u, 0x0u, 0x200u, 0xc00000u}, /* enclosing_namespace_specifier */
-    {0x0u, 0x0u, 0x800u, 0xc00000u}, /* namespace_alias_definition */
-    {0x4000000u, 0x0u, 0x0u, 0xc00000u}, /* qualified_namespace_specifier */
-    {0x4000000u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* using_directive */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc00020u}, /* linkage_specification */
-    {0x0u, 0x0u, 0x4000000000018000u, 0xc00000u}, /* using_declaration */
-    {0x0u, 0x0u, 0x4000000000018000u, 0xc00000u}, /* using_declarator_list */
-    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0xc00000u}, /* using_declarator */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* asm_declaration */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* attribute_specifier_seq */
-    {0x0u, 0x0u, 0x1e00000u, 0xc00000u}, /* attribute_specifier */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xc7b1c0u}, /* alignment_specifier */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* attribute_using_prefix */
-    {0x0u, 0x0u, 0x1c00000u, 0xc00000u}, /* attribute_list */
-    {0x0u, 0x0u, 0x3000000u, 0xc00000u}, /* attribute */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* attribute_scoped_token */
-    {0x0u, 0x0u, 0xc000000u, 0xc00000u}, /* attribute_argument_clause */
-    {0x0u, 0x0u, 0xc000000u, 0xc00000u}, /* balanced_token_seq */
-    {0x0u, 0x0u, 0xc000000u, 0xc00000u}, /* balanced_token */
-    {0x208007cu, 0x2040000000u, 0x30f00300275c0u, 0xc00020u}, /* template_declaration */
-    {0x0u, 0x80000u, 0x4c0000000u, 0xc00000u}, /* template_head */
-    {0x0u, 0x80000u, 0x440000000u, 0xc00000u}, /* template_parameter_list */
-    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0xc7b000u}, /* requires_clause */
-    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0xc7b000u}, /* constraint_logical_or_expression */
-    {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0xc7b000u}, /* constraint_logical_and_expression */
-    {0x18000000u, 0x1c000000001000u, 0x3820000000u, 0xc00000u}, /* type_parameter */
-    {0xfffe0813fc000000u, 0x1c000000001000u, 0x30007000000000u, 0xc7b1c0u}, /* type_constraint */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xc7b1c0u}, /* simple_template_id */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xc7b1c0u}, /* template_id */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xc7b1c0u}, /* template_argument_list */
-    {0x4000000u, 0x0u, 0x1000000000u, 0xc00000u}, /* typename_specifier */
-    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* concept_definition */
-    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0xc00020u}, /* explicit_instantiation */
-    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0xc00020u}, /* explicit_specialization */
-    {0x0u, 0x20000000e0400u, 0x40000010001c0000u, 0xc00000u}, /* deduction_guide */
-    {0x0u, 0x0u, 0x40006000001c0000u, 0xc00000u}, /* module_declaration */
-    {0x0u, 0x0u, 0x800000000000u, 0xc00000u}, /* module_name */
-    {0x0u, 0x0u, 0x800000000000u, 0xc00000u}, /* module_partition */
-    {0x0u, 0x0u, 0x800000000000u, 0xc00000u}, /* module_name_qualifier */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc00020u}, /* export_declaration */
-    {0x0u, 0x0u, 0x40006000001c0000u, 0xc00000u}, /* module_import_declaration */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc00020u}, /* global_module_fragment */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc00020u}, /* private_module_fragment */
-    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* fold_expression */
-    {0x0u, 0x0u, 0xc0000000000000u, 0xc00000u}, /* requires_expression */
-    {0x0u, 0xe0000u, 0x0u, 0xc00000u}, /* requirement_parameter_list */
-    {0x0u, 0x0u, 0x2f00000000000000u, 0xc00000u}, /* requirement_body */
-    {0x0u, 0x0u, 0x2f00000000000000u, 0xc00000u}, /* requirement_seq */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* simple_requirement */
-    {0x4000000u, 0x0u, 0x1000000000u, 0xc00000u}, /* type_requirement */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x1030003000000000u, 0xc7b1c0u}, /* compound_requirement */
-    {0x0u, 0x0u, 0x800000000u, 0xc00000u}, /* return_type_requirement */
-    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* nested_requirement */
-    {0x0u, 0x0u, 0x8000000000000000u, 0xc00001u}, /* gnu_attribute_specifier */
-    {0x0u, 0x0u, 0x8000000000000000u, 0xc00001u}, /* gnu_attribute_list */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_attribute */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* gnu_asm_label */
-    {0x0u, 0x0u, 0x0u, 0xc00008u}, /* gnu_asm_statement */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_asm_operand */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* gnu_declarator */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* gnu_extension_declaration */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* gnu_extension_expression */
-    {0x0u, 0x2001000u, 0x0u, 0xc00000u}, /* gnu_compound_literal */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* gnu_label_address */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_computed_goto */
-    {0xfffe081ff8000000u, 0x1c000022000001u, 0x30003000000000u, 0xc7bdc0u}, /* gnu_initializer_list */
-    {0x0u, 0x20000000u, 0x0u, 0xc00000u}, /* gnu_designation */
-    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_offsetof_expression */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xc7b1c0u}, /* clang_type_trait_expression */
-    {0x0u, 0x1000u, 0x0u, 0xc00000u}, /* clang_type_transformation */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_va_arg_expression */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xc7b1c0u}, /* clang_bit_cast_expression */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xc7b1c0u}, /* clang_convertvector_expression */
-    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* clang_source_location_expression */
-    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_typeof_specifier */
-    {0x0u, 0x1000u, 0x0u, 0xc00000u}, /* clang_atomic_type_specifier */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* clang_bit_int_type_specifier */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* unparsed */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* erroneous */
+    {0x208007eu, 0x40000000u, 0xf1e00100275c0u, 0x3000020u}, /* translation_unit */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x3000020u}, /* declaration_seq */
+    {0x18000080u, 0x1c0002038000fcu, 0x40000030801c0000u, 0x3000010u}, /* simple_declaration */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* empty_declaration */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* static_assert_declaration */
+    {0x0u, 0x2000u, 0x40000000001c0000u, 0x3000000u}, /* alias_declaration */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0x3000000u}, /* attribute_declaration */
+    {0x1fc80u, 0x2000000000000u, 0x40000090001c0000u, 0x3784000u}, /* decl_specifier_seq */
+    {0x7d00u, 0x0u, 0x40000090001c0000u, 0x3784000u}, /* type_specifier_seq */
+    {0x1fe00u, 0x0u, 0x40000090001c0000u, 0x3784000u}, /* defining_type_specifier_seq */
+    {0x4000000u, 0x0u, 0x1000000000u, 0x3000000u}, /* simple_type_specifier */
+    {0x4000000u, 0x0u, 0x40000010001c0000u, 0x3000000u}, /* elaborated_type_specifier */
+    {0x4040000u, 0x0u, 0x0u, 0x3000000u}, /* elaborated_enum_specifier */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x387b1c0u}, /* decltype_specifier */
+    {0x4000u, 0x0u, 0x800000000u, 0x3000000u}, /* placeholder_type_specifier */
+    {0x0u, 0x1400000000u, 0x0u, 0x3000000u}, /* class_specifier */
+    {0x1c20000u, 0x0u, 0x0u, 0x3000000u}, /* enum_specifier */
+    {0x340000u, 0x0u, 0x40000000001c0000u, 0x3000000u}, /* enum_head */
+    {0x4000000u, 0x0u, 0x0u, 0x3000000u}, /* enum_head_name */
+    {0x340000u, 0x0u, 0x40000000001c0000u, 0x3000000u}, /* opaque_enum_declaration */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* enum_key */
+    {0x100u, 0x0u, 0x0u, 0x3000000u}, /* enum_base */
+    {0x1c00000u, 0x0u, 0x0u, 0x3000000u}, /* enumerator_list */
+    {0xfffe0813f9000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* enumerator_definition */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0x3000000u}, /* enumerator */
+    {0x1000u, 0x0u, 0x0u, 0x3000000u}, /* using_enum_declaration */
+    {0x4002000u, 0x0u, 0x1000000000u, 0x3000000u}, /* nested_name_specifier */
+    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0x3000000u}, /* qualified_id */
+    {0x6000u, 0x0u, 0x1000000000u, 0x3000000u}, /* unqualified_id */
+    {0xfffe081ff8000000u, 0x81c000000000003u, 0x30003000000000u, 0x387b1c0u}, /* primary_expression */
+    {0xfffe081ff8006400u, 0x1c000006001003u, 0x3000b000000000u, 0x3fff1c0u}, /* postfix_expression */
+    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x387b1c0u}, /* unary_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x387b1c0u}, /* noexcept_expression */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* await_expression */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x387b1c0u}, /* yield_expression */
+    {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0x387b1c0u}, /* throw_expression */
+    {0x6000000000u, 0x800000000080000u, 0x40000004c01c0000u, 0x3000000u}, /* lambda_expression */
+    {0x78000000000u, 0x0u, 0x0u, 0x3000000u}, /* lambda_introducer */
+    {0x80u, 0x1e0800u, 0x40000000801c0000u, 0x3000000u}, /* lambda_declarator */
+    {0x70000000000u, 0x0u, 0x0u, 0x3000000u}, /* lambda_capture */
+    {0x70000000000u, 0x0u, 0x0u, 0x3000000u}, /* capture_list */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* simple_capture */
+    {0x0u, 0x3800000u, 0x0u, 0x3000000u}, /* init_capture */
+    {0x1300000000000u, 0x2001000u, 0x0u, 0x3000000u}, /* new_expression */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x387b1c0u}, /* new_placement */
+    {0xc00000000100u, 0x100u, 0x0u, 0x3000000u}, /* new_type_id */
+    {0xc00000000000u, 0x100u, 0x0u, 0x3000000u}, /* new_declarator */
+    {0xfffe881ff8000000u, 0x1c000000000003u, 0x40300030001c0000u, 0x387b1c0u}, /* noptr_new_declarator */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x387b1c0u}, /* new_initializer */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* delete_expression */
+    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x387b1c0u}, /* cast_expression */
+    {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* pm_expression */
+    {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* multiplicative_expression */
+    {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* additive_expression */
+    {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* shift_expression */
+    {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* compare_expression */
+    {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* relational_expression */
+    {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* equality_expression */
+    {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* and_expression */
+    {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* exclusive_or_expression */
+    {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* inclusive_or_expression */
+    {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* logical_and_expression */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* logical_or_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x387b1c0u}, /* conditional_expression */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x387b1c0u}, /* assignment_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x387b1c0u}, /* expression */
+    {0x18000000u, 0x1c0000000000fcu, 0x3000000000u, 0x3000000u}, /* init_declarator_list */
+    {0x18000000u, 0x1c0000038000f0u, 0x3080000000u, 0x3000010u}, /* init_declarator */
+    {0x18000000u, 0x1c000000000ce0u, 0x4000003000000000u, 0x3000002u}, /* declarator */
+    {0x18000000u, 0x1c0000000001e0u, 0x3000000000u, 0x3000000u}, /* ptr_declarator */
+    {0xfffe0813f8000000u, 0x1c0000000004e0u, 0x40300030001c0000u, 0x387b1c0u}, /* noptr_declarator */
+    {0x18000000u, 0x1c000000000000u, 0x3000000000u, 0x3000000u}, /* declarator_id */
+    {0x4000000u, 0x200u, 0x40000000001c0000u, 0x3000000u}, /* ptr_operator */
+    {0x0u, 0x200u, 0x0u, 0x3000000u}, /* cv_qualifier_seq */
+    {0x0u, 0x3e0200u, 0x40000000001c0000u, 0x3000000u}, /* parameters_and_qualifiers */
+    {0x0u, 0x1000u, 0x0u, 0x3000000u}, /* trailing_return_type */
+    {0x100u, 0x1c100u, 0x0u, 0x3000000u}, /* type_id */
+    {0x200u, 0x1c100u, 0x0u, 0x3000000u}, /* defining_type_id */
+    {0x0u, 0x10c00u, 0x0u, 0x3000000u}, /* abstract_declarator */
+    {0x0u, 0x18100u, 0x0u, 0x3000000u}, /* ptr_abstract_declarator */
+    {0xfffe0813f8000000u, 0x1c000000018500u, 0x40300030001c0000u, 0x387b1c0u}, /* noptr_abstract_declarator */
+    {0x0u, 0xc0000u, 0x0u, 0x3000000u}, /* parameter_declaration_clause */
+    {0x0u, 0xc0000u, 0x0u, 0x3000000u}, /* parameter_declaration_list */
+    {0xfffe081ff8000080u, 0x1c00000201c1f1u, 0x40300030001c0000u, 0x387b1c0u}, /* parameter_declaration */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* noexcept_specifier */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3ffffffu}, /* dynamic_exception_specification */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3ffffffu}, /* type_id_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x387b1c0u}, /* initializer */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x387b1c0u}, /* brace_or_equal_initializer */
+    {0xfffe081ff8000000u, 0x1c00001e000001u, 0x30003000000000u, 0x387b5c0u}, /* braced_init_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x387b1c0u}, /* initializer_list */
+    {0x0u, 0x18000000u, 0x0u, 0x3000000u}, /* designated_initializer_list */
+    {0x0u, 0x23000000u, 0x0u, 0x3000000u}, /* designated_initializer_clause */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* designator */
+    {0x18000080u, 0x1c0101800000f0u, 0x40000030801c0000u, 0x3000000u}, /* function_definition */
+    {0x0u, 0x800400000000000u, 0x0u, 0x3000000u}, /* function_body */
+    {0x0u, 0x800400000000000u, 0x18u, 0x3000000u}, /* function_try_block */
+    {0x0u, 0x200000000u, 0x0u, 0x3000000u}, /* identifier_list */
+    {0x0u, 0x40800000000u, 0x40000010001c0000u, 0x3000000u}, /* class_head */
+    {0x4000000u, 0x0u, 0x1000000000u, 0x3000000u}, /* class_head_name */
+    {0x2080038u, 0x3040000000u, 0xe0010004000u, 0x3000020u}, /* member_specification */
+    {0x1a0800b8u, 0x1c00e0400000f0u, 0x40000c30901c4000u, 0x3000020u}, /* member_declaration */
+    {0x18000000u, 0x1c00c0000000f0u, 0x3080000000u, 0x3000000u}, /* member_declarator_list */
+    {0xfffe0813f8000000u, 0x1c0300030000f0u, 0x40300030801c0000u, 0x387b1c0u}, /* member_declarator */
+    {0x0u, 0x10000000000u, 0x4000000000000000u, 0x3000000u}, /* virt_specifier_seq */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* pure_specifier */
+    {0x6000u, 0x380000000000u, 0x1000000000u, 0x3000000u}, /* base_clause */
+    {0x2000u, 0x380000000000u, 0x1000000000u, 0x3000000u}, /* base_specifier_list */
+    {0x2000u, 0x200000000000u, 0x40000010001c0000u, 0x3000000u}, /* base_specifier */
+    {0x4000000u, 0x0u, 0x1000000000u, 0x3000000u}, /* class_or_decltype */
+    {0x0u, 0x1800000000000u, 0x0u, 0x3000000u}, /* ctor_initializer */
+    {0x0u, 0x1800000000000u, 0x0u, 0x3000000u}, /* mem_initializer_list */
+    {0xfffe081ff8006000u, 0x1c200006000001u, 0x30003000000000u, 0x387b1c0u}, /* mem_initializer */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* explicit_specifier */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* operator_function_id */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* literal_operator_id */
+    {0x100u, 0x20000000000000u, 0x0u, 0x3000000u}, /* conversion_function_id */
+    {0x100u, 0x40000000000100u, 0x0u, 0x3000000u}, /* conversion_type_id */
+    {0x0u, 0x40000000000100u, 0x0u, 0x3000000u}, /* conversion_declarator */
+    {0x0u, 0x6c00000000000000u, 0x40000000001c0007u, 0x3000200u}, /* statement */
+    {0x18000080u, 0x1c0000030000f0u, 0x40000030001c0000u, 0x3000000u}, /* condition */
+    {0xfffe0813fa080034u, 0x6e9c000000000000u, 0x40300030001e5407u, 0x387b3e4u}, /* labeled_statement */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x387b1c0u}, /* expression_statement */
+    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0x3000224u}, /* compound_statement */
+    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0x3000224u}, /* statement_seq */
+    {0xfffe081ffa080034u, 0x6f9c000000000003u, 0x30003000025407u, 0x387b3e4u}, /* selection_statement */
+    {0xfffe081ffa080034u, 0xef9c000002000003u, 0x30003000025407u, 0x387b3e4u}, /* iteration_statement */
+    {0x18000080u, 0x1c0002000000f0u, 0x40000030001c0000u, 0x3000000u}, /* for_range_declaration */
+    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x387b1c0u}, /* jump_statement */
+    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x387b1c0u}, /* coroutine_return_statement */
+    {0x0u, 0x800000000000000u, 0x18u, 0x3000000u}, /* try_block */
+    {0x0u, 0x0u, 0x18u, 0x3000000u}, /* handler_seq */
+    {0x0u, 0x800000000000000u, 0x20u, 0x3000000u}, /* handler */
+    {0x18000100u, 0x1c00000001c1f0u, 0x40000030001c0000u, 0x3000000u}, /* exception_declaration */
+    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0x3000020u}, /* named_namespace_definition */
+    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0x3000020u}, /* unnamed_namespace_definition */
+    {0x208007eu, 0x40000000u, 0x30e00100277c0u, 0x3000020u}, /* nested_namespace_definition */
+    {0x0u, 0x0u, 0x200u, 0x3000000u}, /* enclosing_namespace_specifier */
+    {0x0u, 0x0u, 0x800u, 0x3000000u}, /* namespace_alias_definition */
+    {0x4000000u, 0x0u, 0x0u, 0x3000000u}, /* qualified_namespace_specifier */
+    {0x4000000u, 0x0u, 0x40000000001c0000u, 0x3000000u}, /* using_directive */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x3000020u}, /* linkage_specification */
+    {0x0u, 0x0u, 0x4000000000018000u, 0x3000000u}, /* using_declaration */
+    {0x0u, 0x0u, 0x4000000000018000u, 0x3000000u}, /* using_declarator_list */
+    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0x3000000u}, /* using_declarator */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0x3000000u}, /* asm_declaration */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0x3000000u}, /* attribute_specifier_seq */
+    {0x0u, 0x0u, 0x1e00000u, 0x3000000u}, /* attribute_specifier */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x387b1c0u}, /* alignment_specifier */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* attribute_using_prefix */
+    {0x0u, 0x0u, 0x1c00000u, 0x3000000u}, /* attribute_list */
+    {0x0u, 0x0u, 0x3000000u, 0x3000000u}, /* attribute */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* attribute_scoped_token */
+    {0x0u, 0x0u, 0xc000000u, 0x3000000u}, /* attribute_argument_clause */
+    {0x0u, 0x0u, 0xc000000u, 0x3000000u}, /* balanced_token_seq */
+    {0x0u, 0x0u, 0xc000000u, 0x3000000u}, /* balanced_token */
+    {0x208007cu, 0x2040000000u, 0x30f00300275c0u, 0x3000020u}, /* template_declaration */
+    {0x0u, 0x80000u, 0x4c0000000u, 0x3000000u}, /* template_head */
+    {0x0u, 0x80000u, 0x440000000u, 0x3000000u}, /* template_parameter_list */
+    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0x387b000u}, /* requires_clause */
+    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0x387b000u}, /* constraint_logical_or_expression */
+    {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0x387b000u}, /* constraint_logical_and_expression */
+    {0x18000000u, 0x1c000000001000u, 0x3820000000u, 0x3000000u}, /* type_parameter */
+    {0xfffe0813fc000000u, 0x1c000000001000u, 0x30007000000000u, 0x387b1c0u}, /* type_constraint */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x387b1c0u}, /* simple_template_id */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x387b1c0u}, /* template_id */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x387b1c0u}, /* template_argument_list */
+    {0x4000000u, 0x0u, 0x1000000000u, 0x3000000u}, /* typename_specifier */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* concept_definition */
+    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0x3000020u}, /* explicit_instantiation */
+    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0x3000020u}, /* explicit_specialization */
+    {0x0u, 0x20000000e0400u, 0x40000010001c0000u, 0x3000000u}, /* deduction_guide */
+    {0x0u, 0x0u, 0x40006000001c0000u, 0x3000000u}, /* module_declaration */
+    {0x0u, 0x0u, 0x800000000000u, 0x3000000u}, /* module_name */
+    {0x0u, 0x0u, 0x800000000000u, 0x3000000u}, /* module_partition */
+    {0x0u, 0x0u, 0x800000000000u, 0x3000000u}, /* module_name_qualifier */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x3000020u}, /* export_declaration */
+    {0x0u, 0x0u, 0x40006000001c0000u, 0x3000000u}, /* module_import_declaration */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x3000020u}, /* global_module_fragment */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x3000020u}, /* private_module_fragment */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* fold_expression */
+    {0x0u, 0x0u, 0xc0000000000000u, 0x3000000u}, /* requires_expression */
+    {0x0u, 0xe0000u, 0x0u, 0x3000000u}, /* requirement_parameter_list */
+    {0x0u, 0x0u, 0x2f00000000000000u, 0x3000000u}, /* requirement_body */
+    {0x0u, 0x0u, 0x2f00000000000000u, 0x3000000u}, /* requirement_seq */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x387b1c0u}, /* simple_requirement */
+    {0x4000000u, 0x0u, 0x1000000000u, 0x3000000u}, /* type_requirement */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x1030003000000000u, 0x387b1c0u}, /* compound_requirement */
+    {0x0u, 0x0u, 0x800000000u, 0x3000000u}, /* return_type_requirement */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* nested_requirement */
+    {0x0u, 0x0u, 0x8000000000000000u, 0x3000001u}, /* gnu_attribute_specifier */
+    {0x0u, 0x0u, 0x8000000000000000u, 0x3000001u}, /* gnu_attribute_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x387b1c0u}, /* gnu_attribute */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* gnu_asm_label */
+    {0x0u, 0x0u, 0x0u, 0x3000008u}, /* gnu_asm_statement */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x387b1c0u}, /* gnu_asm_operand */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3ffffffu}, /* gnu_declarator */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3ffffffu}, /* gnu_extension_declaration */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3ffffffu}, /* gnu_extension_expression */
+    {0x0u, 0x2001000u, 0x0u, 0x3000000u}, /* gnu_compound_literal */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* gnu_label_address */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x387b1c0u}, /* gnu_computed_goto */
+    {0xfffe081ff8000000u, 0x1c000022000001u, 0x30003000000000u, 0x387bdc0u}, /* gnu_initializer_list */
+    {0x0u, 0x20000000u, 0x0u, 0x3000000u}, /* gnu_designation */
+    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0x387b1c0u}, /* gnu_offsetof_expression */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x387b1c0u}, /* clang_type_trait_expression */
+    {0x0u, 0x1000u, 0x0u, 0x3000000u}, /* clang_type_transformation */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x387b1c0u}, /* gnu_va_arg_expression */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x387b1c0u}, /* clang_bit_cast_expression */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x387b1c0u}, /* clang_convertvector_expression */
+    {0x0u, 0x0u, 0x0u, 0x3000000u}, /* clang_source_location_expression */
+    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0x387b1c0u}, /* gnu_typeof_specifier */
+    {0x0u, 0x1000u, 0x0u, 0x3000000u}, /* clang_atomic_type_specifier */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* clang_bit_int_type_specifier */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* clang_pack_index_specifier */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x387b1c0u}, /* clang_pack_index_expression */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3ffffffu}, /* unparsed */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3ffffffu}, /* erroneous */
 };
 /* the list kinds: a child of the same kind is a list not flattened */
 static const uint64_t syntax_list_kinds[4] = {0x10000400002u, 0x1000004008040004u, 0x100000044000000u, 0x0u};

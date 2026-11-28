@@ -243,6 +243,8 @@ SYNTAX_NODE(clang_source_location_expression, "clang-source-location-expression"
 SYNTAX_NODE(gnu_typeof_specifier, "gnu-typeof-specifier", "ext.gnu")
 SYNTAX_NODE(clang_atomic_type_specifier, "clang-atomic-type-specifier", "ext.clang")
 SYNTAX_NODE(clang_bit_int_type_specifier, "clang-bit-int-type-specifier", "ext.clang")
+SYNTAX_NODE(clang_pack_index_specifier, "clang-pack-index-specifier", "ext.clang")
+SYNTAX_NODE(clang_pack_index_expression, "clang-pack-index-expression", "ext.clang")
 
 /*
  * Scaffolding, not grammar: both are counted, and both are at zero on

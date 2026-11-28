@@ -4427,6 +4427,11 @@ class semantic_analysis
     uint32_t bind_call_site(uint32_t node, token_index call);
     analysis_result clang_atomic_type(SyntaxRef n, qualified_type &type);
     uint64_t atomic_layout(qualified_type value, bool alignment) const;
+    /* [ext:clang_pack_indexing] */
+    analysis_result pack_index(SyntaxRef n, uint32_t &element, bool &dependent);
+    analysis_result pack_index_type(SyntaxRef n, qualified_type &type,
+                                    uint32_t &cv);
+    analysis_result pack_index_expression(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_int_type(SyntaxRef n, bool is_unsigned,
                                        qualified_type &type);
     /* [ext:gnu_typeof] the type typeof ( expression or type-id ) denotes */

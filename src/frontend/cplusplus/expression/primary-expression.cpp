@@ -76,6 +76,8 @@ node_index parser::primary_expression()
             return misplaced_attribute_brackets();
         return lambda_expression();
     }
+    if (pack_index_follows()) /* [ext:clang_pack_indexing] */
+        return clang_pack_index(syntax_kind::clang_pack_index_expression);
     if (at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
         at(standard_keyword::decltype_) || at(standard_keyword::operator_))
         return id_expression(false);

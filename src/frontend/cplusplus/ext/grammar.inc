@@ -265,6 +265,13 @@ PRODUCTION(clang_blocks, "ptr-operator", "^ attribute-specifier-seq_opt cv-quali
 PRODUCTION(clang_bit_int, "simple-type-specifier", "clang-bit-int-type-specifier")
 PRODUCTION(clang_bit_int, "clang-bit-int-type-specifier", "_BitInt ( constant-expression )")
 
+/* ---- C++26's pack indexing (P2662R3) in every mode, as clang ---- */
+
+PRODUCTION(clang_pack_indexing, "simple-type-specifier", "clang-pack-index-specifier")
+PRODUCTION(clang_pack_indexing, "clang-pack-index-specifier", "identifier ... [ constant-expression ]")
+PRODUCTION(clang_pack_indexing, "primary-expression", "clang-pack-index-expression")
+PRODUCTION(clang_pack_indexing, "clang-pack-index-expression", "identifier ... [ constant-expression ]")
+
 /* ---- clang Language Extensions, Source location builtins ---- */
 
 PRODUCTION(clang_source_location, "primary-expression", "clang-source-location-expression")
