@@ -122,6 +122,8 @@ typedef struct debug_writer {
         *members; /* the member functions and static members defined
                           here, declared in their classes */
     uint32_t member_count, member_capacity;
+    debug_member *statics; /* the static locals here, by their function */
+    uint32_t static_count;
 } debug_writer;
 
 static bool debug_chunk_is_function(const cc *c, const codegen_chunk *chunk)
@@ -827,17 +829,6 @@ static void debug_global_write(debug_writer *w, uint32_t s, bool coff)
     debug_scope_close(w, depth);
 }
 
-/* by class, then by symbol: the order does not depend on the sort */
-static int debug_member_compare(const void *a, const void *b)
-{
-    const debug_member *x = (const debug_member *)a;
-    const debug_member *y = (const debug_member *)b;
-
-    if (x->type != y->type)
-        return x->type < y->type ? -1 : 1;
-    return x->symbol < y->symbol ? -1 : x->symbol > y->symbol;
-}
-
 /* the entries of every type referred to, those they refer to too */
 static void debug_types_write(debug_writer *w)
 {
@@ -941,6 +932,45 @@ static bool debug_is_structor(cc *c, uint32_t s)
             !memcmp(name, vintern_ents[r->name].s, vintern_ents[r->name].len));
 }
 
+/* by class, then by symbol: the order does not depend on the sort */
+static int debug_member_compare(const void *a, const void *b)
+{
+    const debug_member *x = (const debug_member *)a;
+    const debug_member *y = (const debug_member *)b;
+
+    if (x->type != y->type)
+        return x->type < y->type ? -1 : 1;
+    return x->symbol < y->symbol ? -1 : x->symbol > y->symbol;
+}
+
+/* the first of the static locals of function (they are sorted by function) */
+static uint32_t debug_statics_first(const debug_writer *w, uint32_t function)
+{
+    uint32_t low = 0, high = w->static_count;
+
+    while (low < high) {
+        uint32_t middle = low + (high - low) / 2;
+
+        if (w->statics[middle].type < function)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    return low;
+}
+
+static void debug_static_write(debug_writer *w, uint32_t s)
+{
+    cc *c = w->c;
+    const sym *y = &c->syms[s];
+    debug_die d = debug_die_new(DEBUG_TAG_VARIABLE, false);
+
+    debug_die_source_name(c, &d, s);
+    debug_die_declared(w, &d, y->ty, debug_typedef_of(c, y->tdef, y->ty), 0);
+    debug_die_number(&d, DEBUG_AT_LOCATION, DEBUG_FORM_SYMBOL, s);
+    debug_die_write(w, &d);
+}
+
 static void debug_function_append(debug_writer *w, uint32_t function,
                                   int version, const codegen_debug_frame *frame)
 {
@@ -953,9 +983,12 @@ static void debug_function_append(debug_writer *w, uint32_t function,
     parameters = N(y->body)->aux;
     const ctype *type = T(c, y->ty);
     bool variadic = (type->flags & AST_TYPE_FLAG_VARIADIC);
-    debug_die d =
-        debug_die_new(DEBUG_TAG_SUBPROGRAM,
-                      parameters || variadic || (frame && frame->count));
+    uint32_t first = debug_statics_first(w, function);
+    bool has_statics =
+        first < w->static_count && w->statics[first].type == function;
+    debug_die d = debug_die_new(DEBUG_TAG_SUBPROGRAM,
+                                parameters || variadic ||
+                                    (frame && frame->count) || has_statics);
 
     /* (a class's member: declared in it, which this definition completes) */
     bool member =
@@ -1020,6 +1053,8 @@ static void debug_function_append(debug_writer *w, uint32_t function,
         if (!debug_is_parameter(c, function, frame->locals[i].symbol))
             debug_object_write(w, DEBUG_TAG_VARIABLE, frame->locals[i].symbol,
                                frame);
+    while (first < w->static_count && w->statics[first].type == function)
+        debug_static_write(w, w->statics[first++].symbol);
     if (d.children)
         debug_children_end(w);
     debug_scope_close(w, depth);
@@ -1121,6 +1156,24 @@ VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
     if (!writer.type_labels || !writer.typedef_labels ||
         !writer.reference_labels)
         vout_of_memory();
+    /* the static locals with storage here, for their functions' entries
+       (a data chunk's key is odd) */
+    writer.statics = (debug_member *)malloc(((size_t)chunk_count + 1) *
+                                            sizeof(debug_member));
+    if (!writer.statics)
+        vout_of_memory();
+    for (uint32_t i = 0; i < chunk_count; i++) {
+        uint64_t key = chunks[i].key;
+        uint32_t s = (uint32_t)(key >> 1);
+
+        if (!(key & 1) || key >= ((uint64_t)1 << 62) || !c->syms[s].depth ||
+            !codegen_symbol_attributes(c, s)->debug_owner)
+            continue;
+        writer.statics[writer.static_count++] = VCC_LITERAL(
+            debug_member, codegen_symbol_attributes(c, s)->debug_owner, s);
+    }
+    qsort(writer.statics, writer.static_count, sizeof *writer.statics,
+          debug_member_compare);
     for (uint32_t i = 0; i < chunk_count; i++) {
         uint32_t function = (uint32_t)(chunks[i].key >> 1);
 
@@ -1148,6 +1201,7 @@ VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
     free(writer.typedef_labels);
     free(writer.reference_labels);
     free(writer.members);
+    free(writer.statics);
     vtext_string_append(tail, "\t.byte\t0\n.Ldbg_cu_end:\n");
     vtext_format_append(tail, "\t.section\t.debug_abbrev,%s\n",
                         w ? "\"dr\"" : "\"\",@progbits");

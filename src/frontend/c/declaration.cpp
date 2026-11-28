@@ -137,6 +137,18 @@ CC_PRIVATE void cc_attribute_apply_symbol(cc *c, sym *s, const attrs *a)
         s->flags |= AST_SYMBOL_FLAG_OVERLOAD;
 }
 
+/* -g: the static local s is function fn's (debug-unit.cpp lists it there); a
+   record of its own, as another symbol may share s's */
+static void cc_debug_owner_note(cc *c, uint32_t s, uint32_t fn)
+{
+    attrs a = {};
+
+    if (c->syms[s].attrs)
+        a = c->attr[c->syms[s].attrs];
+    a.debug_owner = fn;
+    c->syms[s].attrs = cc_attribute_new(c, &a);
+}
+
 /* the file-scope entity name refers to, if any */
 CC_PRIVATE uint32_t cc_symbol_file_scope_find(cc *c, uint32_t name)
 {
@@ -741,6 +753,10 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
             ds.invalid = true;
         }
         s = cc_declaration_bind(c, &ds, &d, t, file);
+        if (unlikely(c->o->debug) && !file && c->fn &&
+            ds.sc == AST_STORAGE_STATIC &&
+            c->syms[s].kind == AST_SYMBOL_VARIABLE)
+            cc_debug_owner_note(c, s, c->fn);
         if (ds.constexpr_) {
             if (c->syms[s].kind != AST_SYMBOL_VARIABLE)
                 cc_report_error(
