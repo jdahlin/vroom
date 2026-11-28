@@ -274,8 +274,10 @@ bool character_type(fundamental_type t)
 /* a string-literal, not in parentheses */
 bool is_unparenthesized_string_literal(token_stream &tokens, syntax_child c)
 {
-    return c.is_token() && tokens[c.index()].kind == token_kind::literal &&
-           tokens[c.index()].literal == literal_kind::string_literal;
+    return c.is_token() &&
+           tokens[token_index{c.index()}].kind == token_kind::literal &&
+           tokens[token_index{c.index()}].literal ==
+               literal_kind::string_literal;
 }
 
 } // namespace
@@ -551,8 +553,14 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     /* an array's or scalar's list temporary is a literal object (static at
        namespace scope); one whose elements have destructors is the
        lowering's array_temporary */
-    bool no_room = object.kind == type_kind::class_type && !at_block_scope() &&
-                   !binding_extends;
+    /* (an empty class's holds nothing a constant could refer to: an
+       argument std::monostate{} of a namespace-scope initializer) */
+    /* a call argument's temporary in a dynamic initialization is the
+       initialization function's; a constant initialization has nowhere to
+       keep one */
+    bool no_room = declarator_constant &&
+                   object.kind == type_kind::class_type && !at_block_scope() &&
+                   !binding_extends && !empty_class(object.entity);
     /* (an array of an incomplete class: clang's error, not claimed) */
     if (object.kind == type_kind::array) {
         qualified_type element = m.type;
@@ -1197,6 +1205,7 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
     }
     if (!(same && m.category == value_category::prvalue) &&
         (entity_table[target.entity].first_constructor ||
+         entity_table[target.entity].constructor_templates ||
          /* its deleted implicit copy constructor (construct) */
          entity_table[target.entity].implicit_copy_deleted)) {
         /* /17.6.2 by [over.match.ctor]; /17.6.3: a user-defined
@@ -1230,15 +1239,17 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
     }
     /* /17.6.3: "If the conversion cannot be done or is ambiguous, the
        initialization is ill-formed": a copy-initialization of a class
-       with no constructor and no base class from an unrelated class none
-       of whose conversion functions yields it (above), where a
+       with no constructor from a non-class, or with no base class either
+       from an unrelated class none of whose conversion functions yields it
+       (above), where a
        substitution is tried
        (is_assignable<S&, const U> of libc++ and json: false; elsewhere an
        overload candidate the analysis takes for this one may be the
        cause); other forms not analysed */
     if (!same && !direct && substituting &&
-        type_table[m.type.unqualified()].kind == type_kind::class_type &&
-        !entity_table[target.entity].base_count)
+        type_table[m.type.unqualified()].kind != type_kind::none &&
+        (type_table[m.type.unqualified()].kind != type_kind::class_type ||
+         !entity_table[target.entity].base_count))
         return ill_formed(at,
                           "the initialization is ill-formed if the "
                           "conversion cannot be done",
@@ -1830,6 +1841,18 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
                 /* (a union with constructor templates only: its
                    constructors' deleted-destructor rules are not
                    followed) */
+                if (entity_table[target.entity].kind ==
+                        entity_kind::class_type &&
+                    !entity_table[target.entity].first_constructor &&
+                    !entity_table[target.entity].constructor_templates &&
+                    tokens.files.behavior.edition >=
+                        standard_edition::cplusplus_20 &&
+                    is_aggregate(target.entity)) {
+                    owned_array<expression_meaning> arguments;
+                    VTRY(r, expression_list_meanings(parts.list, arguments));
+                    return parenthesized_aggregate_initialization(
+                        init, type, arguments, result);
+                }
                 if (entity_table[target.entity].kind !=
                         entity_kind::class_type ||
                     (!entity_table[target.entity].first_constructor &&
@@ -2063,7 +2086,7 @@ analysis_result semantic_analysis::class_list_initialization(
             analysis_result r = construct(list, type, none, 0, result);
             if (r == analysis_result::well_formed && !direct &&
                 semantics[result.node].kind == semantic_kind::construct &&
-                entity_table[semantics[result.node].b].explicit_)
+                entity_table[semantics[result.node].entity_b()].explicit_)
                 /* [over.match.list]/1 */
                 return ill_formed(list,
                                   "In copy-list-initialization, if an explicit "
@@ -2179,7 +2202,9 @@ analysis_result semantic_analysis::constructor_list_initialization(
                 qualified_type::make(first.unqualified(), cv_none));
         }
     }
-    if (ilist_ctors.size() == 1) {
+    /* (not viable when an element converts to no E: std::string{""}) */
+    if (ilist_ctors.size() == 1 &&
+        list_sequence_possible(list, ilist_types[0])) {
         qualified_type ilist_type = ilist_types[0];
         initialized_value ilist_val;
         substitution_mark mark = mark_substitution();
@@ -2270,7 +2295,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
         return not_supported_because(list, "over.match.list",
                                      "no constructor chosen for the list");
     }
-    entity_index chosen = semantics[result.node].b;
+    entity_index chosen = semantics[result.node].entity_b();
     if (!chosen)
         return not_supported_because(list, "over.match.list",
                                      "no constructor chosen for the list");
@@ -2540,7 +2565,7 @@ analysis_result semantic_analysis::aggregate_elements(
     }
     aggregate_value(list, type, all, elements, result);
     if (union_default)
-        semantics[result.node].a = members[union_default].member;
+        semantics[result.node].set_entity_a(members[union_default].member);
     return analysis_result::well_formed;
 }
 
@@ -2611,6 +2636,10 @@ analysis_result semantic_analysis::parenthesized_aggregate_initialization(
         }
     }
     aggregate_value(at, type, all, elements, result);
+    /* (op 1: from parentheses, which extend no temporary's lifetime,
+       [class.temporary]/6) */
+    if (result.node)
+        semantics[result.node].op = 1;
     return analysis_result::well_formed;
 }
 
@@ -2778,7 +2807,7 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     for (uint32_t n = nodes_before;
          n < static_cast<uint32_t>(semantics.size()) && !uses_this; n++)
         uses_this = semantics[n].kind == semantic_kind::entity &&
-                    semantics[n].a == this_object_entity;
+                    semantics[n].entity_a() == this_object_entity;
     if (!uses_this)
         return analysis_result::well_formed;
     if (this_unsupported)
@@ -2793,7 +2822,7 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     uint32_t node = expression_node(semantic_kind::default_member_initializer,
                                     wrapped, list.first_token());
     semantics[node].a = one.node;
-    semantics[node].b = this_object_entity;
+    semantics[node].set_entity_b(this_object_entity);
     one.node = node;
     one.evaluation = constness::unknown;
     return analysis_result::well_formed;
@@ -2842,6 +2871,17 @@ analysis_result semantic_analysis::omitted_element_value(
            only when it names nothing (literals and operators) */
         qualified_type member_type = element;
         const struct type member = type_table[element.unqualified()];
+        /* [abi:closure-types] a lambda in it is the data member's, one
+           closure type with the constructors' */
+        entity_index initialized = 0;
+        if (owner && entity_table[owner].kind == entity_kind::class_type)
+            for (uint32_t i = 0; i < entity_table[owner].member_count; i++) {
+                entity_index k =
+                    class_members[entity_table[owner].first_member + i];
+                if (entity_table[k].default_initializer == default_initializer)
+                    initialized = k;
+            }
+        scoped_value<entity_index> of_member(initialized_member, initialized);
         if (initializer_names_nothing(default_initializer)) {
             VTRY(r, initializer(default_initializer, member_type, one));
         } else {
@@ -3368,7 +3408,7 @@ analysis_result semantic_analysis::designated_elements(
         type = qualified_type::make(type_table.array_of(target.operand, extent),
                                     type.cv());
     aggregate_value(list, type, all, elements, result);
-    semantics[result.node].a = active_member;
+    semantics[result.node].set_entity_a(active_member);
     return analysis_result::well_formed;
 }
 

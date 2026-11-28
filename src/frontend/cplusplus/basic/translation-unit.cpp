@@ -138,14 +138,14 @@ bool semantic_analysis::argument_unit_local(const template_argument &a) const
             !address_parameter_type(a.type))
             return false;
         {
-            entity_index named = static_cast<entity_index>(a.value);
+            entity_index named = entity_index_in(a.value);
             return entity_table[named].linkage_of_name == linkage::internal ||
                    unit_local(named);
         }
     case template_argument::kind_t::template_name: {
         if (a.template_entity)
             return false;
-        entity_index named = static_cast<entity_index>(a.value);
+        entity_index named = entity_index_in(a.value);
         return entity_table[named].linkage_of_name == linkage::internal ||
                unit_local(named);
     }
@@ -198,10 +198,7 @@ bool semantic_analysis::unit_local(entity_index e) const
             if (entity_table[declared].linkage_of_name == linkage::internal)
                 return true;
         }
-        /* (a template's, and a template parameter's, instantiation is its
-           function_template record, not an instantiation's) */
-        if (!x.instantiation || x.kind == entity_kind::template_entity ||
-            x.kind == entity_kind::typedef_name)
+        if (!x.instantiation)
             continue;
         const instantiation_record &made = instantiations[x.instantiation - 1];
         for (uint32_t i = 0; i < made.argument_count; i++)
@@ -490,14 +487,12 @@ analysis_result semantic_analysis::declare(
                                      entity_table[e].type.unqualified(),
                                      type.unqualified()))) {
                     /* [dcl.array]/8: a bound given in the block is not
-                       this scope's */
+                       this scope's: the entity has this declaration's type
+                       (a definition's initializer then completes it) */
                     if (!(entity_table[e].type == type) &&
                         differ_in_major_bound(type_table, entity_table[e].type,
                                               type))
-                        return not_supported_because(
-                            declaration, "dcl.array",
-                            "a redeclaration of a block's extern array with "
-                            "another bound");
+                        entity_table[e].type = type;
                     prior = e;
                     entity_table.bind(scope, name, e);
                 }
@@ -737,7 +732,7 @@ analysis_result semantic_analysis::declare(
                    implicitly instantiated when an object of it is defined */
                 uint32_t k = entity_table[record.entity].instantiation - 1;
                 entity_index t = instantiations[k].template_entity;
-                uint32_t ct = entity_table[t].instantiation;
+                uint32_t ct = entity_table[t].template_record;
                 if (ct && !instantiations[k].defining) {
                     entity_index done = record.entity;
                     /* (a copy: instantiate_class may grow template_arguments) */
@@ -809,8 +804,8 @@ analysis_result semantic_analysis::declare(
             c.linkage_of_name = linkage::external;
             /* (and its unnamed member classes have it now,
                class_specifier) */
-            for (entity_index k = record.entity + 1; k < entity_table.size();
-                 k++) {
+            for (entity_index k = record.entity + 1;
+                 k.index() < entity_table.size(); k++) {
                 entity &m = entity_table[k];
                 if (m.kind == entity_kind::class_type && !m.name &&
                     !m.linkage_name && !m.lambda && m.enclosing &&

@@ -28,11 +28,12 @@ namespace cplusplus
 qualified_type semantic_analysis::placeholder_type(bool decltype_auto,
                                                    entity_index named_concept)
 {
-    uint32_t which = named_concept << 2 | 1;
+    uint32_t which = named_concept.index() << 2 | 1;
     if (decltype_auto)
-        which = named_concept << 2 | 2;
+        which = named_concept.index() << 2 | 2;
     return qualified_type::make(
-        type_table.of_entity(type_kind::placeholder, which), cv_none);
+        type_table.of_entity(type_kind::placeholder, entity_index{which}),
+        cv_none);
 }
 
 bool semantic_analysis::contains_placeholder(qualified_type t,
@@ -43,9 +44,9 @@ bool semantic_analysis::contains_placeholder(qualified_type t,
     switch (r.kind) {
     case type_kind::placeholder:
         if (decltype_auto)
-            *decltype_auto = (r.entity & 3) == 2;
+            *decltype_auto = (r.entity.index() & 3) == 2;
         if (named_concept)
-            *named_concept = r.entity >> 2;
+            *named_concept = entity_index{r.entity.index() >> 2};
         return true;
     case type_kind::pointer:
     case type_kind::lvalue_reference:
@@ -217,7 +218,9 @@ analysis_result semantic_analysis::placeholder_declaration(
             allocation_function_declaration) */
          (m.operator_function && !in_member_template_declarator &&
           m.allocation != allocation_function::none) ||
-         m.literal_operator || m.template_id || m.destructor))
+         /* (an explicit specialization's name, [temp.expl.spec]) */
+         m.literal_operator || (m.template_id && !specialization_declarator) ||
+         m.destructor))
         return not_supported_because(
             declaration, "dcl.spec.auto",
             "a placeholder type in this kind of declaration");
@@ -434,7 +437,7 @@ semantic_analysis::deduce_initializer_list(SyntaxElement braced, entity_index e,
 {
     done = false;
     if (type_table[type.unqualified()].kind != type_kind::placeholder ||
-        !entity_table[e].automatic || declaration_deduced.unqualified())
+        declaration_deduced.unqualified())
         return analysis_result::well_formed;
     for (token_index t = current_declaration.first_token();
          t < braced.first_token(); t++)
@@ -624,6 +627,11 @@ bool semantic_analysis::deduce_member_body_now(entity_index e)
     const entity &x = entity_table[e];
     if (x.kind != entity_kind::function)
         return false;
+    /* the name that needs the type may be one a call is choosing: the
+       body's own calls do not replace that */
+    scoped_value<token_index> callee(overloaded_callee, overloaded_callee);
+    scoped_value<token_index> target(overload_target_token,
+                                     overload_target_token);
     if (defining_bodies && x.enclosing == defining_bodies_class &&
         entity_table[x.enclosing].instantiation) {
         for (size_t i = 0; i < defining_bodies->size(); i++) {
@@ -706,7 +714,7 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
             instantiation_record &rec = instantiations[idx];
             const entity tmpl = entity_table[rec.template_entity];
             const function_template ft =
-                function_templates[tmpl.instantiation - 1];
+                function_templates[tmpl.template_record - 1];
             if (!rec.defined && !rec.defining && ft.definition) {
                 rec.quiet = quiet_member_bodies != 0;
                 if (!instantiation_depth && !rec.wanted_by && !unevaluated &&

@@ -163,7 +163,8 @@ bool semantic_analysis::clang_trivial_special_members(entity_index c)
     const entity &x = entity_table[c];
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor) {
-        if (entity_table[k].implicit || declared_deleted(k) ||
+        if (entity_table[k].implicit ||
+            entity_table[k].constraint_unsatisfied || declared_deleted(k) ||
             declared_defaulted(k))
             continue;
         const struct type &f = type_table[entity_table[k].type.unqualified()];
@@ -181,7 +182,8 @@ bool semantic_analysis::clang_trivial_special_members(entity_index c)
         if (entity_table[o].kind == entity_kind::function &&
             (copy_assignment_operator(o, c) ||
              move_assignment_operator(o, c)) &&
-            !declared_deleted(o) && !declared_defaulted(o))
+            !entity_table[o].constraint_unsatisfied && !declared_deleted(o) &&
+            !declared_defaulted(o))
             return false;
     for (uint32_t i = 0; i < x.member_count; i++)
         if (entity_table[class_members[x.first_member + i]].default_initializer)
@@ -241,7 +243,8 @@ bool semantic_analysis::class_trivially_copyable(entity_index c, bool &known)
         if (entity_table[o].kind == entity_kind::function &&
             (copy_assignment_operator(o, c) ||
              move_assignment_operator(o, c)) &&
-            !declared_deleted(o) && !declared_defaulted(o))
+            !entity_table[o].constraint_unsatisfied && !declared_deleted(o) &&
+            !declared_defaulted(o))
             return false;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);

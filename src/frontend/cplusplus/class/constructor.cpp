@@ -1542,6 +1542,9 @@ analysis_result semantic_analysis::construct(
                             deduced.data() + first_arguments[k],
                             static_cast<uint32_t>(end - first_arguments[k]),
                             chosen));
+        if (chosen && entity_table[chosen].enclosing != c) {
+            VTRY(inherited, inherit_specialization(at, c, chosen));
+        }
     }
     if (!chosen) {
         if (!copies_bytes(c) && !(x.defaulted_move_constructor && best == move))
@@ -1647,7 +1650,7 @@ analysis_result semantic_analysis::construct(
     VTRY(du, diagnose_if_call(at.first_token(), chosen, nodes.data(),
                               nodes.size()));
     result.node = expression_node(semantic_kind::construct, made,
-                                  at.first_token(), object, chosen);
+                                  at.first_token(), object, chosen.index());
     if (!nodes.empty()) {
         semantics.set_list(result.node, &nodes[0], nodes.size());
     }
@@ -1853,6 +1856,14 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                         current_scope = c;
                         found_name = lookup(name);
                         current_scope = saved_scope;
+                        /* a constructor template's own type parameter
+                           ([temp.local]), which no class scope holds */
+                        entity_index own = 0;
+                        if (!found_name)
+                            own = lookup(name);
+                        if (own &&
+                            entity_table[own].kind == entity_kind::typedef_name)
+                            found_name = own;
                     }
                     base = found_name;
                 }
@@ -2754,7 +2765,10 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                     "a friend's access to a non-public subobject constructor "
                     "in an aggregate");
             bool allowed = !entity_table[q].access || grants(k, c);
-            if (is_default && entity_table[q].access == 1) {
+            /* [class.protected]/1, [class.access.base]: a protected one is the
+               derived class's to call for its base subobject */
+            if ((is_default || copy_or_move_constructor(k, q)) &&
+                entity_table[q].access == 1) {
                 bool ambiguous = false;
                 bool has_member = false;
                 for (uint32_t i = 0; i < x.member_count; i++) {
@@ -3281,6 +3295,78 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
 }
 
 /*
+ * [namespace.udecl]/14, [class.inhctor.init]/1: chosen, a specialization of a
+ * constructor template of a base of c that c inherits, becomes c's inheriting
+ * constructor for it: one that initializes the base subobject with it and
+ * the rest of c as a defaulted default constructor does, in every class
+ * between them
+ */
+analysis_result semantic_analysis::inherit_specialization(SyntaxRef at,
+                                                          entity_index c,
+                                                          entity_index &chosen)
+{
+    entity_index owner = entity_table[chosen].enclosing;
+    /* the direct base that has it: its own, or one that inherits it */
+    entity_index through = 0;
+    for (const inheriting_declaration &d : inheriting) {
+        if (d.c != c)
+            continue;
+        entity_index b =
+            type_table[entity_table[d.base].type.unqualified()].entity;
+        if (b == owner) {
+            through = b;
+            break;
+        }
+        if (entity_table[b].constructor_templates)
+            through = b;
+    }
+    if (!through)
+        return analysis_result::well_formed;
+    entity_index inner = chosen;
+    if (through != owner) {
+        VTRY(r, inherit_specialization(at, through, inner));
+        if (inner == chosen)
+            return analysis_result::well_formed;
+    }
+    for (const inherited_specialization &s : inherited_specializations)
+        if (s.c == c && s.inner == inner) {
+            chosen = s.constructor;
+            return analysis_result::well_formed;
+        }
+    entity_index e =
+        entity_table.make(entity_kind::function, entity_table[c].name, c);
+    const entity from = entity_table[inner];
+    entity &f = entity_table[e];
+    f.type = from.type;
+    f.nonstatic_member = true;
+    f.special = special_member::constructor;
+    f.inline_ = true;
+    f.defined = true;
+    f.implicit = true;
+    f.constexpr_ = from.constexpr_;
+    f.inherited_constructor = inner;
+    /* ([abi:mangling]: its name has the specialization's arguments) */
+    f.instantiation = from.instantiation;
+    f.linkage_of_name = entity_table[c].linkage_of_name;
+    f.explicit_ = from.explicit_;
+    f.deleted = from.deleted;
+    f.access = from.access;
+    f.first_default = from.first_default;
+    f.default_arguments = from.default_arguments;
+    inherited_specializations.append({c, inner, e});
+    chosen = e;
+    if (from.deleted)
+        return analysis_result::well_formed;
+    /* a definition in the class's context, within the construction's */
+    instantiation_context context;
+    enter_instantiation(context, entity_table[c].enclosing, at);
+    scoped_value<entity_index> member_context(access_class, c);
+    analysis_result r = define_defaulted_special_member(c, e, at);
+    leave_instantiation(context);
+    return r;
+}
+
+/*
  * [class.inhctor.init]/1: the base subobject `base` of a constructor
  * inherited from it, "initialized by the invocation of the inherited
  * constructor" with the inheriting constructor's parameters: an xvalue
@@ -3317,7 +3403,7 @@ analysis_result semantic_analysis::inherited_base_construct(
             from.category = value_category::xvalue;
         }
         from.evaluation = constness::not_constant;
-        from.node = expression_node(semantic_kind::entity, from, at, p);
+        from.node = expression_node(semantic_kind::entity, from, at, p.index());
         if (kind.kind == type_kind::class_type && !trivial_class(kind.entity)) {
             semantics[from.node].op = 1;
             nodes.append(from.node);
@@ -3335,7 +3421,7 @@ analysis_result semantic_analysis::inherited_base_construct(
     made.category = value_category::prvalue;
     made.evaluation = constness::unknown;
     uint32_t built = expression_node(semantic_kind::construct, made, at,
-                                     object.node, chosen);
+                                     object.node, chosen.index());
     if (!nodes.empty())
         semantics.set_list(built, &nodes[0], nodes.size());
     statement = statement_node(semantic_kind::expression_statement, at, built);
@@ -3629,7 +3715,8 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
         from.category = value_category::lvalue;
         from.type = type_table[entity_table[source].type.unqualified()].operand;
         from.evaluation = constness::not_constant;
-        from.node = expression_node(semantic_kind::entity, from, at, source);
+        from.node =
+            expression_node(semantic_kind::entity, from, at, source.index());
         analysis_result r = analysis_result::well_formed;
         if (entity_table[e].base_subobject)
             r = to_base(at,
@@ -3805,8 +3892,9 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
                 type_table.fundamental(fundamental_type::void_), cv_none);
             call.category = value_category::prvalue;
             call.evaluation = constness::not_constant;
-            uint32_t destroyed = expression_node(semantic_kind::destroy, call,
-                                                 at, elem.node, destructor);
+            uint32_t destroyed =
+                expression_node(semantic_kind::destroy, call, at, elem.node,
+                                destructor.index());
             statements.append(array_loop_statement(
                 at, bound, true,
                 statement_node(semantic_kind::expression_statement, at,
@@ -3833,7 +3921,7 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
         call.category = value_category::prvalue;
         call.evaluation = constness::not_constant;
         uint32_t destroyed = expression_node(semantic_kind::destroy, call, at,
-                                             object.node, destructor);
+                                             object.node, destructor.index());
         statements.append(
             statement_node(semantic_kind::expression_statement, at, destroyed));
         if (entity_table[order[i]].virtual_base)
@@ -4213,7 +4301,10 @@ analysis_result semantic_analysis::class_direct_initialization(
             class_prvalue(type, value.evaluation, value.node, m);
         return r;
     }
-    if (!entity_table[c].first_constructor && arguments.empty()) {
+    /* (inherited constructor templates are constructors too) */
+    bool constructors = entity_table[c].first_constructor ||
+                        entity_table[c].constructor_templates;
+    if (!constructors && arguments.empty()) {
         /* [dcl.init]/8.2: value-initialization of a class without a
            user-provided default constructor zero-initializes it (the
            implicit one is trivial: no constructor entity); the empty
@@ -4237,7 +4328,7 @@ analysis_result semantic_analysis::class_direct_initialization(
         }
         owned_array<SyntaxElement> none;
         r = list_initialization_of(n, none, type, true, value);
-    } else if (!entity_table[c].first_constructor) {
+    } else if (!constructors) {
         /* T(x): "the type conversion expression is equivalent to the
            corresponding cast expression" ([expr.type.conv]/2): of the
            class's own type or of a class derived from it, a copy (of the
@@ -4253,8 +4344,8 @@ analysis_result semantic_analysis::class_direct_initialization(
             if (is_aggregate(c) && written_arguments &&
                 tokens.files.behavior.has(
                     language_feature::three_way_comparison_operator)) {
-                r = class_list_initialization(n, *written_arguments, type, true,
-                                              value);
+                r = parenthesized_values(n, type, arguments, *written_arguments,
+                                         value);
             } else {
                 return not_supported_because(
                     n, "expr.type.conv",
@@ -4294,8 +4385,8 @@ analysis_result semantic_analysis::class_direct_initialization(
         if (written_arguments &&
             tokens.files.behavior.has(
                 language_feature::three_way_comparison_operator)) {
-            r = class_list_initialization(n, *written_arguments, type, true,
-                                          value);
+            r = parenthesized_values(n, type, arguments, *written_arguments,
+                                     value);
         } else {
             return not_supported_because(
                 n, "expr.type.conv",
@@ -4307,6 +4398,30 @@ analysis_result semantic_analysis::class_direct_initialization(
     if (r == analysis_result::well_formed)
         class_prvalue(type, value.evaluation, value.node, m);
     return r;
+}
+
+/* [dcl.init]/16.6.2.2: the aggregate type from the values of
+   ( expression-list ), where narrowing is allowed; one with a braced list
+   among them goes through the list's rules */
+analysis_result semantic_analysis::parenthesized_values(
+    SyntaxRef n, qualified_type type,
+    owned_array<expression_meaning> &arguments,
+    const owned_array<SyntaxElement> &written, initialized_value &result)
+{
+    for (SyntaxElement w : written)
+        if (w.is(syntax_kind::braced_init_list))
+            return class_list_initialization(n, written, type, true, result);
+    /* (a reference member's temporary: the list's path has its storage) */
+    const entity &x = entity_table[type_table[type.unqualified()].entity];
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        type_kind k = type_table[entity_table[class_members[x.first_member + i]]
+                                     .type.unqualified()]
+                          .kind;
+        if (k == type_kind::lvalue_reference ||
+            k == type_kind::rvalue_reference)
+            return class_list_initialization(n, written, type, true, result);
+    }
+    return parenthesized_aggregate_initialization(n, type, arguments, result);
 }
 
 } // namespace cplusplus

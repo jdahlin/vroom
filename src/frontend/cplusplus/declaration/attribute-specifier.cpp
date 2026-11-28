@@ -627,6 +627,30 @@ token_index semantic_analysis::scoped_gnu_abi_tag(SyntaxElement n) const
     return a[1][1].token();
 }
 
+/* [ext:gnu_attributes] [[gnu::noinline]], an optimization hint vcc may pass
+   over, and [[gnu::target("...")]], which record_target_features reads, as
+   the one attribute of attribute-specifier n */
+bool semantic_analysis::scoped_gnu_function_hint(SyntaxElement n) const
+{
+    if (!n.is(syntax_kind::attribute_specifier) || n.size() != 5)
+        return false;
+    SyntaxElement a = n[2], token = n[2];
+    if (a.is(syntax_kind::attribute) && a.size() == 2)
+        token = a[0];
+    if (!token.is(syntax_kind::attribute_scoped_token) || token.size() != 3 ||
+        !token[0].is_token() || !token[2].is_token())
+        return false;
+    owned_buffer ns_spelling, spelling;
+    tokens.spelling(token[0].token(), ns_spelling.get());
+    tokens.spelling(token[2].token(), spelling.get());
+    const char *ns, *name;
+    size_t ns_length, length;
+    attribute_name(ns_spelling, &ns, &ns_length);
+    attribute_name(spelling, &name, &length);
+    return name_is(ns, ns_length, "gnu") && (name_is(name, length, "target") ||
+                                             name_is(name, length, "noinline"));
+}
+
 /* The same, also accepting [dcl.attr.noreturn] noreturn (and
    gnu::noreturn), whose GCC flag goes into flags: GCC's noreturn says
    the same */

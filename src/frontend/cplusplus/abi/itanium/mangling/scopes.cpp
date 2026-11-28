@@ -86,7 +86,7 @@ uint64_t itanium_mangler::local_class_ordinal(entity_index c,
     if (!name)
         name = table[c].linkage_name;
     uint64_t ordinal = 0;
-    for (entity_index other = 1; other < c; other++) {
+    for (entity_index other{1}; other < c; other++) {
         const entity &x = table[other];
         uint32_t other_name = x.name;
         if (!other_name)
@@ -121,6 +121,9 @@ bool itanium_mangler::local_name_scope(entity_index function)
         !f.enclosing && length == 4 && !memcmp(identifier, "main", 4);
 
     enc.write(terminal::Z_local_name);
+    /* [impl.clang] a constructor or destructor as a context is the
+       complete object's (C1, D1), whichever variant holds the entity */
+    scoped_value<int> complete(ctor_dtor_variant, 1);
     if (is_main) {
         if (!unqualified_name(function))
             return false;
@@ -154,7 +157,7 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
     if (!unqualified_name(e))
         return false;
     uint64_t earlier = 0;
-    for (entity_index other = 1; other < e; other++)
+    for (entity_index other{1}; other < e; other++)
         if (table[other].kind == entity_kind::variable &&
             !table[other].automatic && table[other].name == x.name &&
             table[other].enclosing &&
@@ -265,18 +268,24 @@ bool itanium_mangler::closure_type_name(entity_index c)
         uint32_t explicit_count =
             analysis.template_parameter_count(call) -
             analysis.invented_parameter_count(table[c].lambda);
-        /* the template-param-decls: Ty, Tn and the type, Tp before a pack's */
+        /* the template-param-decls: Ty or Tk and the concept, Tn and the
+           type, Tp before a pack's */
         for (uint32_t i = 0; i < explicit_count; i++) {
             bool pack = false;
             qualified_type value_type;
             semantic_analysis::template_parameter_form_kind kind =
                 analysis.template_parameter_kind(call, i, pack, value_type);
+            SyntaxRef q = analysis.parameter_type_constraint(call, i);
             if (kind ==
                 semantic_analysis::template_parameter_form_kind::template_)
                 return false;
             if (pack)
                 enc.write(terminal::Tp_pack_parameter_decl);
-            if (kind == semantic_analysis::template_parameter_form_kind::type) {
+            if (q) {
+                if (!constrained_parameter_decl(call, q))
+                    return false;
+            } else if (kind ==
+                       semantic_analysis::template_parameter_form_kind::type) {
                 enc.write(terminal::Ty_type_parameter_decl);
             } else {
                 enc.write(terminal::Tn_non_type_parameter_decl);

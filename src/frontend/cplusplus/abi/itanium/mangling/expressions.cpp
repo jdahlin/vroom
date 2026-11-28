@@ -266,10 +266,23 @@ void itanium_mangler::expr_primary_nullptr()
        <function-param> ::= fp <top-level CV-qualifiers> _
                         ::= fp <top-level CV-qualifiers> <parameter-2 non-negative number> _
 
-   the parameter at position (from 1), no CV-qualifiers */
-void itanium_mangler::function_param(uint32_t position)
+   the parameter at position (from 1); outer, [impl.clang] a
+   requires-expression's in a template-head's requires-clause, written fL0p */
+void itanium_mangler::function_param(uint32_t position, uint32_t cv, bool outer)
 {
-    enc.write(terminal::fp_function_param);
+    if (outer) {
+        enc.write(terminal::fL_outer_function_param);
+        enc.number(0);
+        enc.write(terminal::p_parameter_of_level);
+    } else {
+        enc.write(terminal::fp_function_param);
+    }
+    if (cv & cv_restrict)
+        enc.write(terminal::r_restrict_qualifier);
+    if (cv & cv_volatile)
+        enc.write(terminal::V_volatile_qualifier);
+    if (cv & cv_const)
+        enc.write(terminal::K_const_qualifier);
     if (position > 1)
         enc.number(position - 2);
     enc.write(terminal::underscore);

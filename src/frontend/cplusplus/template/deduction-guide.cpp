@@ -117,7 +117,7 @@ semantic_analysis::deduction_guide_candidate(TemplateDeclaration t,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].instantiation = index + 1;
+                entity_table[e].template_record = index + 1;
         }
     }
     function_template record =
@@ -231,6 +231,12 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
     if (!ctor.direct || !ctor.id.is_identifier() ||
         tokens.identifier(ctor.id.token()) != class_name || !ctor.parameters())
         return analysis_result::unsupported;
+    /* [dcl.fct]/22: an abbreviated constructor template's invented
+       template-parameters follow */
+    size_t written = parameters.size();
+    if (!abbreviated_clause(SyntaxElement(ctor.parameters()), parameters))
+        return analysis_result::unsupported;
+    bool abbreviated = parameters.size() != written;
     entity_index outer = entity_table[c.entity].enclosing;
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -267,16 +273,21 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
         } else if (m.is(syntax_kind::member_declaration) && m.size() >= 2 &&
                    m[0].is(syntax_kind::decl_specifier_seq) &&
                    syntax_parser.keyword_of(tokens[m[0].first_token()]) ==
-                       standard_keyword::typedef_ &&
-                   m[1].is(syntax_kind::member_declarator_list) &&
-                   m[1].size() == 1 && m[1][0].is_token() &&
-                   tokens[m[1][0].token()].kind == token_kind::identifier) {
+                       standard_keyword::typedef_) {
+            /* typedef T name; the declarator alone, or in a list of one */
+            SyntaxElement declared_name = m[1];
+            if (declared_name.is(syntax_kind::member_declarator_list) &&
+                declared_name.size() == 1)
+                declared_name = declared_name[0];
+            if (!declared_name.is_token() ||
+                tokens[declared_name.token()].kind != token_kind::identifier)
+                continue;
             size_t u = unsupported.size();
             specified ds;
             if (decl_specifier_seq(m[0].index(), ds, false) ==
                     analysis_result::well_formed &&
                 ds.typedef_ && ds.type.unqualified()) {
-                uint32_t td_name = tokens.identifier(m[1][0].token());
+                uint32_t td_name = tokens.identifier(declared_name.token());
                 entity_index td = entity_table.make(entity_kind::typedef_name,
                                                     td_name, scope);
                 entity_table[td].type = ds.type;
@@ -292,7 +303,7 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].instantiation = index + 1;
+                entity_table[e].template_record = index + 1;
         }
     }
     function_template record =
@@ -302,7 +313,8 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
     record.guide_of = ct;
     record.implicit_guide = true;
     record.explicit_guide = is_explicit;
-    record.guide_of_template = mem.is(syntax_kind::template_declaration);
+    record.guide_of_template =
+        mem.is(syntax_kind::template_declaration) || abbreviated;
     entity_table[record.entity].type = type;
     if (!is_namespace(outer))
         entity_table[record.entity].inline_ = true;

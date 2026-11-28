@@ -59,10 +59,10 @@ void c_lowering::block_items(uint32_t first, uint32_t count,
    initialization ([impl.clang] as clang's -O0) */
 bool c_lowering::unreached_static(const semantic_node &n)
 {
-    const entity &x = analysis.entity_table[n.a];
+    const entity &x = analysis.entity_table[n.entity_a()];
     if (x.automatic || !n.b || constant_initializer(n.b))
         return false;
-    uint32_t s = symbol(n.a, n.at);
+    uint32_t s = symbol(n.entity_a(), n.at);
     if (s) {
         ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
         ast_builder_symbol_keep(c, s);
@@ -78,6 +78,7 @@ void c_lowering::declaration_items(const semantic_node &n,
     /* the initializer is a full-expression ([intro.execution]/5.3): the
        temporaries of its arguments before the declaration, destroyed
        after it */
+    located here(c, tokens.location(n.at));
     collection k = collect();
     owned_array<uint32_t> items, after;
     initialized_declaration(n, items);
@@ -92,7 +93,7 @@ void c_lowering::initialized_declaration(const semantic_node &n,
                                          owned_array<uint32_t> &out)
 {
     entity_index outer_declaring = declaring;
-    declaring = n.a;
+    declaring = n.entity_a();
     initialized_variable(n, out);
     declaring = outer_declaring;
 }
@@ -100,7 +101,7 @@ void c_lowering::initialized_declaration(const semantic_node &n,
 void c_lowering::initialized_variable(const semantic_node &n,
                                       owned_array<uint32_t> &out)
 {
-    entity_index e = n.a;
+    entity_index e = n.entity_a();
     const entity &x = analysis.entity_table[e];
     qualified_type object;
     entity_index destructor = element_destructor(x.type, object);
@@ -275,7 +276,7 @@ bool c_lowering::static_lvalue(uint32_t n) const
     case semantic_kind::string_literal:
         return true;
     case semantic_kind::entity: {
-        const entity &e = analysis.entity_table[x.a];
+        const entity &e = analysis.entity_table[x.entity_a()];
         if (is_reference(e.type))
             return false;
         return e.kind == entity_kind::function ||
@@ -318,7 +319,7 @@ bool c_lowering::address_constant(uint32_t n) const
             return address_constant(x.a);
         case conversion_kind::derived_to_base:
             /* a virtual base's offset is read from the virtual table */
-            return !analysis.entity_table[x.b].virtual_base &&
+            return !analysis.entity_table[x.entity_b()].virtual_base &&
                    address_constant(x.a);
         default:
             return false;
@@ -366,7 +367,7 @@ bool c_lowering::nonnull_address(uint32_t n) const
     const semantic_node &o = node(object);
     if (o.kind != semantic_kind::entity)
         return false;
-    const entity &e = analysis.entity_table[o.a];
+    const entity &e = analysis.entity_table[o.entity_a()];
     if (is_reference(e.type) || (e.gnu_flags & gnu_weak))
         return false;
     return e.kind == entity_kind::function ||
@@ -497,7 +498,7 @@ bool c_lowering::constant_initializer(uint32_t n) const
    static one's symbol holds its initializer */
 uint32_t c_lowering::declaration(const semantic_node &n)
 {
-    entity_index e = n.a;
+    entity_index e = n.entity_a();
     const entity &x = analysis.entity_table[e];
     uint32_t s = symbol(e, n.at);
     if (!s)
@@ -521,7 +522,7 @@ uint32_t c_lowering::declaration(const semantic_node &n)
         ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
         /* [impl.clang]: a static local is emitted with its function,
            referred to or not; an inline function's only where the
-           function is (not yet: its function's COMDAT group) */
+           function is (not yet) */
         if (!analysis.entity_table[enclosing_function(e)].inline_)
             ast_builder_symbol_keep(c, s);
         ast_builder_symbol_body(c, s, init);
@@ -616,7 +617,7 @@ bool c_lowering::in_label_scope(uint32_t identifier, entity_index e) const
         uint32_t count = label_paths[i + 1];
         if (label_paths[i] == identifier) {
             for (uint32_t k = 0; k < count; k++)
-                if (label_paths[i + 2 + k] == e)
+                if (entity_index_in(label_paths[i + 2 + k]) == e)
                     return true;
             return false;
         }
@@ -678,7 +679,7 @@ uint32_t c_lowering::asm_statement(const semantic_node &n)
             return fail("an asm operand that is not of a scalar type", o.at);
     }
     for (uint32_t i = 0; i < n.c; i++)
-        written(clobbers[i], true);
+        written(token_index{clobbers[i]}, true);
     auto text = [&](size_t index) {
         ast_builder_asm_text t;
         t.text = pool.data() + ends[index];
@@ -746,6 +747,7 @@ uint32_t c_lowering::statement(uint32_t index)
     if (failure.what || !index)
         return 0;
     const semantic_node &n = node(index);
+    located here(c, tokens.location(n.at));
     switch (n.kind) {
     case semantic_kind::block:
     case semantic_kind::declarations:

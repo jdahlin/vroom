@@ -59,7 +59,7 @@ node_index parser::init_declarator(const decl_specifier_facts &specifiers,
         mark = pending.size() - 1;
         syntax_child c = pending.back();
         if (c.is_token())
-            first_token = c.index();
+            first_token = token_index{c.index()};
         else
             first_token = tree[c.node()].first_token;
     } else {

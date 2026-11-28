@@ -25,15 +25,15 @@ namespace
 token_index first_dynamic_specification(SyntaxElement n)
 {
     if (n.is_token())
-        return UINT32_MAX;
+        return token_index{UINT32_MAX};
     if (n.dynamic_exception_specification())
         return n.first_token();
     for (auto c : n.elements()) {
         token_index found = first_dynamic_specification(c);
-        if (found != UINT32_MAX)
+        if (found != token_index{UINT32_MAX})
             return found;
     }
-    return UINT32_MAX;
+    return token_index{UINT32_MAX};
 }
 
 } // namespace
@@ -125,7 +125,7 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     if (!tokens.files.behavior.has(
             language_feature::dynamic_exception_specifications)) {
         token_index dynamic = first_dynamic_specification(specifier);
-        if (dynamic != UINT32_MAX) {
+        if (dynamic != token_index{UINT32_MAX}) {
             VTRY(dr, recoverable_extension_used(
                          diagnostic_id::sema_dynamic_exception_specification,
                          dynamic));
@@ -172,7 +172,7 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
             if (entity_table[template_parameter_entities[first + i]].kind !=
                 entity_kind::template_entity)
                 entity_table[template_parameter_entities[first + i]]
-                    .instantiation = declared;
+                    .template_record = declared;
         function_template &record = function_templates[declared - 1];
         record.declaration = n;
         record.definition = specifier;

@@ -57,8 +57,12 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
        where the template named takes a parameter before its pack,
        typename Q<T>::template X<U> of a dependent Q): it is analysed with
        each use's arguments (alias_template_type), as it is anyway, and
-       judged there */
-    if (r == analysis_result::unsupported) {
+       judged there.  Not where it names a template that has no declaration
+       here and a declaration was not parsed: nothing is claimed about it. */
+    if (r == analysis_result::unsupported &&
+        !(declaration_not_parsed_seen &&
+          unsupported.size() > unsupported_before &&
+          !strcmp(unsupported[unsupported_before].subclause, "temp.names"))) {
         unsupported.resize(unsupported_before);
         r = analysis_result::well_formed;
     }
@@ -69,7 +73,7 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].instantiation = index + 1;
+                entity_table[e].template_record = index + 1;
         }
     }
     function_template record = new_template(
@@ -217,7 +221,7 @@ analysis_result semantic_analysis::alias_template_specialization(
     if (r == analysis_result::well_formed &&
         type_table[t.unqualified()].kind == type_kind::class_type) {
         entity_index c = type_table[t.unqualified()].entity;
-        if (entity_table[c].lambda && c >= entities_before) {
+        if (entity_table[c].lambda && c.index() >= entities_before) {
             entity_index fn = saved_scope;
             while (fn && entity_table[fn].kind != entity_kind::function)
                 fn = entity_table[fn].enclosing;

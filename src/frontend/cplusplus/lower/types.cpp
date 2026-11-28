@@ -267,22 +267,38 @@ ast_qualified_type c_lowering::class_tag(entity_index e)
  *   - a member the ABI places after where C would (an empty subobject
  *     moved by a conflict, II) has a char array of padding before it;
  *   - a base whose tail padding the class reuses (a member placed before
- *     the base's sizeof ends: [abi:pod]) is an aligned char array of the
- *     base's data size, which a member access reads as the base's type;
+ *     the base's sizeof ends: [abi:pod]) is the base's struct without its
+ *     tail padding (data_type), which a member access reads as the base's
+ *     type;
  *   - the struct ends with padding to the class's size.
  * The offsets C gives are checked against the analysis's.
  */
-ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
+ast_qualified_type c_lowering::data_type(entity_index e, token_index at)
 {
-    if (records[e] && !deferred_class[e])
+    if (!data_records[e])
+        data_records[e] = class_type(e, at, true);
+    return data_records[e];
+}
+
+ast_qualified_type c_lowering::class_type(entity_index e, token_index at,
+                                          bool data_only)
+{
+    if (!data_only && records[e] && !deferred_class[e])
         return records[e];
     const entity &x = analysis.entity_table[e];
     if (x.kind != entity_kind::class_type) {
         fail("a class whose definition was not analysed", at);
         return ast_builder_type_basic(AST_TYPE_INT);
     }
-    ast_qualified_type made = class_tag(e);
-    deferred_class[e] = 0;
+    ast_qualified_type made;
+    uint64_t whole = x.size;
+    if (data_only) {
+        made = ast_builder_type_record(c, "", 0, false);
+        whole = x.data_size;
+    } else {
+        made = class_tag(e);
+        deferred_class[e] = 0;
+    }
     if (!x.size)
         /* incomplete: a pointer to it is all a program can have */
         return made;
@@ -373,7 +389,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
                 tail_reused[member] = 1;
             } else if (m.base_subobject && next < m.offset + size) {
                 size = of.data_size;
-                t = ast_builder_type_array(c, byte, size, true);
+                t = data_type(record(m.type).entity, at);
                 tail_reused[member] = 1;
             }
         }
@@ -384,7 +400,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
             width = m.bit_width;
         uint32_t field_align = m.alignment;
         if (tail_reused[member])
-            /* the data-size char array: its base's alignment */
+            /* the base without its tail padding: its alignment */
             field_align = static_cast<uint32_t>(align);
         if (m.base_subobject || (!m.name && !m.bit_field)) {
             /* a base class subobject or an anonymous union's object: a
@@ -456,14 +472,14 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         offsets.append(UINT64_MAX);
         end = 1;
     }
-    if (!x.union_ && end < x.size) {
+    if (!x.union_ && end < whole) {
         /* the C struct's size, rounded to its alignment, may fall short of
            the class's: padding at the end where it would */
         uint64_t rounded = end;
         if (x.alignment)
             rounded = (end + x.alignment - 1) / x.alignment * x.alignment;
-        if (rounded < x.size)
-            padding(x.size - end);
+        if (data_only || rounded < whole)
+            padding(whole - end);
     }
     for (size_t i = 0, at_name = 0; i < names.size(); i++) {
         if (names[i])
@@ -492,9 +508,11 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         if (ast_builder_type_record_bit_offset(c, made, f) != bit_off)
             ast_builder_type_record_set_offset(c, made, f, bit_off);
     }
-    if (ast_builder_type_size(c, made) != x.size)
-        ast_builder_type_record_set_size(c, made, x.size,
-                                         static_cast<uint32_t>(x.alignment));
+    uint32_t whole_alignment = static_cast<uint32_t>(x.alignment);
+    if (data_only)
+        whole_alignment = 1;
+    if (ast_builder_type_size(c, made) != whole)
+        ast_builder_type_record_set_size(c, made, whole, whole_alignment);
     if (!analysis.trivial_class(e))
         /* [abi:calls]: "If the return type is a class type that is
            non-trivial for the purposes of calls, the caller passes an

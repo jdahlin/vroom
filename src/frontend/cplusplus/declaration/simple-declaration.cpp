@@ -617,6 +617,7 @@ node_index parser::alias_declaration()
     size_t type_mark = begin_node();
     token_index type_first = position;
     decl_specifier_facts specifiers;
+    specifiers.alias_type_id = true;
     /* [temp.res]/5: the defining-type-id of an alias-declaration */
     specifiers.implicit_typename =
         tokens.files.behavior.has(language_feature::implicit_typename);
@@ -783,12 +784,10 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
         return not_supported_because(
             n, "dcl.typedef", "an alias with no defining-type-id specifiers");
     /* (a simple-template-id counts as declares_class too: the
-       class-specifiers and elaborated-type-specifiers are looked for) */
+       class-specifiers are looked for; an elaborated-type-specifier names
+       the class or enumeration, [dcl.type.elab]) */
     for (SyntaxElement k : id[0].elements()) {
-        if (k.is(syntax_kind::class_specifier,
-                 syntax_kind::elaborated_type_specifier,
-                 syntax_kind::enum_specifier,
-                 syntax_kind::elaborated_enum_specifier))
+        if (k.is(syntax_kind::class_specifier, syntax_kind::enum_specifier))
             return not_supported_because(
                 n, "dcl.typedef", "a type defined or elaborated in this alias");
     }
@@ -961,7 +960,8 @@ bool semantic_analysis::gnu_or_without_effect(SyntaxRef n) const
 {
     uint32_t flags = 0;
     if (n.is(syntax_kind::attribute_specifier))
-        return attributes_as_gnu(n, flags) || scoped_gnu_abi_tag(n);
+        return attributes_as_gnu(n, flags) || scoped_gnu_abi_tag(n) ||
+               scoped_gnu_function_hint(n);
     if (!n.is(syntax_kind::attribute_specifier_seq))
         return only_gnu_attributes(tree, n);
     for (SyntaxElement c : n.elements()) {
@@ -1446,15 +1446,6 @@ analysis_result semantic_analysis::default_initialize_variable(
                 data = repeated_value(type, data, semantics[value.node].at);
             if (c == constness::constant && data)
                 value.node = data;
-            /* an array of a class that is not dynamic, constructed at
-               start-up or on first use: refused, its lowering not
-               followed (clang's symbols differ where one is) */
-            else if (!entity_table[e].automatic && !(object == type) &&
-                     !entity_table[record].dynamic &&
-                     !is_class_entity(entity_table[e].enclosing))
-                return not_supported_because(declaration, "dcl.init",
-                                             "default construction of this "
-                                             "array");
             if (c != constness::constant && constexpr_variable) {
                 /* (a constexpr variable whose initialization is not
                    followed is not known to be unusable) */
@@ -1512,6 +1503,8 @@ analysis_result semantic_analysis::declare_with_initializer(
     const expression_meaning *supplied)
 {
     last_declared = 0;
+    scoped_value<bool> constant_declarator(declarator_constant,
+                                           s.constexpr_ || s.constinit_);
     qualified_type type = s.type;
     declarator_meaning m;
     m.ext_vector.allowed = s.ext_vector.allowed;
@@ -2494,7 +2487,7 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (bound && semantics[bound].kind == semantic_kind::bind_reference)
             bound = semantics[bound].a;
         if (bound && semantics[bound].kind == semantic_kind::entity) {
-            entity_index referent = semantics[bound].a;
+            entity_index referent = semantics[bound].entity_a();
             const entity &r2 = entity_table[referent];
             if (r2.kind == entity_kind::variable && !r2.automatic &&
                 !r2.c11_thread_local &&

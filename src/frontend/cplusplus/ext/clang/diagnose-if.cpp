@@ -121,9 +121,9 @@ analysis_result semantic_analysis::diagnose_if_call(token_index at,
     for (size_t i = 0; i < diagnose_ifs.size(); i++) {
         const diagnose_if_condition d = diagnose_ifs[i];
         if (d.function != f || d.parameter_count > count ||
-            !diagnose_if_holds(d.condition,
-                               &diagnose_if_parameters[d.first_parameter],
-                               d.parameter_count, arguments))
+            !diagnose_if_holds(
+                d.condition, diagnose_if_parameters.data() + d.first_parameter,
+                d.parameter_count, arguments))
             continue;
         owned_buffer text;
         tokens.spelling(d.message, text.get());

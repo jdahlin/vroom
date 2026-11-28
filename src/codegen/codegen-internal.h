@@ -1528,6 +1528,11 @@ VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want);
 VPRIV codegen_value vla_bytes(codegen_context *e, ast_qualified_type t);
 VPRIV void vla_fix(codegen_context *e, ast_qualified_type t, bool pure);
 VPRIV void gen_stmt(codegen_context *e, uint32_t n);
+/* debug-unit.cpp: -g's compile unit, after the code */
+VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
+                                     const codegen_chunk *chunks,
+                                     uint32_t chunk_count);
+VPRIV void codegen_string_quote_append(tbuf *b, const char *s);
 VPRIV bool codegen_debug_location_get(codegen_context *e, uint32_t loc,
                                       uint32_t *file, uint32_t *line,
                                       uint32_t *col);

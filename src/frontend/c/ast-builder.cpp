@@ -313,6 +313,14 @@ void ast_builder_symbol_assembler_name(cc *c, uint32_t s, const char *name,
         ast_builder_attribute_string(c, name, length);
 }
 
+void ast_builder_symbol_debug_name(cc *c, uint32_t s, const char *name,
+                                   size_t length)
+{
+    if (c->describe_location) /* (-g) */
+        ast_builder_attributes(c, s)->debug_name =
+            ast_builder_attribute_string(c, name, length);
+}
+
 void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,
                                 size_t length)
 {
@@ -413,10 +421,35 @@ bool ast_builder_node_is_call(cc *c, uint32_t n)
     return c->nodes[n].op == AST_NODE_CALL;
 }
 
+void ast_builder_location_describer(
+    cc *c,
+    bool (*describe)(void *context, uint32_t location, const char **name,
+                     uint32_t *line, uint32_t *column),
+    void *context)
+{
+    c->describe_location = describe;
+    c->describe_location_context = context;
+}
+
+void ast_builder_node_location(cc *c, uint32_t n, uint32_t location)
+{
+    if (c->describe_location)
+        c->nodes[n].loc = location;
+}
+
+uint32_t ast_builder_location(cc *c, uint32_t location)
+{
+    uint32_t previous = c->builder_location;
+
+    if (c->describe_location)
+        c->builder_location = location;
+    return previous;
+}
+
 uint32_t ast_builder_node(cc *c, int op, ast_qualified_type t, uint32_t a,
                           uint32_t b, uint32_t c_, uint16_t aux, uint8_t flags)
 {
-    uint32_t n = cc_node_new(c, op, t, 0);
+    uint32_t n = cc_node_new(c, op, t, c->builder_location);
 
     c->nodes[n].a = a;
     c->nodes[n].b = b;

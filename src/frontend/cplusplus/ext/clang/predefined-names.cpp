@@ -1127,7 +1127,7 @@ uint32_t semantic_analysis::shown_template_arguments(entity_index c)
     uint32_t count = specialization_argument_count(c);
     entity_index t = specialized_template(c);
     /* (a template entity's record: function_templates' index plus one) */
-    uint32_t ct = entity_table[t].instantiation;
+    uint32_t ct = entity_table[t].template_record;
     if (!ct || entity_table[c].kind != entity_kind::class_type ||
         !function_templates[ct - 1].is_class ||
         function_templates[ct - 1].parameter_count != count)
@@ -1190,7 +1190,7 @@ analysis_result semantic_analysis::predefined_name(token_index t,
         type_table.array_of(element, uint64_t(text.size()) + 1), cv_none);
     m.category = value_category::lvalue;
     m.evaluation = constness::unknown;
-    m.node = expression_node(semantic_kind::predefined_name, m, t, 0, f,
+    m.node = expression_node(semantic_kind::predefined_name, m, t, 0, f.index(),
                              static_cast<uint8_t>(form));
     return analysis_result::well_formed;
 }

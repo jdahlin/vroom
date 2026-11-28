@@ -33,6 +33,68 @@ template <typename Tag> class table_index
         return value != 0;
     }
     friend constexpr bool operator==(table_index, table_index) = default;
+    /* records are made in order: indexes of one table compare, step to the
+       next record and take an offset within a run of records */
+    friend constexpr bool operator<(table_index a, table_index b)
+    {
+        return a.value < b.value;
+    }
+    friend constexpr bool operator<=(table_index a, table_index b)
+    {
+        return a.value <= b.value;
+    }
+    friend constexpr bool operator>(table_index a, table_index b)
+    {
+        return a.value > b.value;
+    }
+    friend constexpr bool operator>=(table_index a, table_index b)
+    {
+        return a.value >= b.value;
+    }
+    constexpr table_index &operator++()
+    {
+        value++;
+        return *this;
+    }
+    constexpr table_index operator++(int)
+    {
+        table_index old = *this;
+        value++;
+        return old;
+    }
+    friend constexpr table_index operator-(table_index i, uint32_t offset)
+    {
+        return table_index(i.value - offset);
+    }
+    friend constexpr uint32_t operator-(table_index a, table_index b)
+    {
+        return a.value - b.value;
+    }
+    constexpr table_index &operator--()
+    {
+        value--;
+        return *this;
+    }
+    constexpr table_index operator--(int)
+    {
+        table_index old = *this;
+        value--;
+        return old;
+    }
+    constexpr table_index &operator-=(uint32_t offset)
+    {
+        value -= offset;
+        return *this;
+    }
+    constexpr table_index &operator+=(uint32_t offset)
+    {
+        value += offset;
+        return *this;
+    }
+    friend constexpr table_index operator+(table_index i, uint32_t offset)
+    {
+        return table_index(i.value + offset);
+    }
 
   private:
     uint32_t value = 0;

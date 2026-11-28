@@ -16,8 +16,7 @@
  * The call is analysed as the expression it stands for, so the result type,
  * value category and noexcept-ness are that expression's, and an INVOKE of
  * the arguments that is ill-formed is an error where clang's is (a
- * substitution failure in a template argument).  An object that is a
- * std::reference_wrapper ((1.2), (1.5)) is not supported.
+ * substitution failure in a template argument).
  */
 #include "../../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -63,15 +62,46 @@ analysis_result semantic_analysis::builtin_invoke(
            (1.1, 1.4): .*; a pointer to one (1.6, 1.7): ->*; anything else
            that is a class is no object of the class */
         bool arrow = true;
+        /* (1.2, 1.5): a std::reference_wrapper stands for t1.get(), here
+           its conversion to that reference */
+        if (type_table[object.type.unqualified()].kind ==
+            type_kind::class_type) {
+            entity_index c = type_table[object.type.unqualified()].entity;
+            uint32_t made = entity_table[c].instantiation;
+            if (made && c != pointer.entity && named(c, "reference_wrapper") &&
+                has_conversion_functions(c) &&
+                specialization_argument_count(c) == 1 &&
+                !base_subobjects(c, pointer.entity)) {
+                qualified_type referred =
+                    specialization_template_argument(c, 0).type;
+                qualified_type to = qualified_type::make(
+                    type_table.lvalue_reference_to(referred), cv_none);
+                VTRY(bound, reference_binding(n, object, to));
+            }
+        }
         const struct type &own = type_table[object.type.unqualified()];
         if (own.kind == type_kind::class_type) {
-            if (own.entity != pointer.entity &&
-                !base_subobjects(own.entity, pointer.entity))
-                return not_supported_builtin(
-                    n, "ext.clang", called,
-                    "with an object that is not of the member's class: a "
-                    "std::reference_wrapper is not supported");
             arrow = false;
+            if (own.entity != pointer.entity &&
+                !base_subobjects(own.entity, pointer.entity)) {
+                /* (1.3, 1.7): any other class is dereferenced, (*t1).*f
+                   (a std::unique_ptr) */
+                owned_array<SyntaxElement> operand_syntax;
+                operand_syntax.append(written[1]);
+                owned_array<expression_meaning> operands;
+                operands.append(object);
+                expression_meaning pointee;
+                bool handled = false;
+                VTRY(dereferenced,
+                     overloaded_operator(
+                         n, n[1].token(), preprocessing_op_or_punc::STAR, false,
+                         operand_syntax, operands, handled, pointee));
+                if (!handled)
+                    return not_supported_builtin(
+                        n, "ext.clang", called,
+                        "with an object that is not of the member's class");
+                object = pointee;
+            }
         }
         expression_meaning access;
         VTRY(r, member_pointer_operator(n, n.first_token(), arrow, object, f,

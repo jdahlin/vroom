@@ -708,7 +708,7 @@ bool semantic_analysis::associated_with(qualified_type t,
                         associated_with(a.type, classes, namespaces, false);
                     } else if (a.kind ==
                                template_argument::kind_t::template_name) {
-                        entity_index named = static_cast<entity_index>(a.value);
+                        entity_index named = entity_index_in(a.value);
                         entity_index in = entity_table[named].enclosing;
                         if (in &&
                             entity_table[in].kind == entity_kind::class_type)
@@ -1053,16 +1053,23 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                 qualified = true;
                 continue;
             }
+            /* [class.qual], [expr.prim.id.qual]/1: an enumeration's
+               scope, its enumerators' names */
+            if (st.kind == type_kind::enumeration) {
+                scope.entity = st.entity;
+                scope.global = false;
+                qualified = true;
+                continue;
+            }
             if (st.kind != type_kind::class_type) {
-                if (st.kind != type_kind::dependent &&
-                    st.kind != type_kind::enumeration)
+                if (st.kind != type_kind::dependent)
                     return ill_formed(n,
                                       "a nested-name-specifier shall name a "
                                       "class, enumeration, or namespace",
                                       "basic.lookup.qual");
                 return not_supported_because(n, "temp.res",
                                              "a nested-name-specifier naming a "
-                                             "dependent type or enumeration");
+                                             "dependent type");
             }
             require_complete(st.entity);
             const entity &x = entity_table[st.entity];
@@ -1158,7 +1165,7 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             e != defining_class && !entity_table[e].defined) {
             uint32_t k = entity_table[e].instantiation - 1;
             entity_index t_ent = instantiations[k].template_entity;
-            uint32_t ct = entity_table[t_ent].instantiation;
+            uint32_t ct = entity_table[t_ent].template_record;
             if (ct && !instantiations[k].defining) {
                 entity_index done = e;
                 /* (a copy: instantiate_class may grow template_arguments) */
@@ -1238,7 +1245,8 @@ bool semantic_analysis::undefined_specialization(entity_index c) const
         x.size)
         return false;
     const instantiation_record &record = instantiations[x.instantiation - 1];
-    if (record.defining || record.lazy || record.has_failure || record.pattern)
+    if (record.defining || record.lazy || record.has_failure ||
+        record.pattern || record.unmatched)
         return false;
     uint32_t t = class_template_of(c);
     if (!t)

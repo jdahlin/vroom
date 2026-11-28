@@ -321,10 +321,26 @@ void semantic_analysis::record_target_features(SyntaxRef definition,
         return spelling.size() == strlen(word) &&
                !memcmp(spelling.data(), word, spelling.size());
     };
+    auto append_target = [&](token_index i) {
+        owned_buffer spelling;
+        tokens.spelling(i, spelling.get());
+        if (spelling.size() < 2 || spelling.data()[0] != '"')
+            return;
+        if (features.size())
+            vbuffer_append(features.get(), ",", 1);
+        vbuffer_append(features.get(), spelling.data() + 1,
+                       spelling.size() - 2);
+    };
     /* the parentheses open since an __attribute__ */
     int depth = 0;
     bool in_attribute = false;
     for (token_index i = first; i < body; i++) {
+        /* [[gnu::target("...")]] */
+        if (!in_attribute && i + 4 < body && is(i, "gnu") && is(i + 1, "::") &&
+            is(i + 2, "target") && is(i + 3, "(")) {
+            append_target(i + 4);
+            continue;
+        }
         if (!in_attribute) {
             in_attribute = is(i, "__attribute__") || is(i, "__attribute");
             continue;
@@ -337,14 +353,7 @@ void semantic_analysis::record_target_features(SyntaxRef definition,
                 in_attribute = false;
         } else if (depth == 2 && i + 2 < body &&
                    (is(i, "target") || is(i, "__target__")) && is(i + 1, "(")) {
-            owned_buffer spelling;
-            tokens.spelling(i + 2, spelling.get());
-            if (spelling.size() < 2 || spelling.data()[0] != '"')
-                continue;
-            if (features.size())
-                vbuffer_append(features.get(), ",", 1);
-            vbuffer_append(features.get(), spelling.data() + 1,
-                           spelling.size() - 2);
+            append_target(i + 2);
         }
     }
     if (!features.size())
@@ -446,7 +455,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
         entity_table[t].argument_bound =
             entity_table[c].kind == entity_kind::class_type &&
             entity_table[c].instantiation;
-        parameter_entities.append(t);
+        parameter_entities.append(t.index());
         function_state.this_entity = t;
     }
     /* [temp.variadic]/2: a function parameter pack's elements, whose
@@ -463,7 +472,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
             entity_table[e].automatic = true;
             entity_table[e].argument_bound = true;
             entity_table.add_declaration(e, definition);
-            parameter_entities.back() = e;
+            parameter_entities.back() = e.index();
             pack.append(e);
             pack_name = parameter.pack_name;
             continue;
@@ -496,7 +505,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
            compares them, defaulted_equality) */
         if (name)
             entity_table.bind(parameters, name, e);
-        parameter_entities.back() = e;
+        parameter_entities.back() = e.index();
     }
     if (current_lambda()) /* [expr.prim.lambda.capture]/6 */
         result = worse(result, bind_init_captures(parameters));
@@ -668,7 +677,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
         }
         if (!b.has(language_feature::non_literal_constexpr_variables))
             for (uint32_t v : found.variables) {
-                const entity &e = entity_table[semantics[v].a];
+                const entity &e = entity_table[semantics[v].entity_a()];
                 if (e.automatic &&
                     literal_type(e.type) == constness::not_constant)
                     result = worse(
@@ -781,7 +790,7 @@ entity_index semantic_analysis::synthesized_variable(synthesized_function &s,
     entity_table[v].defined = true;
     entity_table[v].automatic = true;
     if (parameter)
-        s.parameters.append(v);
+        s.parameters.append(v.index());
     return v;
 }
 

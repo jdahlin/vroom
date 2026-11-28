@@ -147,8 +147,9 @@ semantic_analysis::defaulted_inequality(token_index at,
         if (of_class && k == 0)
             r = this_object(at, sides[k]);
         else
-            r = named_entity(at, parameters[static_cast<size_t>(k)], sides[k],
-                             false);
+            r = named_entity(
+                at, entity_index_in(parameters[static_cast<size_t>(k)]),
+                sides[k], false);
         VTRY(r2, r);
     }
     analysis_result compared = binary_of(
@@ -171,7 +172,7 @@ semantic_analysis::defaulted_inequality(token_index at,
     bool literal = true;
     for (size_t k = 0; k < parameters.size(); k++)
         if (!(of_class && k == 0) &&
-            literal_type(entity_table[parameters[k]].type) !=
+            literal_type(entity_table[entity_index_in(parameters[k])].type) !=
                 constness::constant)
             literal = false;
     VTRY(c2, constexpr_compatible(current_declaration,
@@ -228,7 +229,7 @@ analysis_result semantic_analysis::three_way_step(
                              false, initial));
     entity_table[v].definition = initial.node;
     uint32_t declaration = statement_node(semantic_kind::declaration_statement,
-                                          at, v, initial.node);
+                                          at, v.index(), initial.node);
     expression_meaning variable;
     VTRY(r2b, named_entity(at, v, variable, false));
     expression_meaning zero = integer_constant(fundamental_type::int_, 0, at);
@@ -281,7 +282,7 @@ analysis_result semantic_analysis::defaulted_three_way_end(
     bool literal = constant;
     for (size_t k = 0; k < parameters.size(); k++)
         if (!(of_class && k == 0) &&
-            literal_type(entity_table[parameters[k]].type) !=
+            literal_type(entity_table[entity_index_in(parameters[k])].type) !=
                 constness::constant)
             literal = false;
     VTRY(c3, constexpr_compatible(current_declaration,
@@ -316,7 +317,7 @@ bool semantic_analysis::calls_non_constexpr(uint32_t node) const
             callee = semantics[callee].a;
         if (semantics[callee].kind != semantic_kind::entity)
             return false;
-        const entity &f = entity_table[semantics[callee].a];
+        const entity &f = entity_table[semantics[callee].entity_a()];
         return f.kind == entity_kind::function && !f.constexpr_ &&
                !f.instantiation;
     }
@@ -490,8 +491,9 @@ analysis_result semantic_analysis::defaulted_equality(
             if (of_class && k == 0)
                 r = this_object(at, sides[k]);
             else
-                r = named_entity(at, parameters[static_cast<size_t>(k)],
-                                 sides[k], false);
+                r = named_entity(
+                    at, entity_index_in(parameters[static_cast<size_t>(k)]),
+                    sides[k], false);
             if (r == analysis_result::well_formed && base)
                 r = to_base(at, base, sides[k]);
             else if (r == analysis_result::well_formed)
@@ -548,7 +550,7 @@ analysis_result semantic_analysis::defaulted_equality(
     bool literal = true;
     for (size_t k = 0; k < parameters.size(); k++)
         if (!(of_class && k == 0) &&
-            literal_type(entity_table[parameters[k]].type) !=
+            literal_type(entity_table[entity_index_in(parameters[k])].type) !=
                 constness::constant)
             literal = false;
     VTRY(c1, constexpr_compatible(current_declaration,

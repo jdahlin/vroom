@@ -84,9 +84,10 @@ semantic_analysis::clang_source_location_object(SyntaxRef n,
         at = source_location_at;
     if (call_site_depth)
         call_site_nodes++;
-    m.node = expression_node(
-        semantic_kind::source_location, m, at, 0, function_state.function,
-        static_cast<uint8_t>(source_location_builtin::object));
+    m.node =
+        expression_node(semantic_kind::source_location, m, at, 0,
+                        function_state.function.index(),
+                        static_cast<uint8_t>(source_location_builtin::object));
     return analysis_result::well_formed;
 }
 
@@ -171,9 +172,9 @@ analysis_result semantic_analysis::clang_source_location(SyntaxRef n,
         at = source_location_at;
     if (call_site_depth)
         call_site_nodes++;
-    m.node =
-        expression_node(semantic_kind::source_location, m, at, 0,
-                        function_state.function, static_cast<uint8_t>(which));
+    m.node = expression_node(semantic_kind::source_location, m, at, 0,
+                             function_state.function.index(),
+                             static_cast<uint8_t>(which));
     return analysis_result::well_formed;
 }
 
@@ -207,7 +208,7 @@ uint32_t semantic_analysis::bind_call_site(uint32_t node, token_index call)
         call_site_nodes++;
     semantic_node bound = semantics[node];
     bound.at = call;
-    bound.b = function_state.function;
+    bound.set_entity_b(function_state.function);
     return semantics.add(bound);
 }
 

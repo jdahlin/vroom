@@ -205,6 +205,7 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
     if (!arguments)
         return false;
     if (head_constraint) {
+        scoped_value<bool> in_head(in_head_constraint, true);
         enc.write(terminal::Q_requires_clause);
         if (!expression_of_constraint(pattern_of, constraint))
             return false;

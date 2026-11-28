@@ -451,7 +451,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
         entity_index field = 0;
         if (alignment && e.node &&
             semantics[e.node].kind == semantic_kind::member)
-            field = semantics[e.node].b;
+            field = semantics[e.node].entity_b();
         if (field && entity_table[field].kind == entity_kind::variable &&
             entity_table[field].nonstatic_member) {
             const entity &f = entity_table[field];
@@ -466,7 +466,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
            alignment, which alignas and aligned give it ([dcl.align]) */
         if (alignment && e.node &&
             semantics[e.node].kind == semantic_kind::entity) {
-            entity_index v = semantics[e.node].a;
+            entity_index v = semantics[e.node].entity_a();
             if (v && entity_table[v].kind == entity_kind::variable &&
                 !entity_table[v].nonstatic_member && entity_table[v].alignment)
                 typedef_alignment = entity_table[v].alignment;
@@ -1065,7 +1065,7 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
             current_declaration, "expr.unary.op",
             "a pointer to a member that is neither a variable nor a function");
     if (!c || entity_table[c].kind != entity_kind::class_type ||
-        !entity_table[c].name)
+        (!entity_table[c].name && !entity_table[c].lambda))
         /* a variant member of an anonymous union: its offset is the
            union's plus its own */
         return not_supported_because(
@@ -1107,7 +1107,7 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
         qualified_type::make(type_table.pointer_to_member(c, pointee), cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::unknown;
-    m.node = expression_node(semantic_kind::member_pointer, m, t, e);
+    m.node = expression_node(semantic_kind::member_pointer, m, t, e.index());
     return analysis_result::well_formed;
 }
 
@@ -1255,8 +1255,9 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
             /* clang: a function with the nothrow attribute has a
                non-throwing type */
             const semantic_node &callee = semantics[callee_node];
-            bool nothrow = callee.kind == semantic_kind::entity && callee.a &&
-                           (entity_table[callee.a].gnu_flags & gnu_nothrow);
+            bool nothrow =
+                callee.kind == semantic_kind::entity && callee.a &&
+                (entity_table[callee.entity_a()].gnu_flags & gnu_nothrow);
             /* [impl.clang] the attribute is ignored with a
                noexcept(false): whether there is one is not kept */
             if (nothrow && !f.non_throwing)
@@ -1264,9 +1265,9 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
                     n, "expr.unary.noexcept",
                     "noexcept of a call to a nothrow function declared without "
                     "noexcept");
-            bool scalar_comparison = callee.kind == semantic_kind::entity &&
-                                     callee.a &&
-                                     entity_table[callee.a].compares_scalars;
+            bool scalar_comparison =
+                callee.kind == semantic_kind::entity && callee.a &&
+                entity_table[callee.entity_a()].compares_scalars;
             if (!f.non_throwing && !scalar_comparison) {
                 throwing = true;
                 break;
@@ -1282,10 +1283,10 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
             /* /6.2: the constructor; an implicit one's exception
                specification is its subobjects' ([except.spec]/8-9) */
             if (s.b) {
-                const entity &c = entity_table[s.b];
+                const entity &c = entity_table[s.entity_b()];
                 if (c.implicit) {
                     bool known = true;
-                    if (implicit_constructor_throws(s.b, known)) {
+                    if (implicit_constructor_throws(s.entity_b(), known)) {
                         throwing = true;
                         break;
                     }

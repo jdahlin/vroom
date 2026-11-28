@@ -372,7 +372,7 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
            _ZN1OUt0_C2Ev): Ut, the number of the unnamed classes and
            enumerations of the class before it, less one, and _ */
         uint64_t before = 0;
-        for (entity_index other = 1; other < e; other++) {
+        for (entity_index other{1}; other < e; other++) {
             const entity &k = table[other];
             if (k.enclosing == x.enclosing && !k.name && !k.linkage_name &&
                 !k.lambda &&

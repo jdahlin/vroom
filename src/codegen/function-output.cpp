@@ -82,6 +82,39 @@ static void sym_header_coff(codegen_context *e, tbuf *b, uint32_t s, bool fn,
     }
 }
 
+/*
+ * ELF, C++ vague linkage: the section clang writes, named by the symbol, in a COMDAT group whose
+ * signature is the symbol (the linker keeps one TU's copy).  defsec is the directive the object
+ * would have otherwise: "\t.text\n", "\t.data\n", "\t.bss\n" or "\t.section\tNAME,\"FLAGS\",TYPE\n".
+ */
+static void sym_section_comdat(cc *c, tbuf *b, uint32_t s, const char *defsec)
+{
+    const char *base = defsec + 1, *flags = "aw", *type = "@progbits";
+    size_t base_length = strlen(base) - 1, flags_length = 2,
+           type_length = strlen(type);
+
+    if (!strcmp(defsec, "\t.text\n")) {
+        flags = "ax";
+    } else if (!strcmp(defsec, "\t.bss\n")) {
+        type = "@nobits";
+        type_length = strlen(type);
+    } else if (!strncmp(defsec, "\t.section\t", 10)) {
+        base = defsec + 10;
+        base_length = strcspn(base, ",");
+        flags = base + base_length + 2;
+        flags_length = strcspn(flags, "\"");
+        type = flags + flags_length + 2;
+        type_length = strcspn(type, "\n");
+    }
+    vtext_string_append(b, "\t.section\t");
+    vtext_format_append(b, "%.*s.", (int)base_length, base);
+    codegen_symbol_name_append(c, b, s);
+    vtext_format_append(b, ",\"%.*sG\",%.*s,", (int)flags_length, flags,
+                        (int)type_length, type);
+    codegen_symbol_name_append(c, b, s);
+    vtext_string_append(b, ",comdat\n");
+}
+
 VPRIV void codegen_symbol_header_append(codegen_context *e, tbuf *b, uint32_t s,
                                         bool fn, const char *defsec,
                                         uint32_t align)
@@ -94,6 +127,9 @@ VPRIV void codegen_symbol_header_append(codegen_context *e, tbuf *b, uint32_t s,
 
     if (CODEGEN_IS_WIN64(c)) {
         sym_header_coff(e, b, s, fn, defsec);
+    } else if (global && (y->flags & AST_SYMBOL_FLAG_COMDAT) && !a->section &&
+               !CODEGEN_IS_DARWIN(c) && !WASM(c)) {
+        sym_section_comdat(c, b, s, defsec);
     } else if (a->section) {
         const char *sn = c->strs[a->section - 1].s;
         bool bss = !strncmp(sn, ".bss", 4) || !strncmp(sn, ".tbss", 5);

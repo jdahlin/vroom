@@ -796,7 +796,7 @@ analysis_result semantic_analysis::musttail_return(Statement n, uint32_t built)
     while (semantics[named].kind == semantic_kind::conversion)
         named = semantics[named].a;
     if (member && semantics[named].kind == semantic_kind::entity &&
-        entity_table[semantics[named].a].enclosing !=
+        entity_table[semantics[named].entity_a()].enclosing !=
             entity_table[function_state.function].enclosing)
         return ill_formed(n,
                           "member function cannot perform a tail call to a "
@@ -805,7 +805,7 @@ analysis_result semantic_analysis::musttail_return(Statement n, uint32_t built)
     /* clang refuses a [[noreturn]] callee, not a GNU noreturn one; the
        entity keeps one flag for both */
     if (semantics[named].kind == semantic_kind::entity &&
-        (entity_table[semantics[named].a].gnu_flags & gnu_noreturn))
+        (entity_table[semantics[named].entity_a()].gnu_flags & gnu_noreturn))
         return not_supported_because(n, "dcl.attr",
                                      "a musttail call of a noreturn function");
     if (!musttail_similar(x.operand, y.operand))
@@ -909,9 +909,10 @@ uint32_t semantic_analysis::declaration_statements(size_t first, token_index at)
 {
     owned_array<uint32_t> each;
     for (size_t i = first; i < block_variables.size(); i++)
-        each.append(statement_node(
-            semantic_kind::declaration_statement, at, block_variables[i],
-            entity_table[block_variables[i]].definition));
+        each.append(
+            statement_node(semantic_kind::declaration_statement, at,
+                           block_variables[i].index(),
+                           entity_table[block_variables[i]].definition));
     block_variables.resize(first);
     if (each.empty())
         return statement_node(semantic_kind::null_statement, at);
@@ -1002,7 +1003,7 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
             m.entity = 0;
         }
         m.node = expression_node(semantic_kind::entity, m, first_token(at[1]),
-                                 last_declared);
+                                 last_declared.index());
     } else {
         VTRY_SET(r, expression(c, m));
     }
@@ -1016,10 +1017,66 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
     return r;
 }
 
+/*
+ * [stmt.switch]/2, [conv]/5: a condition of class type is
+ * contextually implicitly converted: its non-explicit conversion functions
+ * to integral or enumeration types (or references to them) shall all yield
+ * one type, and the conversion function overload resolution chooses for it
+ * is called
+ */
+analysis_result semantic_analysis::switch_class_condition(SyntaxRef at,
+                                                          expression_meaning &m)
+{
+    entity_index cls = type_table[m.type.unqualified()].entity;
+    require_complete(cls);
+    owned_array<entity_index> functions, templates;
+    bool followed = visible_conversion_functions(cls, functions, &templates);
+    type_index to = 0;
+    unsigned types = 0;
+    for (entity_index f : functions) {
+        if (entity_table[f].explicit_)
+            continue;
+        qualified_type result = conversion_function_result(f).type;
+        const struct type &r = type_table[result.unqualified()];
+        if (r.kind == type_kind::lvalue_reference ||
+            r.kind == type_kind::rvalue_reference)
+            result = r.operand;
+        if (!is_integral(result) &&
+            type_table[result.unqualified()].kind != type_kind::enumeration)
+            continue;
+        if (!types || result.unqualified() != to)
+            types++;
+        to = result.unqualified();
+        /* [ext:gnu_attributes] diagnose_if on a conversion function: its
+           condition (on the object converted) is not checked here */
+        if (entity_table[f].gnu_flags & gnu_diagnose_if)
+            followed = false;
+    }
+    /* before C++14 a single such function (N3323) */
+    if (tokens.files.behavior.edition < standard_edition::cplusplus_14 &&
+        functions.size() != 1)
+        followed = false;
+    bool converted = false;
+    if (followed && types == 1) {
+        VTRY(r,
+             conversion_function_call(at, m, qualified_type::make(to, cv_none),
+                                      false, converted));
+    }
+    if (!converted)
+        return not_supported_because(
+            at, "stmt.switch",
+            "a switch condition of class type without one integral or "
+            "enumeration conversion function that analysis follows");
+    return analysis_result::well_formed;
+}
+
 /* [stmt.switch]/2: the value of a switch's condition, m */
 analysis_result semantic_analysis::switch_condition(SyntaxRef at,
                                                     expression_meaning &m)
 {
+    if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
+        VTRY(c, switch_class_condition(at, m));
+    }
     VTRY(r, operand_value(at, m));
     /* [stmt.switch]/2: "The condition shall be of integral type,
        enumeration type, or class type. ... If the (possibly converted) type

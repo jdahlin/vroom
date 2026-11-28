@@ -508,7 +508,7 @@ bool semantic_analysis::same_tokens(SyntaxRef a, SyntaxRef b)
 {
     if (a.end_token() - a.first_token() != b.end_token() - b.first_token())
         return false;
-    for (token_index i = 0; i < a.end_token() - a.first_token(); i++)
+    for (uint32_t i = 0; i < a.end_token() - a.first_token(); i++)
         if (!same_token_spelling(a.first_token() + i, b.first_token() + i))
             return false;
     return true;
@@ -527,10 +527,9 @@ uint32_t semantic_analysis::template_record(entity_index t) const
 {
     if (!t)
         return 0;
-    templates_by_entity.update(function_templates,
-                               [](const function_template &f) {
-                                   return static_cast<size_t>(f.entity);
-                               });
+    templates_by_entity.update(
+        function_templates,
+        [](const function_template &f) { return f.entity; });
     return templates_by_entity.first(t);
 }
 
@@ -634,6 +633,26 @@ semantic_analysis::constraint_own_type_parameter(entity_index t,
     return 0;
 }
 
+/* whether an enclosing template's type parameter and t's own of the same
+   position differ in being packs: then two types, each T_ */
+bool semantic_analysis::outer_parameter_clashes(entity_index t,
+                                                entity_index outer) const
+{
+    entity_index own =
+        constraint_own_type_parameter(t, entity_table[outer].value);
+    if (!own)
+        return false;
+    bool own_pack = false;
+    bool outer_pack = false;
+    for (uint32_t i = 0; i < template_parameter_entities.size(); i++) {
+        if (template_parameter_entities[i] == own)
+            own_pack = template_parameter_is_pack(i);
+        if (template_parameter_entities[i] == outer)
+            outer_pack = template_parameter_is_pack(i);
+    }
+    return own_pack != outer_pack;
+}
+
 /* (the mangler holds the analysis const; this analysis leaves nothing
    behind: the records it adds are dropped) */
 bool semantic_analysis::constraint_type(entity_index t, SyntaxElement written,
@@ -658,7 +677,92 @@ bool semantic_analysis::constraint_type_in(entity_index t,
     size_t unsupported_before = unsupported.size();
     entity_index saved_scope = current_scope;
     current_scope = scope;
-    analysis_result r = type_id(written, type);
+    /* an enclosing template's parameter, bound in the specialization to
+       its argument: back to a parameter, which is what is mangled */
+    owned_array<entity_index> rebound;
+    owned_array<entity> saved;
+    for (token_index k = written.first_token(); k < written.end_token(); k++) {
+        entity_index pe = constraint_parameter(t, k);
+        if (!pe || constraint_parameter_is_own(t, pe) ||
+            type_table[entity_table[pe].type.unqualified()].kind !=
+                type_kind::template_parameter)
+            continue;
+        entity_index bound =
+            lookup_unqualified(tokens.identifier(k), lookup_filter::any).entity;
+        if (!bound || entity_table[bound].kind != entity_kind::typedef_name)
+            continue;
+        outer_parameter stand;
+        for (const outer_parameter &o : outer_parameters)
+            if (o.parameter == pe)
+                stand = o;
+        if (!stand.parameter) {
+            stand.parameter = pe;
+            stand.stand_in = entity_table.make(entity_kind::typedef_name, 0, 0);
+            entity_table[stand.stand_in].value = entity_table[pe].value;
+            stand.type = type_table.of_entity(type_kind::template_parameter,
+                                              stand.stand_in);
+            outer_parameters.append(stand);
+        }
+        rebound.append(bound);
+        saved.append(entity_table[bound]);
+        entity_table[bound].type = qualified_type::make(stand.type, cv_none);
+    }
+    analysis_result r = analysis_result::well_formed;
+    {
+        /* (A...: the expansion of the pattern's type) */
+        bool expansion = ends_in_ellipsis(written);
+        expansion_scope expanding_pattern(*this, expansion, 0, true);
+        r = type_id(written, type);
+        if (expansion && r == analysis_result::well_formed)
+            type = qualified_type::make(type_table.pack_expansion_of(type),
+                                        cv_none);
+    }
+    for (size_t k = rebound.size(); k-- > 0;)
+        entity_table[rebound[k]] = saved[k];
+    current_scope = saved_scope;
+    expressions.resize(expressions_before);
+    name_uses.resize(uses_before);
+    unsupported.resize(unsupported_before);
+    return r == analysis_result::well_formed;
+}
+
+bool semantic_analysis::constraint_requirement_parameters(
+    entity_index t, SyntaxElement list, qualified_type &function_type,
+    owned_array<requirement_parameter> &names) const
+{
+    return const_cast<semantic_analysis *>(this)
+        ->constraint_requirement_parameters_in(t, list, function_type, names);
+}
+
+bool semantic_analysis::constraint_requirement_parameters_in(
+    entity_index t, SyntaxElement list, qualified_type &function_type,
+    owned_array<requirement_parameter> &names)
+{
+    uint32_t ft = template_record(t);
+    if (!ft || !function_templates[ft - 1].parameter_count)
+        return false;
+    const struct function_template &f = function_templates[ft - 1];
+    entity_index scope =
+        entity_table[template_parameter_entities[f.first_parameter]].enclosing;
+    size_t expressions_before = expressions.size();
+    size_t uses_before = name_uses.size();
+    size_t unsupported_before = unsupported.size();
+    entity_index saved_scope = current_scope;
+    current_scope = scope;
+    analysis_result r = analysis_result::well_formed;
+    {
+        function_parameter_guard saved(*this);
+        function_type = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
+        r = function(list, function_type);
+        for (const parameter_meaning &p : function_parameters) {
+            requirement_parameter q;
+            if (p.id)
+                q.name = tokens.identifier(p.id);
+            q.cv = p.type.cv();
+            names.append(q);
+        }
+    }
     current_scope = saved_scope;
     expressions.resize(expressions_before);
     name_uses.resize(uses_before);
@@ -779,24 +883,31 @@ entity_index semantic_analysis::constraint_template(entity_index scope,
     return 0;
 }
 
-entity_index
-semantic_analysis::constraint_namespace_template(entity_index ns,
-                                                 token_index i) const
+/* what token i names as a member of namespace ns, held there by the
+   namespace that declares it: ns or one of its inline namespaces */
+entity_index semantic_analysis::constraint_member(entity_index ns,
+                                                  token_index i) const
 {
     uint32_t name = tokens.identifier(i);
     if (!name)
         return 0;
-    /* (the namespace that declares it, ns or one of its inline
-       namespaces, then the name held there) */
     entity_index e = entity_table.find(ns, name);
-    if (!e) {
-        lookup_result x = lookup_qualified(ns, name, lookup_filter::any);
-        entity_index found = x.entity;
-        if (!found)
-            found = x.unknown_entity;
-        if (found)
-            e = entity_table.find(entity_table[found].enclosing, name);
-    }
+    if (e)
+        return e;
+    lookup_result x = lookup_qualified(ns, name, lookup_filter::any);
+    entity_index found = x.entity;
+    if (!found)
+        found = x.unknown_entity;
+    if (found)
+        e = entity_table.find(entity_table[found].enclosing, name);
+    return e;
+}
+
+entity_index
+semantic_analysis::constraint_namespace_template(entity_index ns,
+                                                 token_index i) const
+{
+    entity_index e = constraint_member(ns, i);
     if (e && (concept_of(e) || variable_template_of(e)))
         return e;
     return 0;
@@ -935,7 +1046,7 @@ analysis_result semantic_analysis::template_constraints_satisfied(
                      static_cast<uint64_t>(a.type.cv()) << 8);
         words.append(a.type.unqualified().index());
         words.append(a.value);
-        words.append(a.template_entity);
+        words.append(a.template_entity.index());
         words.append(a.count);
     }
     uint32_t key = vhash_bytes(reinterpret_cast<const char *>(words.data()),

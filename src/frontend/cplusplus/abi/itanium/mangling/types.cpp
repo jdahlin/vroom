@@ -309,6 +309,24 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
         return builtin_type(r.fundamental);
     if (r.kind == type_kind::placeholder && !t.cv())
         return placeholder_type(r);
+    /* (a leveled parameter is a candidate of its own, not the type the
+       specialization's T_ names) */
+    /* (an enclosing template's parameter in a constraint's type: T_ as
+       the specialization names it) */
+    if (!t.cv() && r.kind == type_kind::template_parameter)
+        for (const auto &o : analysis.outer_parameters)
+            if (o.stand_in == r.entity) {
+                scoped_value<entity_index> unleveled(leveled_template, 0);
+                return type(analysis.entity_table[o.parameter].type);
+            }
+    if (!t.cv() && r.kind == type_kind::template_parameter &&
+        leveled_template) {
+        entity_index own = analysis.constraint_own_type_parameter(
+            leveled_template, analysis.entity_table[r.entity].value);
+        if (!own)
+            return refuse("a template parameter in a constraint's type");
+        return template_param_of_constraint(leveled_template, own);
+    }
     /* [abi:mangling-type] <type> ::= <substitution> */
     if (substitution(t, member_class))
         return true;
@@ -316,14 +334,6 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
     if (!qualified && r.kind == type_kind::dependent &&
         analysis.entity_table[r.entity].kind == entity_kind::dependent_written)
         return type_of_written(t, member_class);
-    if (!qualified && r.kind == type_kind::template_parameter &&
-        leveled_template) {
-        entity_index own = analysis.constraint_own_type_parameter(
-            leveled_template, analysis.entity_table[r.entity].value);
-        if (!own || t.cv())
-            return refuse("a template parameter in a constraint's type");
-        return template_param_of_constraint(leveled_template, own);
-    }
     if (!type_alternative(t, member_class))
         return refuse(type_kind_description(r.kind));
     add_candidate(t, member_class);
@@ -463,8 +473,8 @@ bool itanium_mangler::placeholder_type(const struct type &r)
         {terminal::Da_auto_type, terminal::Dc_decltype_auto_type},
         {terminal::Dk_constrained_auto_type,
          terminal::DK_constrained_decltype_auto_type}};
-    entity_index constraint = r.entity >> 2;
-    enc.write(codes[constraint != 0][(r.entity & 3) == 2]);
+    entity_index constraint{r.entity.index() >> 2};
+    enc.write(codes[constraint != 0][(r.entity.index() & 3) == 2]);
     return !constraint || name(constraint);
 }
 
@@ -663,10 +673,10 @@ bool itanium_mangler::make_integer_seq_of_written(qualified_type t)
         return false;
     /* (the builtin template's name a candidate as a template prefix is; no
        entity: a scope of its own) */
-    if (!substitution(UINT32_MAX)) {
+    if (!substitution(entity_index{UINT32_MAX})) {
         enc.source_name("__make_integer_seq");
         candidate builtin;
-        builtin.scope = UINT32_MAX;
+        builtin.scope = entity_index{UINT32_MAX};
         enc.add_candidate(builtin);
     }
     enc.write(terminal::I_template_args);

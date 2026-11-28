@@ -219,20 +219,20 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
         entity_index function = 0;
         if ((kind == semantic_kind::entity ||
              kind == semantic_kind::member_pointer) &&
-            a && entity_table[a].kind == entity_kind::function)
-            function = a;
+            a && entity_table[entity_index_in(a)].kind == entity_kind::function)
+            function = entity_index_in(a);
         else if (kind == semantic_kind::construct ||
                  kind == semantic_kind::destroy)
-            function = b;
+            function = entity_index_in(b);
         /* ([basic.def.odr]/4: an overload set named before overload
            resolution is no use of its first function; the call's node
            of the one chosen is) */
         else if (kind == semantic_kind::bound_member_function && b &&
-                 !entity_table[b].next_overload)
-            function = b;
+                 !entity_table[entity_index_in(b)].next_overload)
+            function = entity_index_in(b);
         else if ((kind == semantic_kind::entity) && a &&
-                 entity_table[a].kind == entity_kind::variable)
-            function = a;
+                 entity_table[entity_index_in(a)].kind == entity_kind::variable)
+            function = entity_index_in(a);
         if (function) {
             if (!instantiation_depth &&
                 !entity_table[function].member_needed_by)
@@ -252,12 +252,12 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
         entity_index function = 0;
         if ((kind == semantic_kind::entity ||
              kind == semantic_kind::member_pointer) &&
-            a && entity_table[a].kind == entity_kind::function)
-            function = a;
+            a && entity_table[entity_index_in(a)].kind == entity_kind::function)
+            function = entity_index_in(a);
         else if (kind == semantic_kind::construct ||
                  kind == semantic_kind::destroy ||
                  kind == semantic_kind::bound_member_function)
-            function = b;
+            function = entity_index_in(b);
         if (function)
             default_argument_needed.append(function);
         if (m.category == value_category::prvalue) {
@@ -300,7 +300,7 @@ uint32_t semantic_analysis::statement_node(semantic_kind kind, token_index at,
                                            uint32_t d)
 {
     if (kind == semantic_kind::declaration_statement)
-        require_destructor_definition(entity_table[a].type);
+        require_destructor_definition(entity_table[entity_index_in(a)].type);
     semantic_node n;
     n.kind = kind;
     n.at = at;

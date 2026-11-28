@@ -107,7 +107,7 @@ void c_lowering::psabi_definition(entity_index e, uint32_t s,
                            tokens.location(result_at));
     const uint32_t *items = analysis.semantics.items(body.first);
     for (uint32_t i = 0; i < body.count && i < parameters.size(); i++) {
-        token_index at = parameter_token(items[i], first, end);
+        token_index at = parameter_token(entity_index_in(items[i]), first, end);
         ast_builder_psabi_site(c, AST_BUILDER_PSABI_PARAMETER, parameters[i],
                                tokens.location(at));
     }
@@ -172,7 +172,7 @@ void c_lowering::psabi_call(const semantic_node &n, uint32_t call)
     } else {
         while (spelled(at + 1, ".") || spelled(at + 1, "->"))
             at += 2;
-        while (at > 2 && spelled(at - 1, "::"))
+        while (at.index() > 2 && spelled(at - 1, "::"))
             at -= 2;
     }
     ast_builder_psabi_site(c, AST_BUILDER_PSABI_CALL, call,

@@ -8,11 +8,13 @@ C's AST, C's code generator and object writer; S1e) at each -O level asked
 for, with the same flags.  Both are linked with the C suites' run time (src/test/rt) and run
 under qemu-system-aarch64 with semihosting, as bench/vcc-ctests.py does;
 the exit status and output must be clang's.  The functions and variables
-the -O0 object defines are also clang -O0's, by name and binding (global,
-local, weak).  A program of several translation units names the others in
+the -O0 object defines are also clang -O0's, by name, binding (global,
+local, weak) and COMDAT group.  A program of several translation units names the others in
 /* cxx-run-units: FILE... */ (files of src/test/cxx/run/units, which hold
 their headers too); each compiler compiles them as the program and links
-them with it.
+them with it.  /* cxx-run-local-names-differ: why */ compares only the
+symbols that are not local; /* cxx-run-symbols-differ: why */ none at all
+(vcc runs code where clang has constant data).
 
     bench/cxx-run.py [-j N] [-O LEVELS] [--no-cache] [-v] [PATTERN]
 
@@ -41,6 +43,7 @@ TESTS = f'{R}/src/test/cxx/run'
 VPP = ct.VPP
 OUT = f'{ct.BUILD}/cxx-run'
 NM = ct.llvm('llvm-nm')
+READELF = ct.llvm('llvm-readelf')
 TARGET = ['--target=aarch64-linux-gnu', '-nostdinc', '-fno-PIE',
           '-fno-asynchronous-unwind-tables', '-fno-stack-protector',
           '-mno-outline-atomics']
@@ -50,7 +53,9 @@ CXX = TARGET + ['-I', f'{ct.RT}/include', '-isystem', ct.RES,
 
 
 def defined(obj):
-    """name -> 'global' or 'local' for each function and object defined"""
+    """name -> 'global', 'local' or 'weak' for each function and object
+    defined, ' comdat' added when its section is in a COMDAT group (whatever
+    its signature: clang's constructors share the C5 group)"""
     rc, out, err = ct.sh([NM, '--defined-only', obj])
     symbols = {}
     for line in out.decode().splitlines():
@@ -63,6 +68,16 @@ def defined(obj):
         if parts[1] in 'WV':
             binding = 'weak'
         symbols[parts[2]] = binding
+    rc, out, err = ct.sh([READELF, '--section-groups', '--symbols', '--wide', obj])
+    text = out.decode()
+    grouped = set(re.findall(r'^\s*\[\s*(\d+)\]\s+\S', text.split('Symbol table')[0], re.M))
+    for line in text.splitlines():
+        parts = line.split()
+        # (Num: Value Size Type Bind Vis Ndx Name; clang puts an inline
+        # variable's guard in the variable's group, vcc in one of its own)
+        if (len(parts) == 8 and parts[6] in grouped and parts[7] in symbols
+                and not (parts[7].startswith('_ZGV') and not parts[7].startswith('_ZGVZ'))):
+            symbols[parts[7]] += ' comdat'
     return symbols
 
 
@@ -104,7 +119,7 @@ def passed_key(objs, key):
 def oracle_key(src, units, cxx):
     """clang's answers (output, exit status, -O0 symbols) are a function of
     the sources, the flags, the C run time and clang itself"""
-    h = hashlib.sha1(('cxx-run-oracle-v1 ' + ' '.join(cxx) + ORACLE).encode())
+    h = hashlib.sha1(('cxx-run-oracle-v3 ' + ' '.join(cxx) + ORACLE).encode())
     for path in [src] + units:
         h.update(path.encode() + b'\0')
         with open(path, 'rb') as f:
@@ -179,11 +194,17 @@ def one(job):
             results.append((level, 'vcc: ' + why))
             continue
         ours = defined(o)
+        wanted = symbols
+        if 'cxx-run-symbols-differ' in head:
+            wanted = None
+        if wanted is not None and 'cxx-run-local-names-differ' in head:
+            ours = {k: v for k, v in ours.items() if v != 'local'}
+            wanted = {k: v for k, v in wanted.items() if v != 'local'}
         # (above -O0 an inlined static function may be gone)
-        if level == '0' and symbols is not None and ours != symbols:
-            missing = sorted(set(symbols) - set(ours))
-            extra = sorted(set(ours) - set(symbols))
-            bound = sorted(k for k in ours if k in symbols and ours[k] != symbols[k])
+        if level == '0' and wanted is not None and ours != wanted:
+            missing = sorted(set(wanted) - set(ours))
+            extra = sorted(set(ours) - set(wanted))
+            bound = sorted(k for k in ours if k in wanted and ours[k] != wanted[k])
             results.append((level, f'symbols: missing {missing} extra {extra} binding {bound}'))
             continue
         pk = passed_key([o] + objs, key)

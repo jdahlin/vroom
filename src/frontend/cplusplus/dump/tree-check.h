@@ -197,7 +197,8 @@ struct tree_checker {
                      static_cast<uint8_t>(conversion_kind::derived_to_base) ||
                  node.op ==
                      static_cast<uint8_t>(conversion_kind::base_to_derived)) &&
-                (!node.b || !analysis.entity_table[node.b].base_subobject))
+                (!node.b ||
+                 !analysis.entity_table[node.entity_b()].base_subobject))
                 problem(n, "no base subobject");
             /* the conversions of a glvalue, and the discarding of any
                value ([expr.static.cast]/6) */
@@ -288,7 +289,8 @@ struct tree_checker {
                 problem(n, "no member");
             break;
         case semantic_kind::member_pointer:
-            if (!node.a || !analysis.entity_table[node.a].nonstatic_member)
+            if (!node.a ||
+                !analysis.entity_table[node.entity_a()].nonstatic_member)
                 problem(n, "no non-static member");
             break;
         case semantic_kind::member_pointer_access:
@@ -320,7 +322,7 @@ struct tree_checker {
             break;
         case semantic_kind::construct:
             child(n, node.a, tree_sort::expression, true, "object");
-            if (!node.b || analysis.entity_table[node.b].special !=
+            if (!node.b || analysis.entity_table[node.entity_b()].special !=
                                special_member::constructor)
                 problem(n, "no constructor");
             list(n, tree_sort::initializer, "argument");
@@ -345,12 +347,12 @@ struct tree_checker {
         case semantic_kind::vtable_pointer_store:
             child(n, node.a, tree_sort::expression, false, "object address");
             prvalue(n, node.a, "object address");
-            if (!node.b || !analysis.entity_table[node.b].dynamic)
+            if (!node.b || !analysis.entity_table[node.entity_b()].dynamic)
                 problem(n, "no dynamic class");
             break;
         case semantic_kind::destroy:
             child(n, node.a, tree_sort::expression, false, "object");
-            if (!node.b || analysis.entity_table[node.b].special !=
+            if (!node.b || analysis.entity_table[node.entity_b()].special !=
                                special_member::destructor)
                 problem(n, "no destructor");
             break;
@@ -612,7 +614,8 @@ void dump_tree(const semantic_analysis &analysis, token_stream &tokens,
 {
     for (const semantic_analysis::definition_record &d : analysis.definitions) {
         uint32_t root = analysis.entity_table[d.entity].definition;
-        vbuffer_format_append(out, "definition of entity #%u\n", d.entity);
+        vbuffer_format_append(out, "definition of entity #%u\n",
+                              d.entity.index());
         if (root)
             dump_node(analysis, tokens, root, 1, out);
     }

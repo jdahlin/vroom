@@ -32,7 +32,7 @@ uint32_t types::hash(const type &t, const qualified_type *parameters) const
                             static_cast<uint32_t>(t.variadic) << 1 |
                             static_cast<uint32_t>(t.bound_known),
                         t.operand.bits,
-                        t.entity,
+                        t.entity.index(),
                         static_cast<uint32_t>(t.bound),
                         static_cast<uint32_t>(t.bound >> 32),
                         t.parameter_count,
@@ -159,7 +159,7 @@ type_index types::array_of_parameter_bound(qualified_type element,
     t.kind = type_kind::array;
     t.operand = element;
     t.bound_known = true;
-    t.entity = parameter;
+    t.entity = entity_index{parameter};
     t.bound = expression;
     return intern(t, nullptr);
 }
@@ -215,7 +215,7 @@ type_index types::function_qualified(type_index f, uint32_t function_cv,
 
 /* a class ([class.name]/1: "A class definition introduces a new type") or
    an enumeration ([dcl.enum]/1: "a distinct type"): one type per entity */
-type_index types::of_entity(type_kind kind, uint32_t entity)
+type_index types::of_entity(type_kind kind, entity_index entity)
 {
     type t;
     t.kind = kind;
@@ -224,7 +224,7 @@ type_index types::of_entity(type_kind kind, uint32_t entity)
 }
 
 /* [dcl.mptr]/1: "pointer to member of class nested-name-specifier of type T" */
-type_index types::pointer_to_member(uint32_t class_entity,
+type_index types::pointer_to_member(entity_index class_entity,
                                     qualified_type member)
 {
     type t;
@@ -266,7 +266,7 @@ type_index types::bit_int(uint64_t width, uint32_t parameter, bool is_unsigned)
     if (is_unsigned)
         t.fundamental = fundamental_type::unsigned_int;
     t.bound = width;
-    t.entity = parameter;
+    t.entity = entity_index{parameter};
     return intern(t, nullptr);
 }
 
@@ -279,7 +279,7 @@ type_index types::ext_vector_of(qualified_type element, uint64_t count,
     t.kind = type_kind::ext_vector;
     t.operand = element;
     t.bound = count;
-    t.entity = parameter;
+    t.entity = entity_index{parameter};
     return intern(t, nullptr);
 }
 

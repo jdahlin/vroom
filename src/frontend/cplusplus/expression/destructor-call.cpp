@@ -375,7 +375,7 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
         named_function.evaluation = constness::constant;
         named_function.entity = destructor;
         uint32_t callee = expression_node(semantic_kind::entity, named_function,
-                                          at, destructor);
+                                          at, destructor.index());
         result.node = expression_node(semantic_kind::call, result, at, callee,
                                       address.node);
         semantics[result.node].c = 1;
@@ -383,8 +383,8 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
         m = result;
         return analysis_result::well_formed;
     }
-    result.node =
-        expression_node(semantic_kind::destroy, result, at, m.node, destructor);
+    result.node = expression_node(semantic_kind::destroy, result, at, m.node,
+                                  destructor.index());
     m = result;
     return analysis_result::well_formed;
 }

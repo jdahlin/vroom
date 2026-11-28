@@ -208,11 +208,11 @@ uint32_t semantic_analysis::allocation_names_spelled()
     uint32_t count = 0;
     size_t end = tokens.made();
     for (size_t i = 0; i + 1 < end; i++) {
-        const token &t = tokens[static_cast<token_index>(i)];
+        const token &t = tokens[token_index{static_cast<uint32_t>(i)}];
         if (t.kind != token_kind::keyword ||
             syntax_parser.keyword_of(t) != standard_keyword::operator_)
             continue;
-        const token &next = tokens[static_cast<token_index>(i + 1)];
+        const token &next = tokens[token_index{static_cast<uint32_t>(i + 1)}];
         if (next.kind == token_kind::keyword &&
             (syntax_parser.keyword_of(next) == standard_keyword::new_ ||
              syntax_parser.keyword_of(next) == standard_keyword::delete_))

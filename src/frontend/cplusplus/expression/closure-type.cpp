@@ -131,8 +131,8 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
         entity_index inv_tmpl =
             entity_table.make(entity_kind::template_entity, invoke_name, c);
         entity_table[inv_tmpl].type = pat_type;
-        entity_table[inv_tmpl].instantiation =
-            entity_table[call_tmpl].instantiation;
+        entity_table[inv_tmpl].template_record =
+            entity_table[call_tmpl].template_record;
         instantiation_record inv_rec = orig;
         inv_rec.template_entity = inv_tmpl;
         inv_rec.specialization = invoke;
@@ -150,8 +150,8 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
         entity_table[conv_tmpl].nonstatic_member = true;
         entity_table[conv_tmpl].member_cv = cv_const;
         entity_table[conv_tmpl].conversion_function = true;
-        entity_table[conv_tmpl].instantiation =
-            entity_table[call_tmpl].instantiation;
+        entity_table[conv_tmpl].template_record =
+            entity_table[call_tmpl].template_record;
         instantiation_record conv_rec = orig;
         conv_rec.template_entity = conv_tmpl;
         conv_rec.specialization = conversion;
@@ -196,20 +196,20 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
             record.kind == type_kind::class_type)
             a.category = value_category::xvalue;
         a.evaluation = constness::not_constant;
-        a.node = expression_node(semantic_kind::entity, a, at, p);
+        a.node = expression_node(semantic_kind::entity, a, at, p.index());
         initialized_value value;
         VTRY(r, initialize_with(n, a, t, false, false, value));
         arguments.append(value.node);
     }
     entity_index object = synthesized_variable(sf, entity_table[c].type, false);
-    uint32_t declared =
-        statement_node(semantic_kind::declaration_statement, at, object);
+    uint32_t declared = statement_node(semantic_kind::declaration_statement, at,
+                                       object.index());
     expression_meaning o;
     o.type = entity_table[c].type;
     o.category = value_category::lvalue;
     o.entity = object;
     o.evaluation = constness::not_constant;
-    o.node = expression_node(semantic_kind::entity, o, at, object);
+    o.node = expression_node(semantic_kind::entity, o, at, object.index());
     o.type = qualified_type::make(
         type_table.pointer_to(qualified_type::make(
             entity_table[c].type.unqualified(), entity_table[call].member_cv)),
@@ -223,7 +223,7 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
     callee.evaluation = constness::constant;
     callee.entity = call;
     uint32_t callee_node =
-        expression_node(semantic_kind::entity, callee, at, call);
+        expression_node(semantic_kind::entity, callee, at, call.index());
     expression_meaning result;
     call_result(f.operand, result);
     result.evaluation = constness::not_constant;
@@ -256,7 +256,8 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
     named.category = value_category::lvalue;
     named.evaluation = constness::constant;
     named.entity = invoke;
-    named.node = expression_node(semantic_kind::entity, named, at, invoke);
+    named.node =
+        expression_node(semantic_kind::entity, named, at, invoke.index());
     initialized_value value;
     VTRY(r, initialize_with(n, named, pointer, false, false, value));
     statement = statement_node(semantic_kind::return_statement, at, value.node);
@@ -291,7 +292,7 @@ analysis_result semantic_analysis::generic_closure_conversion(
             at, "expr.prim.lambda.closure",
             "a generic lambda converted to no non-variadic function pointer");
     entity_index call_tpl = entity_table[c].call_operator;
-    uint32_t ft = entity_table[call_tpl].instantiation;
+    uint32_t ft = entity_table[call_tpl].template_record;
     if (!ft)
         return not_supported_because(
             at, "expr.prim.lambda.closure",
@@ -380,7 +381,7 @@ analysis_result semantic_analysis::generic_closure_conversion(
     callee.evaluation = constness::constant;
     callee.entity = conversion;
     uint32_t callee_node =
-        expression_node(semantic_kind::entity, callee, tok, conversion);
+        expression_node(semantic_kind::entity, callee, tok, conversion.index());
     m = expression_meaning();
     m.type = qualified_type::make(to.unqualified(), cv_none);
     m.category = value_category::prvalue;

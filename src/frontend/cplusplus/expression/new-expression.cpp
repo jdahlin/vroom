@@ -763,7 +763,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                 /* [dcl.init]/8.2: value-initialization zeroes the object
                    before calling a non-user-provided default constructor. */
                 if (initialization.kind == semantic_kind::construct &&
-                    (entity_table[initialization.b].implicit ||
+                    (entity_table[initialization.entity_b()].implicit ||
                      entity_table[c].defaulted_default_constructor))
                     initialization.op = 1;
             } else if (c && (entity_table[c].constructor_templates ||

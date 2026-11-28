@@ -176,8 +176,11 @@ bool semantic_analysis::orderable(qualified_type t, bool packs,
         if (!orderable(r.operand, packs, pack_argument, value_kinds))
             return false;
         const qualified_type *list = type_table.parameters(t.unqualified());
+        /* [temp.deduct.type]/10: a trailing function parameter pack is
+           deduced element by element */
         for (uint32_t i = 0; i < r.parameter_count; i++)
-            if (!orderable(list[i], packs, pack_argument, value_kinds))
+            if (!orderable(list[i], packs || i + 1 == r.parameter_count,
+                           pack_argument, value_kinds))
                 return false;
         return true;
     }
@@ -389,9 +392,9 @@ int semantic_analysis::conversion_template_order(entity_index t1,
                                                  entity_index t2)
 {
     const function_template ft1 =
-        function_templates[entity_table[t1].instantiation - 1];
+        function_templates[entity_table[t1].template_record - 1];
     const function_template ft2 =
-        function_templates[entity_table[t2].instantiation - 1];
+        function_templates[entity_table[t2].template_record - 1];
     qualified_type o1 = type_table[entity_table[t1].type.unqualified()].operand;
     qualified_type o2 = type_table[entity_table[t2].type.unqualified()].operand;
     unsigned cv1 = 0, cv2 = 0;
@@ -675,6 +678,230 @@ int semantic_analysis::constraint_subsumption_order(uint32_t f,
     if (g_sub_f && !f_sub_g)
         return -1;
     return 0;
+}
+
+/* the scope the nested-name-specifier q nominates, from scope (its names
+   looked up as members, through inline namespaces), scope if unknown */
+entity_index semantic_analysis::constraint_qualifier(entity_index scope,
+                                                     SyntaxElement q)
+{
+    entity_index from = 0;
+    for (SyntaxElement x : q.elements()) {
+        if (!x.is_identifier())
+            continue;
+        entity_index named = 0;
+        if (from)
+            named = lookup_qualified(from, tokens.identifier(x.token()),
+                                     lookup_filter::any)
+                        .entity;
+        else
+            named = constraint_name(scope, x.token());
+        if (!named)
+            return scope;
+        from = named;
+    }
+    if (!from)
+        return scope;
+    return from;
+}
+
+entity_index semantic_analysis::constraint_member_concept(entity_index scope,
+                                                          token_index i)
+{
+    entity_index e = constraint_concept(scope, i);
+    if (!e)
+        e = lookup_qualified(scope, tokens.identifier(i), lookup_filter::any)
+                .entity;
+    if (e && concept_of(e))
+        return e;
+    return 0;
+}
+
+/*
+ * [temp.constr.normal]: the atomic constraints of the normal form of the
+ * constraint-expression e, added to atoms: conjunctions split, concept-ids
+ * replaced by their definitions, with env the parameter mapping (each name
+ * in scope and what it stands for).  An atomic constraint is its expression
+ * and its mapping ([temp.constr.atomic]/2).  A disjunction is kept as one
+ * atom, which can only miss a subsumption.
+ */
+void semantic_analysis::constraint_atoms(
+    SyntaxElement e, entity_index scope,
+    const owned_array<constraint_binding> &env, owned_array<uint64_t> &atoms,
+    unsigned depth)
+{
+    while (e.is(syntax_kind::primary_expression) && e.size() == 3 &&
+           e[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        e = e[1];
+    if (e.is(syntax_kind::logical_and_expression,
+             syntax_kind::constraint_logical_and_expression) &&
+        e.size() == 3) {
+        constraint_atoms(e[0], scope, env, atoms, depth);
+        constraint_atoms(e[2], scope, env, atoms, depth);
+        return;
+    }
+    SyntaxElement id = e;
+    entity_index from = scope;
+    while (id.is_node() && !id.is(syntax_kind::simple_template_id) &&
+           id.size()) {
+        SyntaxElement last = id[id.size() - 1];
+        if (id.size() == 2 && id[0].is(syntax_kind::nested_name_specifier)) {
+            from = constraint_qualifier(from, id[0]);
+        } else if (id.size() != 1) {
+            break;
+        }
+        id = last;
+    }
+    if (id.is(syntax_kind::simple_template_id) && id.size() >= 4 &&
+        id[0].is_token() && depth < 32) {
+        entity_index named = constraint_member_concept(from, id[0].token());
+        uint32_t ct = 0;
+        if (named)
+            ct = concept_of(named);
+        if (ct) {
+            owned_array<SyntaxElement> written;
+            owned_array<bool> expansion;
+            for (SyntaxElement x : id.elements())
+                if (x.is(syntax_kind::template_argument_list))
+                    expansion_list(x, written, expansion);
+            if (written.empty())
+                for (uint32_t i = 2; i + 1 < id.size(); i++)
+                    written.append(id[i]);
+            owned_array<uint64_t> arguments;
+            for (const SyntaxElement &a : written)
+                arguments.append(constraint_mapping(a, env));
+            concept_atoms(ct, arguments, atoms, depth + 1);
+            return;
+        }
+    }
+    uint64_t key = 0;
+    if (e.is_token())
+        key = constraint_mapping(e, env);
+    else
+        key = (uint64_t(e.first_token().index()) * 0x9e3779b97f4a7c15ull) ^
+              constraint_mapping(e, env);
+    atoms.append(key);
+}
+
+/* the atoms of concept ct's definition with its parameters mapped to
+   arguments ([temp.constr.normal]/1.4) */
+void semantic_analysis::concept_atoms(uint32_t ct,
+                                      const owned_array<uint64_t> &arguments,
+                                      owned_array<uint64_t> &atoms,
+                                      unsigned depth)
+{
+    const function_template c = function_templates[ct - 1];
+    owned_array<constraint_binding> env;
+    for (uint32_t i = 0; i < c.parameter_count && i < arguments.size(); i++) {
+        entity_index p = template_parameter_entities[c.first_parameter + i];
+        env.append(constraint_binding{entity_table[p].name, arguments[i]});
+    }
+    constraint_atoms(c.definition[3], entity_table[c.entity].enclosing, env,
+                     atoms, depth);
+}
+
+/* the tokens of a, each name env binds replaced by what it stands for */
+uint64_t semantic_analysis::constraint_mapping(
+    SyntaxElement a, const owned_array<constraint_binding> &env) const
+{
+    uint64_t h = 0xcbf29ce484222325ull;
+    token_index first = 0, end = 0;
+    if (a.is_token()) {
+        first = a.token();
+        end = first + 1;
+    } else {
+        first = a.first_token();
+        end = tree[a.index()].end_token;
+    }
+    bool alone = end == first + 1;
+    for (token_index t = first; t < end; t++) {
+        uint64_t x = static_cast<uint64_t>(tokens[t].kind);
+        if (tokens[t].kind == token_kind::identifier) {
+            uint32_t name = tokens.identifier(t);
+            x = name;
+            for (const constraint_binding &b : env)
+                if (b.name == name) {
+                    if (alone)
+                        return b.value;
+                    x = b.value;
+                }
+        } else if (tokens[t].kind == token_kind::operator_or_punctuator) {
+            x = static_cast<uint64_t>(tokens[t].op_or_punc) << 8;
+        }
+        h = (h ^ x) * 0x100000001b3ull;
+    }
+    return h;
+}
+
+/* the atoms of partial specialization s's associated constraints
+   ([temp.constr.decl]/3), its parameters mapped by position */
+void semantic_analysis::specialization_atoms(uint32_t s,
+                                             owned_array<uint64_t> &atoms)
+{
+    const function_template ft = function_templates[s - 1];
+    entity_index scope = entity_table[ft.entity].enclosing;
+    owned_array<constraint_binding> env;
+    for (uint32_t i = 0; i < ft.parameter_count; i++) {
+        entity_index p = template_parameter_entities[ft.first_parameter + i];
+        env.append(constraint_binding{entity_table[p].name, i + 1});
+    }
+    for (uint32_t i = 0; i < ft.parameter_count; i++) {
+        template_parameter_parts parts;
+        if (!template_parameter_form(
+                template_parameter_nodes[ft.first_parameter + i], parts) ||
+            !parts.constraint)
+            continue;
+        SyntaxElement q = parts.constraint;
+        uint32_t at = 0;
+        entity_index from = scope;
+        if (!q.is_token() && q.size() >= 2 &&
+            q[0].is(syntax_kind::nested_name_specifier)) {
+            at = 1;
+            from = constraint_qualifier(from, q[0]);
+        }
+        SyntaxElement name = q;
+        if (!q.is_token())
+            name = q[at];
+        uint32_t ct = 0;
+        if (name.is_token()) {
+            entity_index named = constraint_member_concept(from, name.token());
+            if (named)
+                ct = concept_of(named);
+        }
+        if (!ct) {
+            atoms.append(constraint_mapping(q, env) ^ (uint64_t(i + 1) << 32));
+            continue;
+        }
+        owned_array<uint64_t> arguments;
+        arguments.append(i + 1);
+        if (!q.is_token())
+            for (uint32_t k = at + 2; k + 1 < q.size(); k++)
+                arguments.append(constraint_mapping(q[k], env));
+        concept_atoms(ct, arguments, atoms, 0);
+    }
+    if (SyntaxElement head = head_constraint(ft.declaration))
+        constraint_atoms(head, scope, env, atoms, 0);
+}
+
+/* [temp.constr.order]: whether specialization s's constraints subsume t's
+   and are not subsumed by them */
+bool semantic_analysis::more_constrained_specialization(uint32_t s, uint32_t t)
+{
+    owned_array<uint64_t> a, b;
+    specialization_atoms(s, a);
+    specialization_atoms(t, b);
+    auto subsumes = [](const owned_array<uint64_t> &p,
+                       const owned_array<uint64_t> &q) {
+        for (uint64_t x : q) {
+            bool found = false;
+            for (uint64_t y : p)
+                found |= x == y;
+            if (!found)
+                return false;
+        }
+        return true;
+    };
+    return subsumes(a, b) && !subsumes(b, a);
 }
 
 /*

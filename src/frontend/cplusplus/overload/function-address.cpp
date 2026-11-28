@@ -67,7 +67,8 @@ bool semantic_analysis::function_set_at(token_index at, function_set &out) const
 {
     /* (the name of N::f, the one qualified form named_function_set takes:
        an argument's overload set is kept as its name's token) */
-    if (at >= 2 && tokens[at - 1].kind == token_kind::operator_or_punctuator &&
+    if (at.index() >= 2 &&
+        tokens[at - 1].kind == token_kind::operator_or_punctuator &&
         preprocessing_op_or_punc_primary(tokens[at - 1].op_or_punc) ==
             preprocessing_op_or_punc::COLON_COLON &&
         tokens[at - 2].kind == token_kind::identifier)

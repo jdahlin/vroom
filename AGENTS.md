@@ -23,6 +23,8 @@ relative to it); `TODO.md` stays at the top.
   steps WIN0-WIN10): plans
   and per-step status.  Update the
   status section of a step when it changes.
+- `PLAN-debuginfo.md` (steps D1-D5): DWARF beyond line tables.  Update a
+  step's status there.
 - `PLAN-quality.md`: the code quality work before C++ (duplication, one
   scheduler, one pass per file, names): method, stages P0-P4, baseline.
 - `PLAN-tree.md`: reorganising the source tree PostgreSQL-style (`src/`,
@@ -372,6 +374,7 @@ bench/cxx-sema.py selftest          # the type and layout claims' paths through 
 bench/cxx-run.py -j 6 [-O 0123] [PAT]  # src/test/cxx/run: vpp -c (the driver: frontend/cplusplus lowered to C's AST, frontend/c/ast-builder.h) at -O0..3 vs clang++ -O2, run under qemu; -O0 symbols = clang's; /* cxx-run-flags: */ in a test adds flags for both (<10 s)
 bench/cxx-depfile.py                # C++ -MD/-MMD/-MP depfiles byte for byte vs clang++, also run from another directory as vccd does (<2 s)
 bench/cxx-include-guard.py [-v]      # the C++ preprocessor's multiple-include guard skip: src/test/cxx/include-guard, text and diagnostics vs clang -E -P (<1 s)
+bench/cxx-debug-lines.py            # C++ -g line tables: the marked lines of src/test/cxx/debug-lines have rows, as clang++ -g's (<2 s)
 bench/cxx-thread.py [-v] [PAT]     # src/test/cxx/thread: C++ programs that need threads, built by vpp, linked by clang++ -pthread, self-checking (a variable that should be thread-local or a local emitted as a shared static; <5 s)
 bench/cxx-mangle-unit.py [--clang] [-v] [PAT]   # the mangler's unit tests (src/test/cxx/mangle, a file per ABI section): every `// MANGLE: SYMBOL` in vpp -c's object; --clang: and in clang++'s, so the expectations are clang's (<2 s)
 bench/cxx-mangle-same.py -j 6 --save F | --against F   # the mangler's identity gate (doc/PLAN-mangling.md M0): every -fcxx-dump=symbols symbol and refusal and vpp -c's symbols over cxx/run, clang's mangling tests, json, Stockfish, byte for byte against a saved run (~2.5 min at -j 12)
@@ -572,8 +575,9 @@ default there; vcc exits with its arenas mapped) and the default 8 MB stack
 (`ulimit -s unlimited` leaves `vstack_guard_low()` without a stack bottom).  A TSan batch takes
 65-100 s (15-20x the normal build), an ASan suite 12-25 s.  The bump arenas are
 poisoned in ASan builds (`include/common/asan.h`): vregion/varena
-(`region.h`: preprocessor, assembler, object writer), the C front end's heap
-and vlink's regions keep a 1 MB window past the allocation point poisoned and
+(`region.h`: preprocessor, assembler, object writer), the C front end's heap,
+vlink's regions and the C++ front end's type and entity tables
+(`stable-array.h`) keep a 1 MB window past the allocation point poisoned and
 unpoison each allocation as it goes out; a reset or mark goes through
 `vregion_truncate`, and a released job region is unpoisoned.  Not poisoned:
 the text buffers (`text-buffer.h`), VIR's per-thread arrays and the C front

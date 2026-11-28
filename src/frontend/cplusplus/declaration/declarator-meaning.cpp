@@ -309,7 +309,7 @@ entity_index semantic_analysis::value_parameter_named(SyntaxElement e)
     if (!named)
         named = x.unknown_entity;
     if (named && entity_table[named].kind == entity_kind::none &&
-        entity_table[named].instantiation &&
+        entity_table[named].template_record &&
         !entity_table[named].held_by_template)
         return named;
     return 0;
@@ -428,8 +428,9 @@ uint32_t semantic_analysis::expression_structure(SyntaxElement e)
             return expression_node_make(tag_parameter,
                                         entity_table[named].value, 0, 0);
         lookup_result x = lookup_unqualified(identifier, lookup_filter::any);
-        if (x.entity && !entity_table[x.entity].instantiation)
-            return expression_node_make(tag_entity, 0, x.entity, 0);
+        if (x.entity && !entity_table[x.entity].instantiation &&
+            !entity_table[x.entity].template_record)
+            return expression_node_make(tag_entity, 0, x.entity.index(), 0);
         return expression_node_make(tag_identifier, 0, identifier, 0);
     }
     if (k.literal != literal_kind::none) {
@@ -442,7 +443,7 @@ uint32_t semantic_analysis::expression_structure(SyntaxElement e)
                 static_cast<uint32_t>(v.floating_bits_high >> 32));
         else if (k.literal == literal_kind::string_literal ||
                  k.literal == literal_kind::user_defined_literal)
-            floating = expression_node_make(tag_token, t, 0, 0);
+            floating = expression_node_make(tag_token, t.index(), 0, 0);
         return expression_node_make(tag_literal + (uint32_t)k.literal, v.value,
                                     (uint32_t)k.type, floating);
     }
@@ -509,7 +510,7 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
                 at, "temp.dep.constexpr",
                 "an array bound parameter that is not integral");
         type = qualified_type::make(
-            type_table.array_of_parameter_bound(type, named), cv_none);
+            type_table.array_of_parameter_bound(type, named.index()), cv_none);
         return analysis_result::well_formed;
     }
     /* ... and an expression of one (T (&)[N + 1]) is value-dependent too
@@ -518,10 +519,10 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
        [temp.deduct.type]/5.3); each instantiation analyses the declarator
        again */
     if (entity_index named = value_parameter_in(bound)) {
-        type =
-            qualified_type::make(type_table.array_of_parameter_bound(
-                                     type, named, expression_structure(bound)),
-                                 cv_none);
+        type = qualified_type::make(
+            type_table.array_of_parameter_bound(type, named.index(),
+                                                expression_structure(bound)),
+            cv_none);
         return analysis_result::well_formed;
     }
     expression_meaning m;
@@ -1341,10 +1342,6 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             /* [temp.expl.spec]/1: a variable template's specialization
                named by a qualified template-id */
             VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
-            if (!m.qualified_namespace)
-                return not_supported_because(
-                    n, "dcl.meaning",
-                    "a template-id not qualified by a namespace");
             declarator_template_id = false;
             m.template_id = q[1];
             m.has_id = true;

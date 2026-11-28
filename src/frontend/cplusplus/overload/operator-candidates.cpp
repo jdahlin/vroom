@@ -700,8 +700,11 @@ analysis_result semantic_analysis::overloaded_operator(
             overload_set(e, others);
         /* [temp.dep.candidate]/1: of the functions declared after the
            template, only argument-dependent lookup's are candidates, and
-           only for a dependent call: one of an associated namespace that
-           unqualified lookup also searched is not told apart */
+           only for a dependent expression.  Whether this one was is not
+           known here: one of an associated namespace is a candidate marked
+           late, which overload resolution takes only where no other
+           function is viable */
+        owned_array<entity_index> late;
         if (found.past_horizon) {
             owned_array<entity_index> associated_classes, associated_spaces;
             if (!associated_namespaces(types, associated_classes,
@@ -731,12 +734,23 @@ analysis_result semantic_analysis::overloaded_operator(
                     others[kept++] = e;
                     continue;
                 }
-                for (entity_index space : associated_spaces)
-                    if (space == found.found_in)
-                        return not_supported_because(
-                            n, "temp.dep.candidate",
-                            "an operator declared after the template in an "
-                            "associated namespace");
+                for (entity_index space : associated_spaces) {
+                    if (space != found.found_in)
+                        continue;
+                    /* a built-in candidate of an unscoped enumeration
+                       would be the other viable one: not told apart */
+                    for (size_t k = 0; k < count && !any_class; k++) {
+                        const type &t =
+                            type_table[operand(k).type.unqualified()];
+                        if (t.kind == type_kind::enumeration &&
+                            !entity_table[t.entity].scoped)
+                            return not_supported_because(
+                                n, "temp.dep.candidate",
+                                "an operator declared after the template in "
+                                "an associated namespace");
+                    }
+                    late.append(e);
+                }
             }
             others.resize(kept);
         }
@@ -761,6 +775,15 @@ analysis_result semantic_analysis::overloaded_operator(
             c.type = x.type;
             c.rewritten = rewritten;
             c.reversed = reversed;
+            candidates.append(c);
+        }
+        for (entity_index e : late) {
+            overload_candidate c;
+            c.function = e;
+            c.type = entity_table[e].type;
+            c.rewritten = rewritten;
+            c.reversed = reversed;
+            c.late = true;
             candidates.append(c);
         }
         return analysis_result::well_formed;
@@ -930,6 +953,17 @@ analysis_result semantic_analysis::overloaded_operator(
         }
         return analysis_result::ill_formed;
     };
+    if (op == preprocessing_op_or_punc::EQUAL) {
+        /* [over.match.viable]/3: a function whose constraints are not
+           satisfied is none; what is left of the assignment operators
+           decides whether the class's own is one without an entity */
+        size_t kept = 0;
+        for (size_t i = 0; i < candidates.size(); i++)
+            if (!candidates[i].function ||
+                !entity_table[candidates[i].function].constraint_unsatisfied)
+                candidates[kept++] = candidates[i];
+        candidates.resize(kept);
+    }
     if (candidates.empty()) {
         analysis_result br = builtin_via_conversion();
         if (br != analysis_result::ill_formed)
@@ -958,8 +992,18 @@ analysis_result semantic_analysis::overloaded_operator(
                 ft.parameter_count == 1 &&
                 stripped(type_table.parameters(k.type.unqualified())[0]) ==
                     entity_table[c].type.unqualified() &&
-                !copy_assignment_deleted(c))
-                copy = true;
+                !copy_assignment_deleted(c)) {
+                /* a specialization taking X by value or const X& loses to
+                   the implicit non-template ([over.match.best]/2.4) */
+                qualified_type p =
+                    type_table.parameters(k.type.unqualified())[0];
+                const struct type &ref = type_table[p.unqualified()];
+                if (ref.kind == type_kind::rvalue_reference ||
+                    (ref.kind == type_kind::lvalue_reference &&
+                     !(ref.operand.cv() & cv_const)) ||
+                    !assigned_bitwise(c))
+                    copy = true;
+            }
         }
         /* [class.copy.assign]/3, /9: X& operator=(X&&) = default beside a
            user-declared copy assignment operator, of a class assigned
@@ -1043,7 +1087,25 @@ analysis_result semantic_analysis::overloaded_operator(
                    non-reference type is not C requires a derived-to-base or
                    user-defined conversion and is strictly worse */
                 bool same_type_candidate = false;
+                /* (a specialization taking C by value or const C& converts
+                   no better and loses to a non-template,
+                   [over.match.best]/2.4) */
+                owned_array<overload_candidate> others;
                 for (const overload_candidate &k : candidates) {
+                    const struct type &made = type_table[k.type.unqualified()];
+                    if (k.template_index && made.kind == type_kind::function &&
+                        made.parameter_count == 1) {
+                        qualified_type p =
+                            type_table.parameters(k.type.unqualified())[0];
+                        const struct type &ref = type_table[p.unqualified()];
+                        if (p.unqualified() == operands[0].type.unqualified() ||
+                            (ref.kind == type_kind::lvalue_reference &&
+                             ref.operand.unqualified() ==
+                                 operands[0].type.unqualified() &&
+                             ref.operand.cv() == cv_const))
+                            continue;
+                    }
+                    others.append(k);
                     const entity &ke = entity_table[k.function];
                     const struct type &ft = type_table[ke.type.unqualified()];
                     if (ft.kind != type_kind::function ||
@@ -1069,8 +1131,11 @@ analysis_result semantic_analysis::overloaded_operator(
                 analysis_result t = analysis_result::well_formed;
                 {
                     diagnostics_suppressed_if hush(diagnostics, true);
-                    t = best_viable_function(n, candidates, nullptr, trial,
-                                             ignored, &none);
+                    if (others.empty())
+                        none = true;
+                    else
+                        t = best_viable_function(n, others, nullptr, trial,
+                                                 ignored, &none);
                 }
                 unsupported.resize(unsupported_before);
                 if (t == analysis_result::well_formed && none)
@@ -1369,7 +1434,22 @@ analysis_result semantic_analysis::overloaded_operator(
         ordered.append(arguments[k]);
         ordered_syntax.append(argument_syntax[k]);
     }
-    if (!any_class) {
+    /* [over.built]/18-22: a compound assignment's built-in left operand is
+       an arithmetic or pointer lvalue, which no enumeration binds, and a
+       scoped enumeration converts to no arithmetic operand of another
+       operator ([dcl.enum]/10): no built-in candidate competes (the
+       comparisons of /16 do) */
+    bool no_builtin =
+        compound_assignment_operator(op) != preprocessing_op_or_punc::count &&
+        type_table[operands[0].type.unqualified()].kind ==
+            type_kind::enumeration;
+    for (const expression_meaning &operand : operands) {
+        const struct type &t = type_table[operand.type.unqualified()];
+        if (!is_comparison(op) && t.kind == type_kind::enumeration &&
+            entity_table[t.entity].scoped)
+            no_builtin = true;
+    }
+    if (!any_class && !no_builtin) {
         /* /3.3: the built-in candidates of an enumeration operand convert
            it by an integral promotion or conversion, except the
            comparisons' of the enumeration type T itself (bool
@@ -1469,7 +1549,8 @@ analysis_result semantic_analysis::overloaded_operator(
         if (!x.nonstatic_member) {
             /* [over.match.funcs]/4: a static member function: the object
                expression is evaluated and discarded */
-            callee.node = expression_node(semantic_kind::entity, callee, at, f);
+            callee.node =
+                expression_node(semantic_kind::entity, callee, at, f.index());
             callee.node = expression_node(semantic_kind::comma, callee, at,
                                           e.node, callee.node);
             object = 0;
@@ -1478,7 +1559,8 @@ analysis_result semantic_analysis::overloaded_operator(
     } else {
         /* "Otherwise, if a non-member function is selected, the expression
            is interpreted as operator @ ( x , y )" */
-        callee.node = expression_node(semantic_kind::entity, callee, at, f);
+        callee.node =
+            expression_node(semantic_kind::entity, callee, at, f.index());
     }
     /* the arguments for the parameters: a member's object is not one */
     owned_array<expression_meaning> call_arguments;

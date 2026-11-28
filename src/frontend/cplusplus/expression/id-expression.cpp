@@ -97,11 +97,11 @@ static unsigned nested_component_length(parser &p, bool qualified, bool known,
     return end;
 }
 
-bool parser::same_template_id(token_index a, token_index b, token_index length)
+bool parser::same_template_id(token_index a, token_index b, uint32_t length)
 {
     if (b + length > position)
         return false;
-    for (token_index i = 0; i < length; i++) {
+    for (uint32_t i = 0; i < length; i++) {
         owned_buffer x, y;
         tokens.spelling(a + i, x.get());
         tokens.spelling(b + i, y.get());
@@ -416,7 +416,8 @@ node_index parser::id_expression(bool member)
                                  syntax_kind::simple_template_id);
                 if (failed())
                     return 0;
-            } else if ((member || (!known && !dependent_qualifier)) &&
+            } else if ((member || !known ||
+                        (qualifier && kind == name_kind::not_declared)) &&
                        !dependent_qualifier &&
                        (!member || member_name_may_be_template(
                                        name, qualifier != 0, known, scope))) {
@@ -424,8 +425,9 @@ node_index parser::id_expression(bool member)
                     member && names.declared_as_member_variable_template(name);
                 if (angle_group_follows_call() ||
                     (maybe_var && angle_group_end(0))) {
-                    /* a member's name and a name of a class the parser does not
-                       know may be a template's: the tokens are a template-id
+                    /* a member's name, a name of a class the parser does not
+                       know and one a known class does not declare (a partial
+                       specialization may) may be a template's: the tokens are a template-id
                        when they parse as one and a call, a '::', or (for a
                        member variable template) an operator/punctuator follows.
                        The token scan first: a speculative parse per '<' of
@@ -705,7 +707,7 @@ analysis_result semantic_analysis::address_parameter(token_index t,
     qualified_type to = entity_table[parameter].type;
     const struct type record = type_table[to.unqualified()];
     bool reference = record.kind == type_kind::lvalue_reference;
-    entity_index e = static_cast<entity_index>(entity_table[parameter].value);
+    entity_index e = entity_index_in(entity_table[parameter].value);
     if (!e) {
         m.type = to;
         m.category = value_category::prvalue;
@@ -723,7 +725,7 @@ analysis_result semantic_analysis::address_parameter(token_index t,
     m.category = value_category::lvalue;
     m.entity = e;
     m.evaluation = constness::constant;
-    m.node = expression_node(semantic_kind::entity, m, t, e);
+    m.node = expression_node(semantic_kind::entity, m, t, e.index());
     if (reference) {
         m.entity = 0;
         m.evaluation = constness::unknown;
@@ -910,7 +912,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     }
     if (captured_view.unqualified())
         m.type = captured_view;
-    m.node = expression_node(semantic_kind::entity, m, t, e);
+    m.node = expression_node(semantic_kind::entity, m, t, e.index());
     if (deferred_use) {
         pending_use u;
         u.node = m.node;
@@ -1306,7 +1308,7 @@ analysis_result semantic_analysis::class_member_value(SyntaxRef n,
         m.entity = 0;
         m.evaluation = constness::unknown;
     }
-    m.node = expression_node(semantic_kind::entity, m, t, e);
+    m.node = expression_node(semantic_kind::entity, m, t, e.index());
     return analysis_result::well_formed;
 }
 
