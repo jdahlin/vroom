@@ -119,7 +119,16 @@ static void cc_body_tokens_append(cc *c, const char *text, uint32_t loc,
         VBUG("a builtin body is too long");
     memset(src, 0, sizeof src);
     memcpy(src, text, n);
+    /* src is this frame's: the intern table keeps the pointer of the first
+       spelling it sees, so identifiers are interned as copies */
+    int not_interned = lex_identifiers_not_interned;
+
+    lex_identifiers_not_interned = 1;
     count = lex_tokenize(src, n, toks, scratch);
+    lex_identifiers_not_interned = not_interned;
+    for (uint32_t i = 0; i < count; i++)
+        if (toks[i].kind == LEX_TOKEN_IDENTIFIER)
+            toks[i].id = vintern_copy(src + toks[i].off, toks[i].len);
     *first = c->nlzt;
     for (uint32_t i = 0; i < count; i++) {
         ptok t;

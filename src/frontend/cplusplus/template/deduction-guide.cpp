@@ -90,10 +90,10 @@ semantic_analysis::deduction_guide_candidate(TemplateDeclaration t,
     entity_index outer = current_scope;
     lookup_result x = lookup_unqualified(
         tokens.identifier(guide_parts_of(n).name), lookup_filter::any);
-    uint32_t ct = class_template_of(x.unknown_entity);
+    template_ref ct = class_template_of(x.unknown_entity);
     /* a template-name of a class template, which the guide's simple-template-id
        names too ([temp.deduct.guide]/3) */
-    if (!ct || function_templates[ct - 1].is_alias)
+    if (!ct || function_templates[ct].is_alias)
         return not_supported_because(
             t, "temp.deduct.guide",
             "a deduction guide for a name that is no class template");
@@ -117,7 +117,7 @@ semantic_analysis::deduction_guide_candidate(TemplateDeclaration t,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].template_record = index + 1;
+                entity_table[e].template_record = template_ref::at(index);
         }
     }
     function_template record =
@@ -159,9 +159,9 @@ analysis_result semantic_analysis::deduction_guide_type(SyntaxRef guide,
  * injected-class-name of the copy constructor) makes no guide.  The class
  * template's pack and template template-parameters make none.
  */
-void semantic_analysis::implicit_deduction_guides(uint32_t ct)
+void semantic_analysis::implicit_deduction_guides(template_ref ct)
 {
-    function_template &rec = function_templates[ct - 1];
+    function_template &rec = function_templates[ct];
     if (rec.guides_made)
         return;
     rec.guides_made = true;
@@ -194,10 +194,10 @@ void semantic_analysis::implicit_deduction_guides(uint32_t ct)
     }
 }
 
-analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
+analysis_result semantic_analysis::implicit_guide_member(template_ref ct,
                                                          SyntaxElement mem)
 {
-    const function_template c = function_templates[ct - 1];
+    const function_template c = function_templates[ct];
     uint32_t class_name = entity_table[c.entity].name;
     owned_array<SyntaxRef> parameters;
     for (uint32_t i = 0; i < c.parameter_count; i++)
@@ -303,7 +303,7 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].template_record = index + 1;
+                entity_table[e].template_record = template_ref::at(index);
         }
     }
     function_template record =
@@ -327,10 +327,10 @@ semantic_analysis::implicit_guide_type(const function_template &ft,
                                        const template_argument *arguments,
                                        SyntaxRef at, qualified_type &type)
 {
-    uint32_t ct = ft.guide_of;
+    template_ref ct = ft.guide_of;
     entity_index c = 0;
     VTRY(r, instantiate_class(at, ct, arguments,
-                              function_templates[ct - 1].parameter_count, c));
+                              function_templates[ct].parameter_count, c));
     type = entity_table[c].type;
     function_cv = 0;
     function_parameters.clear();

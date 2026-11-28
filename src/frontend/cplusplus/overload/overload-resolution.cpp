@@ -73,7 +73,7 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
             !entity_table[c].instantiation)
             return true;
         const instantiation_record &inst =
-            instantiations[entity_table[c].instantiation - 1];
+            instantiations[entity_table[c].instantiation];
         if (inst.argument_count < 1 ||
             template_arguments[inst.first_argument].kind !=
                 template_argument::kind_t::type)
@@ -676,8 +676,7 @@ analysis_result semantic_analysis::best_viable_function(
            matches: neither is at least as specialized */
         auto takes_dependent = [&](const overload_candidate &c) {
             qualified_type t =
-                entity_table[function_templates[c.template_index - 1].entity]
-                    .type;
+                entity_table[function_templates[c.template_index].entity].type;
             return type_table[t.unqualified()].parameter_count == 1 &&
                    depends_on_template_parameter(
                        type_table.parameters(t.unqualified())[0]);
@@ -706,10 +705,8 @@ analysis_result semantic_analysis::best_viable_function(
            deduct]) and F2 is not": a deduction-guide a program declares is
            better than an implicit one of a constructor */
         if (x.template_index && y.template_index) {
-            const function_template &fx =
-                function_templates[x.template_index - 1];
-            const function_template &fy =
-                function_templates[y.template_index - 1];
+            const function_template &fx = function_templates[x.template_index];
+            const function_template &fy = function_templates[y.template_index];
             if (fx.guide_of && !fx.implicit_guide && fy.guide_of &&
                 fy.implicit_guide)
                 return true;
@@ -903,9 +900,9 @@ analysis_result semantic_analysis::best_viable_function(
             entity_table[x.function].enclosing !=
                 entity_table[y.function].enclosing)
             return false;
-        const uint32_t both[2] = {x.template_index, y.template_index};
-        for (uint32_t t : both) {
-            SyntaxRef d = function_templates[t - 1].declaration;
+        const template_ref both[2] = {x.template_index, y.template_index};
+        for (template_ref t : both) {
+            SyntaxRef d = function_templates[t].declaration;
             if (template_head_constrained(d) || trailing_constraint(d) ||
                 uses_decltype(d))
                 return false;

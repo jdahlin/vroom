@@ -67,7 +67,7 @@ analysis_result semantic_analysis::builtin_invoke(
         if (type_table[object.type.unqualified()].kind ==
             type_kind::class_type) {
             entity_index c = type_table[object.type.unqualified()].entity;
-            uint32_t made = entity_table[c].instantiation;
+            uint32_t made = entity_table[c].instantiation.number();
             if (made && c != pointer.entity && named(c, "reference_wrapper") &&
                 has_conversion_functions(c) &&
                 specialization_argument_count(c) == 1 &&

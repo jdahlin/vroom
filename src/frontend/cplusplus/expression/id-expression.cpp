@@ -1125,13 +1125,13 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
         entity_index named = x.entity;
         if (!named)
             named = x.unknown_entity;
-        if (uint32_t ct = concept_of(named))
+        if (template_ref ct = concept_of(named))
             return concept_id(id, ct, m);
-        if (uint32_t vt = variable_template_of(named))
+        if (template_ref vt = variable_template_of(named))
             return variable_template_id_of(id, vt, m);
         /* [namespace.qual] N::f<A>: a function template's specialization,
            as f<A> (function_template_id_value) */
-        if (uint32_t ft = function_template_of(x.unknown_entity))
+        if (template_ref ft = function_template_of(x.unknown_entity))
             return function_template_id_value(n, ft, m);
         return not_supported_because(
             n, "expr.prim.id.qual",
@@ -1145,7 +1145,7 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
                                        lookup_filter::any);
     entity_index held = 0;
     if (x.unknown && !x.entity && !x.ambiguous) {
-        if (uint32_t vt = variable_template_of(x.unknown_entity))
+        if (template_ref vt = variable_template_of(x.unknown_entity))
             return variable_template_id_of(id.index(), vt, m);
         if (member_function_template_of(x.unknown_entity))
             held = x.unknown_entity;
@@ -1166,11 +1166,11 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
         return not_supported_because(
             n, "over.over",
             "a member template-id naming no template or several");
-    uint32_t ft = group[0];
+    template_ref ft = template_ref::from_number(group[0]);
     owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     VTRY_SET(r, written_arguments_of(id, written, expansion));
-    const function_template &of = function_templates[ft - 1];
+    const function_template &of = function_templates[ft];
     uint32_t parameters = of.parameter_count;
     bool trailing_pack = parameters && template_parameter_is_pack(
                                            of.first_parameter + parameters - 1);
@@ -1234,9 +1234,8 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
         specified.append(rest);
     }
     entity_index e = 0;
-    VTRY_SET(r,
-             instantiate(n, function_templates[ft - 1].entity, specified.data(),
-                         static_cast<uint32_t>(specified.size()), e));
+    VTRY_SET(r, instantiate(n, function_templates[ft].entity, specified.data(),
+                            static_cast<uint32_t>(specified.size()), e));
     used(t, e);
     return class_member_value(n, t, e, m);
 }

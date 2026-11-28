@@ -25,12 +25,14 @@ enum {
     DEBUG_TAG_CONST_TYPE = 0x26,
     DEBUG_TAG_ENUMERATOR = 0x28,
     DEBUG_TAG_SUBPROGRAM = 0x2e,
+    DEBUG_TAG_VARIABLE = 0x34,
     DEBUG_TAG_VOLATILE_TYPE = 0x35,
     DEBUG_TAG_RESTRICT_TYPE = 0x37,
     DEBUG_TAG_UNSPECIFIED_TYPE = 0x3b,
     DEBUG_TAG_ATOMIC_TYPE = 0x47,
 };
 enum {
+    DEBUG_AT_LOCATION = 0x02,
     DEBUG_AT_NAME = 0x03,
     DEBUG_AT_BYTE_SIZE = 0x0b,
     DEBUG_AT_BIT_SIZE = 0x0d,
@@ -43,6 +45,7 @@ enum {
     DEBUG_AT_DECLARATION = 0x3c,
     DEBUG_AT_ENCODING = 0x3e,
     DEBUG_AT_EXTERNAL = 0x3f,
+    DEBUG_AT_FRAME_BASE = 0x40,
     DEBUG_AT_TYPE = 0x49,
     DEBUG_AT_DATA_BIT_OFFSET = 0x6b,
     DEBUG_AT_LINKAGE_NAME = 0x6e,
@@ -58,6 +61,11 @@ enum {
     DEBUG_FORM_REFERENCE = 0x13, /* ref4 */
     DEBUG_FORM_LENGTH = 0xf0,
     DEBUG_FORM_END = 0xf1,
+    /* expressions (exprloc, below DWARF 4 block1): a register as the frame base, an offset from
+       the frame base, a symbol's address */
+    DEBUG_FORM_FRAME_REGISTER = 0xf2,
+    DEBUG_FORM_FRAME_OFFSET = 0xf3,
+    DEBUG_FORM_SYMBOL = 0xf4,
 };
 enum { DEBUG_ATTRIBUTES = 8, DEBUG_SHAPES = 96 };
 
@@ -86,6 +94,7 @@ typedef struct debug_writer {
     const char *word, *quad;
     debug_die shapes[DEBUG_SHAPES];
     uint32_t shape_count;
+    int version;
     debug_type *types; /* label i + 1's */
     uint32_t type_count, type_capacity;
     uint32_t *type_labels,
@@ -221,6 +230,25 @@ static void debug_die_write(debug_writer *w, const debug_die *d)
                 vtext_char_append(b, '-');
                 codegen_symbol_name_append(w->c, b, (uint32_t)a->number);
             }
+            vtext_char_append(b, '\n');
+            break;
+        case DEBUG_FORM_FRAME_REGISTER: /* DW_OP_reg0 + n */
+            vtext_format_append(b, "\t.byte\t1, %u\n",
+                                0x50 + (unsigned)a->number);
+            break;
+        case DEBUG_FORM_FRAME_OFFSET: { /* DW_OP_fbreg */
+            int64_t offset = (int64_t)a->number;
+            unsigned bytes = 1;
+
+            for (int64_t v = offset; v < -64 || v > 63; v >>= 7)
+                bytes++;
+            vtext_format_append(b, "\t.byte\t%u, 145\n\t.sleb128\t%lld\n",
+                                bytes + 1, (long long)offset);
+            break;
+        }
+        case DEBUG_FORM_SYMBOL: /* DW_OP_addr */
+            vtext_format_append(b, "\t.byte\t9, 3\n\t.%s\t", w->quad);
+            codegen_symbol_name_append(w->c, b, (uint32_t)a->number);
             vtext_char_append(b, '\n');
             break;
         default:
@@ -520,6 +548,26 @@ static void debug_type_write(debug_writer *w, ast_qualified_type t,
     }
 }
 
+/* a C object of file scope with storage here: where it is */
+static void debug_global_write(debug_writer *w, uint32_t s, bool coff)
+{
+    cc *c = w->c;
+    const sym *y = &c->syms[s];
+
+    if (c->describe_location || y->kind != AST_SYMBOL_VARIABLE || y->depth ||
+        !y->name || (y->flags & AST_SYMBOL_FLAG_THREAD) ||
+        (coff && (y->flags & AST_SYMBOL_FLAG_WEAK)))
+        return;
+    debug_die d = debug_die_new(DEBUG_TAG_VARIABLE, false);
+
+    debug_die_identifier(&d, y->name);
+    debug_die_type(w, &d, y->ty, debug_typedef_of(c, y->tdef, y->ty));
+    debug_die_number(&d, DEBUG_AT_EXTERNAL, DEBUG_FORM_FLAG,
+                     y->sc != AST_STORAGE_STATIC);
+    debug_die_number(&d, DEBUG_AT_LOCATION, DEBUG_FORM_SYMBOL, s);
+    debug_die_write(w, &d);
+}
+
 /* the entries of every type referred to, those they refer to too */
 static void debug_types_write(debug_writer *w)
 {
@@ -545,6 +593,11 @@ static void debug_abbreviations_write(const debug_writer *w, tbuf *b)
                 form = 6; /* data4 */
             else if (form == DEBUG_FORM_END)
                 form = DEBUG_FORM_ADDRESS;
+            else if (form >= DEBUG_FORM_FRAME_REGISTER) {
+                form = 0x0a; /* block1 */
+                if (w->version >= 4)
+                    form = 0x18; /* exprloc */
+            }
             vtext_format_append(b, "\t.uleb128\t%d\n\t.uleb128\t%d\n",
                                 s->attributes[k].attribute, form);
         }
@@ -559,8 +612,36 @@ static void debug_abbreviations_write(const debug_writer *w, tbuf *b)
  * linkage name, the source's identifier is attrs' debug_name (0: none, an operator's or a
  * closure's), and its types are not described yet (D4).
  */
+/* a parameter or variable of C: its name, type and, where known, place in the frame */
+static void debug_object_write(debug_writer *w, int tag, uint32_t s,
+                               const codegen_debug_frame *frame)
+{
+    const sym *y = &w->c->syms[s];
+    debug_die d = debug_die_new(tag, false);
+
+    debug_die_identifier(&d, y->name);
+    debug_die_type(w, &d, y->ty, debug_typedef_of(w->c, y->tdef, y->ty));
+    for (uint32_t i = 0; frame && i < frame->count; i++)
+        if (frame->locals[i].symbol == s) {
+            debug_die_number(&d, DEBUG_AT_LOCATION, DEBUG_FORM_FRAME_OFFSET,
+                             (uint64_t)frame->locals[i].offset);
+            break;
+        }
+    debug_die_write(w, &d);
+}
+
+static bool debug_is_parameter(const cc *c, uint32_t function, uint32_t s)
+{
+    const node *body = N(c->syms[function].body);
+
+    for (uint32_t i = 0; i < body->aux; i++)
+        if (c->lists[body->a + i] == s)
+            return true;
+    return false;
+}
+
 static void debug_function_append(debug_writer *w, uint32_t function,
-                                  int version)
+                                  int version, const codegen_debug_frame *frame)
 {
     cc *c = w->c;
     const sym *y = &c->syms[function];
@@ -572,7 +653,11 @@ static void debug_function_append(debug_writer *w, uint32_t function,
         parameters = N(y->body)->aux;
     const ctype *type = T(c, y->ty);
     bool variadic = !other && (type->flags & AST_TYPE_FLAG_VARIADIC);
-    debug_die d = debug_die_new(DEBUG_TAG_SUBPROGRAM, parameters || variadic);
+    if (other)
+        frame = NULL; /* (D4) */
+    debug_die d =
+        debug_die_new(DEBUG_TAG_SUBPROGRAM,
+                      parameters || variadic || (frame && frame->count));
 
     if (!other) {
         debug_die_identifier(&d, y->name);
@@ -599,27 +684,31 @@ static void debug_function_append(debug_writer *w, uint32_t function,
         if (!(type->flags & AST_TYPE_FLAG_NO_PROTOTYPE))
             debug_die_number(&d, DEBUG_AT_PROTOTYPED, DEBUG_FORM_FLAG, 1);
     }
+    if (frame)
+        debug_die_number(&d, DEBUG_AT_FRAME_BASE, DEBUG_FORM_FRAME_REGISTER,
+                         frame->frame_register);
     debug_die_write(w, &d);
-    for (uint32_t i = 0; i < parameters; i++) {
-        const sym *p = &c->syms[c->lists[N(y->body)->a + i]];
-        debug_die f = debug_die_new(DEBUG_TAG_FORMAL_PARAMETER, false);
-
-        debug_die_identifier(&f, p->name);
-        debug_die_type(w, &f, p->ty, debug_typedef_of(c, p->tdef, p->ty));
-        debug_die_write(w, &f);
-    }
+    for (uint32_t i = 0; i < parameters; i++)
+        debug_object_write(w, DEBUG_TAG_FORMAL_PARAMETER,
+                           c->lists[N(y->body)->a + i], frame);
     if (variadic) {
         debug_die v = debug_die_new(DEBUG_TAG_UNSPECIFIED_PARAMETERS, false);
 
         debug_die_write(w, &v);
     }
+    /* (locals of every block are the function's: no lexical blocks yet) */
+    for (uint32_t i = 0; frame && i < frame->count; i++)
+        if (!debug_is_parameter(c, function, frame->locals[i].symbol))
+            debug_object_write(w, DEBUG_TAG_VARIABLE, frame->locals[i].symbol,
+                               frame);
     if (d.children)
         debug_children_end(w);
 }
 
 VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
                                      const codegen_chunk *chunks,
-                                     uint32_t chunk_count)
+                                     uint32_t chunk_count,
+                                     codegen_debug_frame *const *frames)
 {
     const cc_options *o = c->o;
     /* one compile unit over .text: producer, C11, name, its line table, dir, pc range;
@@ -703,6 +792,7 @@ VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
     writer.b = tail;
     writer.word = word;
     writer.quad = quad;
+    writer.version = v;
     writer.type_labels = (uint32_t *)calloc(
         (size_t)AST_QUALIFIED_TYPE(c->nty, 0), sizeof(uint32_t));
     writer.typedef_labels = (uint32_t *)calloc(c->nsym, sizeof(uint32_t));
@@ -711,11 +801,20 @@ VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
     for (uint32_t i = 0; i < chunk_count; i++) {
         uint32_t function = (uint32_t)(chunks[i].key >> 1);
 
+        uint64_t key = chunks[i].key;
+
+        if ((key & 1) && key < ((uint64_t)1 << 62))
+            debug_global_write(&writer, function, w);
         /* (COFF: a weak function's name is a weak external, whose address in
            the object is not the code's: no entry) */
         if (debug_chunk_is_function(c, &chunks[i]) &&
-            !(w && (c->syms[function].flags & AST_SYMBOL_FLAG_WEAK)))
-            debug_function_append(&writer, function, v);
+            !(w && (c->syms[function].flags & AST_SYMBOL_FLAG_WEAK))) {
+            const codegen_debug_frame *frame = NULL;
+
+            if (frames)
+                frame = frames[function];
+            debug_function_append(&writer, function, v, frame);
+        }
     }
     debug_types_write(&writer);
     free(writer.types);

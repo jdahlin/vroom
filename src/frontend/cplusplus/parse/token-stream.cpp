@@ -63,7 +63,7 @@ void token_stream::resume()
         kept.resize(kept.size() - 1);
     }
     identifiers.resize(tokens.size() - 1);
-    tokens.resize(tokens.size() - 1);
+    tokens.truncate(tokens.size() - 1);
     complete = false;
 }
 

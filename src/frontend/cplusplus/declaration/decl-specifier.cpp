@@ -1409,7 +1409,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                             named_concept =
                                 constraint_concept(current_scope, q[0].token());
                         if (!named_concept ||
-                            function_templates[concept_of(named_concept) - 1]
+                            function_templates[concept_of(named_concept)]
                                     .parameter_count != 1)
                             return not_supported_because(
                                 c[0].index(), "temp.param",

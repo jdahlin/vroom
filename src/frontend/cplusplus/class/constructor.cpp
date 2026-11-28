@@ -1536,13 +1536,13 @@ analysis_result semantic_analysis::construct(
         return parenthesized_aggregate_initialization(at, type, arguments,
                                                       result);
     entity_index chosen = candidates[best].function;
-    if (uint32_t g = candidates[best].template_index) {
+    if (template_ref g = candidates[best].template_index) {
         /* the chosen specialization's definition ([temp.inst]/4) */
         size_t k = best - templates;
         size_t end = deduced.size();
         if (k + 1 < first_arguments.size())
             end = first_arguments[k + 1];
-        VTRY(r, instantiate(at, function_templates[g - 1].entity,
+        VTRY(r, instantiate(at, function_templates[g].entity,
                             deduced.data() + first_arguments[k],
                             static_cast<uint32_t>(end - first_arguments[k]),
                             chosen));

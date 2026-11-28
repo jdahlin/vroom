@@ -530,7 +530,7 @@ semantic_analysis::class_sequence(const expression_meaning &a,
     owned_array<entity_index> constructors;
     /* each one's constructor template (a function_templates index + 1),
        or 0 */
-    owned_array<uint32_t> template_of;
+    owned_array<template_ref> template_of;
     for (entity_index k = entity_table[c1].details().first_constructor; k;
          k = entity_table[k].details().next_constructor) {
         constructors.append(k);
@@ -945,7 +945,7 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
                 entity_table[call].template_record &&
                 to.kind == type_kind::function && !to.variadic) {
                 const function_template &f =
-                    function_templates[entity_table[call].template_record - 1];
+                    function_templates[entity_table[call].template_record];
                 const struct type &pattern =
                     type_table[entity_table[f.entity].type.unqualified()];
                 if (pattern.kind == type_kind::function && !pattern.variadic &&

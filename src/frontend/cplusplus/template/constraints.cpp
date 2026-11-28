@@ -56,7 +56,7 @@ semantic_analysis::concept_definition(SyntaxRef n, ConceptDefinition definition)
     return analysis_result::well_formed;
 }
 
-uint32_t semantic_analysis::concept_of(entity_index e) const
+template_ref semantic_analysis::concept_of(entity_index e) const
 {
     return template_of_form(e, &function_template::is_concept);
 }
@@ -69,7 +69,7 @@ uint32_t semantic_analysis::concept_of(entity_index e) const
  * satisfied ([temp.constr.constr]) by the specified template arguments
  * and false otherwise."  Of dependent arguments: not analysed.
  */
-analysis_result semantic_analysis::concept_id(SyntaxRef n, uint32_t ct,
+analysis_result semantic_analysis::concept_id(SyntaxRef n, template_ref ct,
                                               expression_meaning &m)
 {
     owned_array<template_argument> arguments;
@@ -131,15 +131,15 @@ analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
     } else {
         named = constraint_concept(current_scope, q[0].token());
     }
-    uint32_t ct = 0;
+    template_ref ct = 0;
     if (named)
         ct = concept_of(named);
     if (!ct ||
-        (rest == 1 && function_templates[ct - 1].parameter_count != 1 &&
-         !(function_templates[ct - 1].parameter_count == 2 &&
-           template_parameter_is_pack(
-               function_templates[ct - 1].first_parameter + 1))) ||
-        template_parameter_is_pack(function_templates[ct - 1].first_parameter))
+        (rest == 1 && function_templates[ct].parameter_count != 1 &&
+         !(function_templates[ct].parameter_count == 2 &&
+           template_parameter_is_pack(function_templates[ct].first_parameter +
+                                      1))) ||
+        template_parameter_is_pack(function_templates[ct].first_parameter))
         return not_supported_because(q, "temp.param",
                                      "a type-constraint naming no concept with "
                                      "a suitable parameter list");
@@ -148,7 +148,7 @@ analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
     first.kind = template_argument::kind_t::type;
     first.type = u;
     arguments.append(first);
-    if (rest == 1 && function_templates[ct - 1].parameter_count == 2) {
+    if (rest == 1 && function_templates[ct].parameter_count == 2) {
         arguments.append(make_pack(nullptr, 0));
     } else if (rest != 1) {
         substitution_mark mark = mark_substitution();
@@ -313,8 +313,8 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
 }
 
 analysis_result semantic_analysis::concept_satisfied(
-    SyntaxRef at, uint32_t ct, const owned_array<template_argument> &arguments,
-    bool &satisfied)
+    SyntaxRef at, template_ref ct,
+    const owned_array<template_argument> &arguments, bool &satisfied)
 {
     for (const satisfaction &s : satisfactions) {
         if (s.concept_template != ct || s.count != arguments.size())
@@ -345,7 +345,7 @@ analysis_result semantic_analysis::concept_satisfied(
     class_matching_scope in_progress(concepts_in_progress, ct,
                                      arguments.begin(),
                                      static_cast<uint32_t>(arguments.size()));
-    const function_template c = function_templates[ct - 1];
+    const function_template c = function_templates[ct];
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[c.entity].enclosing);
     for (uint32_t i = 0; i < c.parameter_count; i++)
@@ -523,40 +523,40 @@ bool semantic_analysis::same_token_spelling(token_index a, token_index b)
 }
 
 /* the function template whose entity (not held name) t is, plus one */
-uint32_t semantic_analysis::template_record(entity_index t) const
+template_ref semantic_analysis::template_record(entity_index t) const
 {
     if (!t)
         return 0;
     templates_by_entity.update(
         function_templates,
         [](const function_template &f) { return f.entity; });
-    return templates_by_entity.first(t);
+    return template_ref::from_number(templates_by_entity.first(t));
 }
 
 SyntaxElement semantic_analysis::template_constraint(entity_index t) const
 {
-    uint32_t ft = template_record(t);
+    template_ref ft = template_record(t);
     if (!ft)
         return SyntaxElement();
-    return head_constraint(function_templates[ft - 1].declaration);
+    return head_constraint(function_templates[ft].declaration);
 }
 
 SyntaxElement
 semantic_analysis::template_trailing_constraint(entity_index t) const
 {
-    uint32_t ft = template_record(t);
+    template_ref ft = template_record(t);
     if (!ft)
         return SyntaxElement();
-    return trailing_constraint(function_templates[ft - 1].declaration);
+    return trailing_constraint(function_templates[ft].declaration);
 }
 
 bool semantic_analysis::constraint_parameter_is_own(entity_index t,
                                                     entity_index p) const
 {
-    uint32_t ft = template_record(t);
+    template_ref ft = template_record(t);
     if (!ft)
         return false;
-    const struct function_template &f = function_templates[ft - 1];
+    const struct function_template &f = function_templates[ft];
     for (uint32_t k = 0; k < f.parameter_count; k++)
         if (template_parameter_entities[f.first_parameter + k] == p)
             return true;
@@ -619,10 +619,10 @@ entity_index
 semantic_analysis::constraint_own_type_parameter(entity_index t,
                                                  uint64_t position) const
 {
-    uint32_t ft = template_record(t);
+    template_ref ft = template_record(t);
     if (!ft)
         return 0;
-    const struct function_template &f = function_templates[ft - 1];
+    const struct function_template &f = function_templates[ft];
     for (uint32_t k = 0; k < f.parameter_count; k++) {
         entity_index pe = template_parameter_entities[f.first_parameter + k];
         if (type_table[entity_table[pe].type.unqualified()].kind ==
@@ -666,10 +666,10 @@ bool semantic_analysis::constraint_type_in(entity_index t,
                                            SyntaxElement written,
                                            qualified_type &type)
 {
-    uint32_t ft = template_record(t);
-    if (!ft || !function_templates[ft - 1].parameter_count)
+    template_ref ft = template_record(t);
+    if (!ft || !function_templates[ft].parameter_count)
         return false;
-    const struct function_template &f = function_templates[ft - 1];
+    const struct function_template &f = function_templates[ft];
     entity_index scope =
         entity_table[template_parameter_entities[f.first_parameter]].enclosing;
     size_t expressions_before = expressions.size();
@@ -738,10 +738,10 @@ bool semantic_analysis::constraint_requirement_parameters_in(
     entity_index t, SyntaxElement list, qualified_type &function_type,
     owned_array<requirement_parameter> &names)
 {
-    uint32_t ft = template_record(t);
-    if (!ft || !function_templates[ft - 1].parameter_count)
+    template_ref ft = template_record(t);
+    if (!ft || !function_templates[ft].parameter_count)
         return false;
-    const struct function_template &f = function_templates[ft - 1];
+    const struct function_template &f = function_templates[ft];
     entity_index scope =
         entity_table[template_parameter_entities[f.first_parameter]].enclosing;
     size_t expressions_before = expressions.size();
@@ -778,9 +778,9 @@ entity_index semantic_analysis::constraint_parameter(entity_index t,
         return 0;
     entity_index own = t;
     for (entity_index s = t;;) {
-        uint32_t ft = template_record(own);
+        template_ref ft = template_record(own);
         if (ft) {
-            const struct function_template &f = function_templates[ft - 1];
+            const struct function_template &f = function_templates[ft];
             for (uint32_t k = 0; k < f.parameter_count; k++) {
                 entity_index pe =
                     template_parameter_entities[f.first_parameter + k];
@@ -808,12 +808,12 @@ entity_index semantic_analysis::constraint_parameter(entity_index t,
 uint32_t semantic_analysis::function_parameter_position(entity_index t,
                                                         token_index i) const
 {
-    uint32_t ft = template_record(t);
+    template_ref ft = template_record(t);
     uint32_t name = tokens.identifier(i);
     if (!ft || !name)
         return 0;
-    SyntaxRef d = function_templates[ft - 1].declarator;
-    SyntaxRef lambda = function_templates[ft - 1].declaration;
+    SyntaxRef d = function_templates[ft].declarator;
+    SyntaxRef lambda = function_templates[ft].declaration;
     owned_array<SyntaxElement> work;
     if (lambda && lambda.is(syntax_kind::lambda_expression)) {
         /* a generic lambda's are its lambda-declarator's */
@@ -932,12 +932,11 @@ entity_index semantic_analysis::constraint_class(entity_index scope,
 }
 
 analysis_result semantic_analysis::template_constraints_satisfied(
-    uint32_t function_template, const owned_array<template_argument> &values,
-    bool &satisfied)
+    template_ref function_template,
+    const owned_array<template_argument> &values, bool &satisfied)
 {
     satisfied = true;
-    const struct function_template ft =
-        function_templates[function_template - 1];
+    const struct function_template ft = function_templates[function_template];
     bool is_trailing = false;
     SyntaxElement constraint = head_constraint(ft.declaration);
     /* (a trailing requires-clause only where the head has none: the
@@ -1023,13 +1022,11 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         } else {
             named = constraint_concept(lookup_scope, q[name_at].token());
         }
-        uint32_t ct = 0;
+        template_ref ct = 0;
         if (named)
             ct = concept_of(named);
-        if (!ct ||
-            (rest == 1 && function_templates[ct - 1].parameter_count != 1) ||
-            template_parameter_is_pack(
-                function_templates[ct - 1].first_parameter))
+        if (!ct || (rest == 1 && function_templates[ct].parameter_count != 1) ||
+            template_parameter_is_pack(function_templates[ct].first_parameter))
             return not_supported_because(x.constraint, "temp.param",
                                          "a constrained parameter whose "
                                          "concept is unknown or unsuitable");
@@ -1048,7 +1045,7 @@ analysis_result semantic_analysis::template_constraints_satisfied(
        (a constructor template constrained by __is_constructible of its
        class) */
     owned_array<uint64_t> words;
-    words.append(function_template);
+    words.append(function_template.number());
     for (const template_argument &a : values) {
         words.append(static_cast<uint64_t>(a.kind) |
                      static_cast<uint64_t>(a.type.cv()) << 8);

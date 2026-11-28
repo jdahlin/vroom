@@ -96,7 +96,7 @@ analysis_result semantic_analysis::member_function_template(
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].template_record = index + 1;
+                entity_table[e].template_record = template_ref::at(index);
         }
     }
     /* [temp.mem]/3: "A member function template shall not be virtual." */
@@ -543,7 +543,7 @@ analysis_result semantic_analysis::member_template_call(
         /* [temp.inst]/4: the specialization chosen is referenced: its
            definition is instantiated (a candidate's declaration only was) */
         const struct function_template ft =
-            function_templates[k.template_index - 1];
+            function_templates[k.template_index];
         VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
                                 ft.parameter_count, f));
     }

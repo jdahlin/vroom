@@ -1978,7 +1978,7 @@ analysis_result semantic_analysis::class_list_initialization(
                 list, "dcl.init.list",
                 "an initializer_list that is no specialization");
         const instantiation_record &inst =
-            instantiations[entity_table[c].instantiation - 1];
+            instantiations[entity_table[c].instantiation];
         if (inst.argument_count < 1 ||
             template_arguments[inst.first_argument].kind !=
                 template_argument::kind_t::type)

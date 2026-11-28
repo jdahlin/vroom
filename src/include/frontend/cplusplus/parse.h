@@ -16,6 +16,7 @@
 #ifndef VCC_CPLUSPLUS_PARSE_H
 #define VCC_CPLUSPLUS_PARSE_H
 
+#include "frontend/cplusplus/stable-array.h"
 #include "frontend/cplusplus/table-index.h"
 #include "frontend/cplusplus/cplusplus.h"
 
@@ -82,7 +83,7 @@ class token_stream
     owned_array<bool> revertible_keywords;
 
   private:
-    owned_array<token, token_index> tokens;
+    stable_array<token, token_index> tokens;
     /* the tokens at which source_files::layout_pragma changed, and what it
        changed to */
     owned_array<token_index> layout_change_at;

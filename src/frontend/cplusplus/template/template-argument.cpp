@@ -871,7 +871,7 @@ entity_index semantic_analysis::dependent_variable_specialization(
     entity_index named = x.entity;
     if (!named)
         named = x.unknown_entity;
-    uint32_t vt = variable_template_of(named);
+    template_ref vt = variable_template_of(named);
     if (!vt)
         return e;
     size_t unsupported_before = unsupported.size();
@@ -887,7 +887,7 @@ entity_index semantic_analysis::dependent_variable_specialization(
             dependent = true;
     if (!dependent)
         return e;
-    entity_index v = function_templates[vt - 1].entity;
+    entity_index v = function_templates[vt].entity;
     entity_index s = 0;
     const record_chains &chains = instantiations_of_templates();
     for (uint32_t n = chains.first(v); n; n = chains.after(n)) {
@@ -915,7 +915,7 @@ entity_index semantic_analysis::dependent_variable_specialization(
         entity_table[s].type = qualified_type::make(
             type_table.of_entity(type_kind::dependent, s), cv_none);
         entity_table[s].instantiation =
-            static_cast<uint32_t>(instantiations.size()) + 1;
+            instantiation_ref::at(instantiations.size());
         record.specialization = s;
         instantiations.append(record);
     }
@@ -947,10 +947,10 @@ semantic_analysis::template_lexical_outer(const function_template &ft) const
 }
 
 analysis_result semantic_analysis::substituted_parameter_type(
-    uint32_t template_index, uint32_t position, const template_argument *before,
-    qualified_type &type)
+    template_ref template_index, uint32_t position,
+    const template_argument *before, qualified_type &type)
 {
-    const function_template ft = function_templates[template_index - 1];
+    const function_template ft = function_templates[template_index];
     SyntaxRef node = template_parameter_nodes[ft.first_parameter + position];
     template_parameter_parts form;
     if (!template_parameter_form(node, form))
@@ -994,11 +994,11 @@ analysis_result semantic_analysis::substituted_parameter_type(
  * expression of the type of the template-parameter" (integral here).
  */
 analysis_result semantic_analysis::template_argument_for(
-    SyntaxRef at, uint32_t template_index, uint32_t position,
+    SyntaxRef at, template_ref template_index, uint32_t position,
     SyntaxElement written, const template_argument *before,
     template_argument &out)
 {
-    const function_template ft = function_templates[template_index - 1];
+    const function_template ft = function_templates[template_index];
     entity_index p = template_parameter_entities[ft.first_parameter + position];
     out = template_argument();
     if (entity_table[p].kind == entity_kind::template_entity)
@@ -1542,10 +1542,8 @@ bool semantic_analysis::template_parameters_match(
         if (x.kind == entity_kind::none)
             return x.type == y.type;
         if (x.kind == entity_kind::template_entity) {
-            const function_template p =
-                function_templates[x.template_record - 1];
-            const function_template q =
-                function_templates[y.template_record - 1];
+            const function_template p = function_templates[x.template_record];
+            const function_template q = function_templates[y.template_record];
             return p.parameter_count == q.parameter_count &&
                    same_template_parameters(
                        p.first_parameter, q.first_parameter, p.parameter_count);
@@ -1654,16 +1652,16 @@ analysis_result semantic_analysis::template_template_argument(
         named = x.unknown_entity;
     /* (an injected-class-name names its class template here,
        [temp.local]/1) */
-    uint32_t a = class_template_of(named);
+    template_ref a = class_template_of(named);
     if (!a)
         a = alias_template_of(named);
-    if (!a || function_templates[a - 1].primary)
+    if (!a || function_templates[a].primary)
         return not_supported_because(
             at, "temp.arg.template",
             "a template argument naming no primary class or alias template");
-    const function_template given = function_templates[a - 1];
+    const function_template given = function_templates[a];
     const function_template wanted =
-        function_templates[entity_table[parameter].template_record - 1];
+        function_templates[entity_table[parameter].template_record];
     if (!template_parameters_match(wanted, given))
         return not_supported_because(
             at, "temp.arg.template",
@@ -1685,10 +1683,10 @@ analysis_result semantic_analysis::template_template_argument(
  * parameters before it.
  */
 analysis_result semantic_analysis::default_template_arguments(
-    SyntaxRef at, uint32_t template_index,
+    SyntaxRef at, template_ref template_index,
     owned_array<template_argument> &arguments, const owned_array<bool> &set)
 {
-    const function_template ft = function_templates[template_index - 1];
+    const function_template ft = function_templates[template_index];
     entity_index saved = current_scope;
     token_index saved_horizon = lookup_horizon;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {

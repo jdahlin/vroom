@@ -440,7 +440,7 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
         if (std_ns)
             ilist_tmpl = entity_table.find(
                 std_ns, tokens.pp.identifier("initializer_list", 16) + 1);
-        uint32_t ct = 0;
+        template_ref ct = 0;
         if (ilist_tmpl)
             ct = class_template_of(ilist_tmpl);
         if (!ct)

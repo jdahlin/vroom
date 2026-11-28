@@ -8,6 +8,28 @@
 
 /* ---------------- slots and memory ---------------- */
 
+/* -g -O0: the locals noted at the walker's offsets are where the lowering put the VIR slot of
+   their pinned slot (offsets: per VIR slot) */
+VPRIV void virbuild_debug_locals_place(codegen_context *e,
+                                       const int64_t *offsets)
+{
+    const virbuild_context *V = e->vir_builder;
+
+    for (uint32_t i = 0; i < e->debug_local_count; i++) {
+        codegen_debug_local *l = &e->debug_locals[i];
+
+        for (uint32_t k = 0; !l->is_placed && k < V->slot_count; k++) {
+            const virbuild_preir_slot *s = &V->slots[k];
+
+            if (s->is_pinned && s->off == l->offset &&
+                s->final_slot != VIRBUILD_BLOCK_NONE && !s->incoming_object) {
+                l->offset = offsets[s->final_slot];
+                l->is_placed = true;
+            }
+        }
+    }
+}
+
 VPRIV void virbuild_slot(codegen_context *e, int64_t off, uint64_t size,
                          uint32_t align, int kind)
 {
@@ -32,7 +54,8 @@ VPRIV void virbuild_slot(codegen_context *e, int64_t off, uint64_t size,
     /* -O0: a local's or parameter's value is where a debugger looks for it, so its slot is
        never promoted, forwarded from or written less than the source does */
     V->slots[V->slot_count].is_pinned =
-        !e->unit->options->opt && kind == WALK_SLOT_LOCAL;
+        !e->unit->options->opt &&
+        (kind == WALK_SLOT_LOCAL || kind == WALK_SLOT_PARAMETER);
     VIRBUILD_ARRAY_GROW(V->active_slots, V->active_slot_count,
                         V->active_slot_capacity, 1);
     V->active_slots[V->active_slot_count++] = V->slot_count++;

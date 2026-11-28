@@ -213,9 +213,9 @@ analysis_result semantic_analysis::array_binding_object(
 
 /* std::NAME, found as [namespace.qual] finds it (in an inline namespace
    of std too) */
-analysis_result semantic_analysis::std_class_template(SyntaxRef n,
-                                                      const char *name,
-                                                      uint32_t &template_index)
+analysis_result
+semantic_analysis::std_class_template(SyntaxRef n, const char *name,
+                                      template_ref &template_index)
 {
     template_index = 0;
     entity_index std_ =
@@ -243,11 +243,11 @@ analysis_result semantic_analysis::std_class_template(SyntaxRef n,
    prvalue of type std::size_t", for the first parameter of the template
    (a non-type one of integral type) */
 analysis_result semantic_analysis::index_argument(SyntaxRef n,
-                                                  uint32_t template_index,
+                                                  template_ref template_index,
                                                   uint32_t i,
                                                   template_argument &out)
 {
-    const function_template ft = function_templates[template_index - 1];
+    const function_template ft = function_templates[template_index];
     if (!ft.parameter_count)
         return not_supported_because(n, "dcl.struct.bind",
                                      "a std trait template with no parameters");
@@ -278,11 +278,11 @@ analysis_result semantic_analysis::tuple_trait_member(
     qualified_type type, const char *member, entity_index &found)
 {
     found = 0;
-    uint32_t ct = 0;
+    template_ref ct = 0;
     analysis_result r = std_class_template(n, trait, ct);
     if (r != analysis_result::well_formed || !ct)
         return r;
-    const function_template ft = function_templates[ct - 1];
+    const function_template ft = function_templates[ct];
     uint32_t count = 1;
     if (indexed)
         count = 2;
@@ -462,7 +462,7 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
                 first == entity_kind::template_entity)
                 continue;
         }
-        VTRY_SET(r, index_argument(n, g, i, index));
+        VTRY_SET(r, index_argument(n, template_ref::from_number(g), i, index));
         given.append(index);
         owned_array<uint32_t> one;
         one.append(g);
@@ -478,7 +478,7 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
     VTRY_SET(r,
              best_viable_function(n, candidates, nullptr, arguments, chosen));
     const function_template ft =
-        function_templates[candidates[chosen].template_index - 1];
+        function_templates[candidates[chosen].template_index];
     entity_index specialization = 0;
     VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
                             ft.parameter_count, specialization));

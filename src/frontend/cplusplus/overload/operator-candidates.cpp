@@ -633,7 +633,7 @@ analysis_result semantic_analysis::overloaded_operator(
                 entity_table[e.entity].kind == entity_kind::function &&
                 entity_table[e.entity].instantiation) {
                 const instantiation_record &q =
-                    instantiations[entity_table[e.entity].instantiation - 1];
+                    instantiations[entity_table[e.entity].instantiation];
                 for (uint32_t i = 0; i < q.argument_count; i++)
                     if (template_arguments[q.first_argument + i].kind ==
                         template_argument::kind_t::type)
@@ -1417,10 +1417,10 @@ analysis_result semantic_analysis::overloaded_operator(
                              static_cast<uint32_t>(in_order.size() - skip),
                              deduced);
         if (r == analysis_result::well_formed)
-            VTRY_SET(r, instantiate(
-                            n, function_templates[c.template_index - 1].entity,
-                            deduced.data(),
-                            static_cast<uint32_t>(deduced.size()), f));
+            VTRY_SET(r,
+                     instantiate(n, function_templates[c.template_index].entity,
+                                 deduced.data(),
+                                 static_cast<uint32_t>(deduced.size()), f));
     }
     const entity &x = entity_table[f];
     const struct type &type = type_table[x.type.unqualified()];

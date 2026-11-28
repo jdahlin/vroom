@@ -390,6 +390,13 @@ VPRIV int64_t walk_local_slot(codegen_context *e, uint32_t s)
                     walk_slot_permanent_kind(e, size, align, WALK_SLOT_LOCAL);
             }
         }
+        if (!W->inline_local_depth) {
+#ifdef WALK_PREFIX
+            codegen_debug_local_add(e, s, W->symbol_offsets[s], false);
+#else
+            codegen_debug_local_add(e, s, W->symbol_offsets[s], true);
+#endif
+        }
     }
     return W->symbol_offsets[s];
 }

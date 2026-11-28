@@ -1539,7 +1539,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                name may give it one (clang's error): not modelled */
             if (e.instantiation) {
                 const instantiation_record &made =
-                    instantiations[e.instantiation - 1];
+                    instantiations[e.instantiation];
                 for (uint32_t i = 0; i < made.argument_count; i++) {
                     const template_argument &a =
                         template_arguments[made.first_argument + i];
@@ -4190,8 +4190,7 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
         if (x.specialization != f || x.defined || x.defining)
             continue;
         const function_template &ft =
-            function_templates[entity_table[x.template_entity].template_record -
-                               1];
+            function_templates[entity_table[x.template_entity].template_record];
         if (ft.definition)
             instantiate_definition(ft.declaration, static_cast<uint32_t>(i));
         return;
@@ -4284,7 +4283,7 @@ constness semantic_analysis::evaluate_invocation(
         call_operator =
             declared == f ||
             (e.instantiation &&
-             instantiations[e.instantiation - 1].template_entity == declared &&
+             instantiations[e.instantiation].template_entity == declared &&
              tokens.files.behavior.edition >= standard_edition::cplusplus_17);
     }
     bool implicit_constexpr = call_operator || (e.implicit && e.definition);
@@ -4361,7 +4360,7 @@ constness semantic_analysis::evaluate_invocation(
            was instantiated) is invalid: its invocation is not a constant
            expression */
         if (!state.potential && entity_table[f].instantiation &&
-            instantiations[entity_table[f].instantiation - 1].body_ill_formed) {
+            instantiations[entity_table[f].instantiation].body_ill_formed) {
             invalid_specialization_called = true;
             return CONST_NOT_CONSTANT;
         }

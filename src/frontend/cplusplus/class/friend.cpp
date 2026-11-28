@@ -89,7 +89,7 @@ bool semantic_analysis::friend_names(const friend_record &f,
            all specializations of that template ... are friends" */
         if (e == f.template_entity)
             return true;
-        uint32_t i = entity_table[e].instantiation;
+        uint32_t i = entity_table[e].instantiation.number();
         return i && instantiations[i - 1].template_entity == f.template_entity;
     }
     if (f.befriended)
