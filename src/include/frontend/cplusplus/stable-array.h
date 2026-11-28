@@ -24,8 +24,9 @@
 namespace cplusplus
 {
 
-/* address space per array, not memory: pages are taken as they are written */
-inline constexpr size_t STABLE_ARRAY_BYTES = size_t{1} << 30;
+/* address space per array, not memory: pages are taken as they are written
+   (OpenTTD's network_command.cpp outgrows 1 GiB in one table) */
+inline constexpr size_t STABLE_ARRAY_BYTES = size_t{1} << 32;
 
 inline vjob_region_pool stable_array_regions = VJOB_REGION_POOL_INIT(1);
 

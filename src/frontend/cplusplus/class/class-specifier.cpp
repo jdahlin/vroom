@@ -138,8 +138,8 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
             n, "class.union.anon",
             "a namespace-scope anonymous union that is not static");
     if (s.typedef_ || (s.static_ && !in_namespace) || s.extern_ || s.mutable_ ||
-        s.inline_ || s.constexpr_ || s.type.cv() || s.aligned || s.gnu_flags ||
-        record.kind != type_kind::class_type)
+        s.inline_ || s.constexpr_ || (s.type.cv() & ~cv_const) || s.aligned ||
+        s.gnu_flags || record.kind != type_kind::class_type)
         return not_supported_because(
             n, "class.union.anon",
             "an anonymous union with a storage class, specifier, cv-qualifier "
@@ -167,7 +167,10 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
                               "class.union.anon");
     }
     entity_index e = entity_table.make(entity_kind::variable, 0, c);
-    entity_table[e].type = s.type;
+    /* [impl.defects] const union { ... }; as a member: the members are
+       taken as not const, so that only a program assigning one, ill-formed,
+       is told apart (and an overload on a non-const reference to one) */
+    entity_table[e].type = qualified_type::make(s.type.unqualified(), cv_none);
     if (in_namespace) {
         entity_table[e].defined = true;
         entity_table[e].linkage_of_name = linkage::internal;
@@ -262,6 +265,11 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     postpone_member_bodies = false;
     entity_index postponed_scope = current_scope;
     SyntaxRef postponed_declaration = current_declaration;
+    /* (one instantiated while a member's declarator is analysed: that
+       member's virt-specifiers and pure-specifier are not its members') */
+    scoped_value<bool> own_override(virt_override, false);
+    scoped_value<bool> own_final(virt_final, false);
+    scoped_value<bool> own_pure(virt_pure, false);
     auto head = n.class_specifier().class_head();
     if (!head)
         return not_supported_because(n, "class.pre",
@@ -914,23 +922,39 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     /* [temp.inst]/4: a member function of a class template's specialization
        is instantiated when it is used, not with the class (every one of
        libc++'s valarray expression templates, otherwise) */
-    auto queue_body_until_used = [&](SyntaxRef body) {
+    auto queue_body_until_used = [&](entity_index owner, SyntaxRef body) {
         if (!(incomplete_argument || specialization) ||
             body.function_definition().function_body().deleted())
             return false;
+        /* a body that names a member class of its class not defined yet,
+           which a definition outside the class template may still give
+           (libc++'s filter_view<>::end, returning __iterator): its
+           placeholder type is deduced where it is used too */
+        bool awaits_member_class = false;
+        for (token_index t = body.first_token(); t < tree[body].end_token;
+             t++) {
+            if (tokens[t].kind != token_kind::identifier)
+                continue;
+            entity_index m = entity_table.find(owner, tokens.identifier(t));
+            awaits_member_class |=
+                m && entity_table[m].kind == entity_kind::class_type &&
+                entity_table[m].enclosing == owner && !entity_table[m].size &&
+                !entity_table[m].defined;
+        }
         for (entity_index f = first_member_entity;
              f.index() < entity_table.size(); f++) {
             entity &member = entity_table[f];
-            if (member.kind != entity_kind::function || member.enclosing != c ||
-                member.virtual_ ||
-                contains_placeholder(
-                    type_table[member.type.unqualified()].operand) ||
+            if (member.kind != entity_kind::function ||
+                member.enclosing != owner || member.virtual_ ||
+                (!awaits_member_class &&
+                 contains_placeholder(
+                     type_table[member.type.unqualified()].operand)) ||
                 !declared_by(f, body))
                 continue;
             /* [temp.inst]/3, /11: an unused member definition need
                not make a forward-declared template argument complete. */
             member.member_body_deferred = true;
-            postponed_bodies.append(postponed_body{c, body, postponed_scope,
+            postponed_bodies.append(postponed_body{owner, body, postponed_scope,
                                                    postponed_declaration, f});
             return true;
         }
@@ -949,8 +973,14 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            (template<class D> struct base { ... static_cast<D *>(this) ...
            }; struct d : base<d>) is complete only after it: the bodies
            wait for the end of the translation unit (instantiate_pending) */
+        /* [dcl.spec.auto]/11: a body that needs the type of a member
+           declared with a placeholder further down analyses that one first
+           (deduce_member_body_now) */
+        scoped_value<owned_array<SyntaxRef> *> waiting(defining_bodies,
+                                                       &bodies);
+        scoped_value<entity_index> waiting_class(defining_bodies_class, c);
         for (SyntaxRef body : bodies) {
-            if (!body || queue_body_until_used(body))
+            if (!body || queue_body_until_used(c, body))
                 continue;
             bool placeholder = false;
             entity_index body_fn = 0;
@@ -974,7 +1004,11 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                     body_fn = f;
             }
             if (placeholder && !incomplete_argument) {
-                instantiated_member_body(c, body);
+                SyntaxRef taken = body;
+                for (SyntaxRef &other : bodies)
+                    if (other == taken)
+                        other = nullptr;
+                instantiated_member_body(c, taken);
                 current_declaration = outer_declaration;
                 continue;
             }
@@ -990,17 +1024,29 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         size_t nested_end = nested_bodies.size();
         bool quiet = entity_table[c].instantiation != 0;
         bodies_only_ill_formed = result == analysis_result::well_formed;
-        for (SyntaxRef body : bodies) {
-            if (!body || queue_body_until_used(body))
+        /* (a specialization's, as above) */
+        scoped_value<owned_array<SyntaxRef> *> waiting(defining_bodies,
+                                                       &bodies);
+        scoped_value<entity_index> waiting_class(defining_bodies_class, c);
+        for (SyntaxRef &queued : bodies) {
+            SyntaxRef body = queued;
+            if (!body || queue_body_until_used(c, body))
                 continue;
-            if (quiet)
+            if (quiet) {
+                queued = nullptr;
                 instantiated_member_body(c, body);
-            else
+            } else
                 result = worse(result, member_function_body(c, body));
             current_declaration = outer_declaration;
         }
         for (size_t i = nested_start; i < nested_end; i++) {
             deferred_body nested = nested_bodies[i];
+            /* [temp.inst]/4: a nested class's members' too */
+            /* (where an argument was incomplete: an explicit instantiation
+               takes the others' verdicts here) */
+            if (quiet && incomplete_argument &&
+                queue_body_until_used(nested.c, nested.body))
+                continue;
             if (quiet)
                 instantiated_member_body(nested.c, nested.body);
             else
@@ -1888,21 +1934,30 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
                 "unhandled parts");
         bool satisfied = true;
         if (constrained) {
-            if (!entity_table[c].instantiation || body.defaulted() ||
-                body.deleted())
+            if (!templated_class(c))
                 return not_supported_because(
                     node, "temp.constr",
-                    "a requires-clause on a defaulted or deleted special "
-                    "member or outside a template specialization");
+                    "a requires-clause on a special member outside a "
+                    "template specialization");
             VTRY(r, constraint_satisfied(node[body_at][1], current_scope,
                                          lookup_horizon, satisfied));
+        }
+        if (!satisfied && (body.defaulted() || body.deleted())) {
+            /* [temp.constr.constr], [over.match.viable]/3: declared, so
+               that no other is implicitly declared, and never viable */
+            analysis_result r = special_member_declarator(
+                c, node, special(node[at]), access, false, constexpr_specified,
+                virtual_specified, explicit_specified, inline_specified);
+            if (r == analysis_result::well_formed)
+                entity_table[last_declared].constraint_unsatisfied = true;
+            return r;
         }
         if (body.defaulted() || body.deleted()) {
             /* = default, = delete: no user-provided function
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
             return defaulted_or_deleted_special_member(
-                c, node, special(node[at]), node[body_at], access,
+                c, node, special(node[at]), node[body_at + constrained], access,
                 constexpr_specified, virtual_specified || override_ || final_,
                 explicit_specified);
         }
@@ -1963,6 +2018,53 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     return member_declarators(c, node, s, access, lead + 1, bodies);
 }
 
+/* whether the assignment operator f has the signature of the implicit
+   copy (or move) one: no cv-qualifier, const X& (X&&) */
+bool semantic_analysis::implicit_assignment_signature(entity_index f,
+                                                      bool move) const
+{
+    const entity &x = entity_table[f];
+    type_index t = x.type.unqualified();
+    if (x.member_cv || type_table[t].parameter_count != 1)
+        return false;
+    const struct type &p =
+        type_table[type_table.parameters(t)[0].unqualified()];
+    if (move)
+        return p.kind == type_kind::rvalue_reference && !p.operand.cv();
+    return p.kind == type_kind::lvalue_reference && p.operand.cv() == cv_const;
+}
+
+/* [over.match.best]/2.7: whether the unconstrained assignment operator f of
+   class c has the signature a more constrained defaulted one has, so is
+   never selected; it is then not counted */
+bool semantic_analysis::shadow_assignment(entity_index c, entity_index f)
+{
+    if (entity_table[f].kind != entity_kind::function ||
+        entity_table[f].enclosing != c)
+        return false;
+    for (const constrained_default &d : constrained_defaults) {
+        if (d.class_ != c || !implicit_assignment_signature(f, d.move))
+            continue;
+        if (d.move && move_assignment_operator(f, c))
+            return true;
+        if (!d.move && copy_assignment_operator(f, c)) {
+            entity_table[c].user_copy_assignments--;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* [temp.pre]/8: class c is a specialization's or a member of one */
+bool semantic_analysis::templated_class(entity_index c) const
+{
+    for (; c && entity_table[c].kind == entity_kind::class_type;
+         c = entity_table[c].enclosing)
+        if (entity_table[c].instantiation)
+            return true;
+    return false;
+}
+
 /*
  * The declarators of the member-declaration (or function-definition) n of
  * class c from node[first] on, after its decl-specifier-seq s.
@@ -1992,12 +2094,11 @@ analysis_result semantic_analysis::member_declarators(
                 "unhandled parts");
         bool satisfied = true;
         if (constrained) {
-            if (!entity_table[c].instantiation || body.defaulted() ||
-                body.deleted())
+            if (!templated_class(c))
                 return not_supported_because(
                     n, "temp.constr",
-                    "a requires-clause on a defaulted or deleted member "
-                    "function or outside a template specialization");
+                    "a requires-clause on a member function outside a "
+                    "template specialization");
             VTRY(cr, constraint_satisfied(n[body_at][1], current_scope,
                                           lookup_horizon, satisfied));
         }
@@ -2006,10 +2107,26 @@ analysis_result semantic_analysis::member_declarators(
             scoped_value<SyntaxRef> member_declaration(current_declaration, n);
             compared = defaulted_member_equality(c, n[first], s, access);
         }
-        if (body_at == first + 1 && body.defaulted() && !compared)
-            return defaulted_copy_assignment(c, n, n[first], s, access);
+        if (body_at == first + 1 && body.defaulted() && !compared) {
+            if (!constrained)
+                return defaulted_copy_assignment(c, n, n[first], s, access);
+            /* [special]/6: of the assignment operators with one signature
+               the most constrained satisfied one is the class's; one whose
+               constraint is not satisfied is none */
+            if (!satisfied)
+                return analysis_result::well_formed;
+            bool had_move = entity_table[c].defaulted_move_assignment;
+            VTRY(assigned,
+                 defaulted_copy_assignment(c, n, n[first], s, access));
+            constrained_default made;
+            made.class_ = c;
+            made.move = !had_move && entity_table[c].defaulted_move_assignment;
+            constrained_defaults.append(made);
+            return analysis_result::well_formed;
+        }
         /* = delete: member_function_definition's deleted_definition */
-        if (!body.deleted() && !body.plain() && !compared)
+        if (!body.deleted() && !body.plain() && !compared &&
+            !(body.defaulted() && !satisfied))
             /* a ctor-initializer, a function-try-block, = default */
             return not_supported_because(
                 n, "dcl.fct.def.general",
@@ -2021,6 +2138,8 @@ analysis_result semantic_analysis::member_declarators(
         r = member_declarator(c, n, n[first], s, access, true);
         virt_override = virt_final = false;
         if (r == analysis_result::well_formed) {
+            if (!constrained && shadow_assignment(c, last_declared))
+                satisfied = false;
             entity_table[last_declared].constraint_unsatisfied = !satisfied;
             if (satisfied)
                 bodies.append(n);
@@ -2056,8 +2175,15 @@ analysis_result semantic_analysis::member_declarators(
             "or anonymous union");
     }
     analysis_result result = analysis_result::well_formed;
-    for (SyntaxElement d : declarators)
+    for (SyntaxElement d : declarators) {
+        last_declared = 0;
         result = worse(result, member_declarator(c, n, d, s, access, false));
+        /* (declared only: with no requires-clause of its own) */
+        if (last_declared && d.is_token() == false &&
+            !d.is(syntax_kind::member_declarator) &&
+            shadow_assignment(c, last_declared))
+            entity_table[last_declared].constraint_unsatisfied = true;
+    }
     return result;
 }
 

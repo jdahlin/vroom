@@ -327,7 +327,11 @@ analysis_result semantic_analysis::friend_elaborated_class(entity_index c,
         type_index named = 0;
         uint32_t cv = 0;
         declaring_specializations++;
+        uint32_t outer_naming = naming_friend;
+        if (type[1][0].is_token())
+            naming_friend = tokens.identifier(type[1][0].token());
         analysis_result r = template_type(type[1], 0, false, named, &cv);
+        naming_friend = outer_naming;
         declaring_specializations--;
         if (r != analysis_result::well_formed)
             return r;
@@ -736,10 +740,8 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
            whatever its type's) */
         bool no_linkage = type_without_external_linkage(type) &&
                           !within_unnamed_namespace(space);
-        /* (one a class template specialization defines is defined here
-           whatever its type's linkage) */
-        bool local_definition =
-            no_linkage && defines && entity_table[c].instantiation;
+        /* (one defined here is defined whatever its type's linkage) */
+        bool local_definition = no_linkage && defines;
         if ((no_linkage && !local_definition) ||
             tokens.files.behavior.microsoft_extensions)
             return not_supported_because(

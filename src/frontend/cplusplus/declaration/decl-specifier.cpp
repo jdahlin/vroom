@@ -185,13 +185,16 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
             } else if (kind == name_kind::type_name ||
                        kind == name_kind::template_name) {
                 class_name = name;
+                /* [temp.dep.type]/1: a typedef-name of the current
+                   instantiation is dependent, but its members are known */
                 class_known =
-                    !found_dependent && found &&
+                    found &&
                     (p.names.kind_of(found) == scope_kind::class_ ||
-                     p.names.kind_of(found) == scope_kind::enumeration);
+                     p.names.kind_of(found) == scope_kind::enumeration) &&
+                    (!found_dependent || p.names.encloses_current(found));
                 if (class_known)
                     scope = found;
-                dependent = dependent || found_dependent;
+                dependent = dependent || (found_dependent && !class_known);
             } else if (kind == name_kind::not_declared && template_keyword) {
                 class_name = name;
                 class_known = false;
@@ -611,9 +614,11 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                    !at(preprocessing_op_or_punc::ELLIPSIS, 1)) {
             if (facts.has_defining_type_specifier)
                 break;
+            last_type_region = 0;
             typename_specifier();
             if (failed())
                 return 0;
+            facts.type_region = last_type_region;
             facts.has_defining_type_specifier = true;
         } else if (at(extension_keyword::type_transformation)) {
             /* [ext.clang] a simple-type-specifier */
@@ -709,8 +714,15 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                             placeholder_mark, placeholder_first);
                 facts.has_defining_type_specifier = true;
                 k = standard_keyword::auto_;
-            } else if (c == name_class::type || (c == name_class::dependent &&
-                                                 facts.implicit_typename)) {
+            } else if (c == name_class::type ||
+                       (c == name_class::dependent &&
+                        facts.implicit_typename) ||
+                       (c == name_class::unknown &&
+                        (facts.alias_type_id ||
+                         (facts.implicit_typename && length > 1)) &&
+                        !facts.has_defining_type_specifier &&
+                        !at(preprocessing_op_or_punc::LESS, length) &&
+                        !at(preprocessing_op_or_punc::COLON_COLON, length))) {
                 last_type_region = 0;
                 simple_type_specifier_with_name();
                 if (failed())

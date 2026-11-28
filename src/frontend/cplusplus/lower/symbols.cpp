@@ -27,6 +27,13 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
     if (x.linkage_of_name == linkage::internal &&
         !analysis.specialization_visible(e))
         storage = AST_STORAGE_STATIC;
+    /* [impl.clang] clang gives an overloadable function a mangled
+       name even with C language linkage; its definition here (glibc's
+       static fortify printf, beside the library's printf) keeps the plain
+       name, so it must be local */
+    else if (x.defined && x.c_language_linkage &&
+             (x.gnu_flags & gnu_overloadable))
+        storage = AST_STORAGE_STATIC;
     /* [impl.clang]: an entity whose type has no linkage (an unnamed
        class's) cannot be named in another translation unit, so its symbol
        is local, its name unmangled as an external one's */
@@ -37,24 +44,26 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
     flags = AST_SYMBOL_FLAG_GLOBAL;
     /* [basic.def.odr]/11: an inline function or variable is defined in
        every translation unit that odr-uses it: emitted where referenced,
-       weak so that the copies link as one ([abi:vague-inline] wants a
-       COMDAT group too, which C's code generator does not make yet) */
+       weak so that the copies link as one, in a COMDAT group
+       ([abi:vague-inline]) */
     instantiation_kind explicit_ = analysis.explicitly_instantiated(e);
     if (explicit_ == instantiation_kind::definition)
         /* [temp.explicit]/10's explicit instantiation definition: emitted
            whether used or not, weak (clang's weak_odr) */
-        flags |= AST_SYMBOL_FLAG_WEAK;
+        flags |= AST_SYMBOL_FLAG_WEAK | AST_SYMBOL_FLAG_COMDAT;
     else if (x.inline_ && explicit_ != instantiation_kind::declaration &&
              !(x.gnu_flags & gnu_inline_definition))
         /* (an inline gnu_inline function is not emitted at all: a plain
            global symbol, C's GNU extern inline, gnu_attributes) */
-        flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
+        flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK |
+                 AST_SYMBOL_FLAG_COMDAT;
     /* [depr.static.constexpr]/1, [dcl.constexpr]/1 [impl.clang]: an inline
        member's redeclaration at namespace scope, and a definition there
        that adds constexpr, emitted here, weak (weak_odr) */
     for (entity_index member : analysis.weak_static_members)
         if (member == e)
-            flags = AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK;
+            flags = AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
+                    AST_SYMBOL_FLAG_COMDAT;
     /* [class.local]: a member of a local class has no linkage
        ([basic.link]/8); [impl.clang] its symbol is local unless the
        outermost function the class is in is inline or templated (then
@@ -301,7 +310,7 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     if (function && kind == AST_SYMBOL_VARIABLE &&
         storage == AST_STORAGE_NONE && (flags & AST_SYMBOL_FLAG_LINKONCE))
         flags = AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_LINKONCE |
-                AST_SYMBOL_FLAG_WEAK;
+                AST_SYMBOL_FLAG_WEAK | AST_SYMBOL_FLAG_COMDAT;
     else if (function) {
         /* a local static: [basic.stc.static]/1, its symbol the mangled one
            (codegen writes an assembler name as given) */
@@ -333,6 +342,12 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     s = ast_builder_symbol(c, kind, name.data(), name.size(), t, storage, flags,
                            0);
     *slot = s;
+    if (x.kind == entity_kind::function && x.name) {
+        owned_buffer identifier;
+        spelling(e, identifier);
+        ast_builder_symbol_debug_name(c, s, identifier.data(),
+                                      identifier.size());
+    }
     if (x.asm_label) {
         /* [ext:gnu_asm_labels] the symbol is the label's characters, as
            written (codegen writes an assembler name as given): the

@@ -160,6 +160,10 @@ generic)
 	step cxx-sema-claims env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-sema.py selftest
 	# the multiple-include guard skip: text and diagnostics as clang -E -P (src/test/cxx/include-guard)
 	step cxx-include-guard env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-include-guard.py --bin-dir "$BUILD"
+	# -g line tables of C++ against clang's (src/test/cxx/debug-lines)
+	step cxx-debug-lines env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-debug-lines.py --bin-dir "$BUILD"
+	# -g's function signatures and types against clang's (src/test/debug-info)
+	step debug-info env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/debug-info.py --bin-dir "$BUILD"
 	step cxx-depfile env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-depfile.py --bin-dir "$BUILD"
 	step cxx-prefix   python3 bench/cxx-prefix.py -j "$J" --bin-dir "$BUILD"
 	# semantic analysis vs clang on clang's own C++ tests (CXX, SemaCXX, SemaTemplate; fetched, pinned):

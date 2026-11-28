@@ -4337,9 +4337,16 @@ constness semantic_analysis::evaluate_invocation(
     uint32_t with_this = 0;
     if (self.kind == constant_value_kind::pointer)
         with_this = 1;
+    /* [expr.call]/12: the arguments of an ellipsis are evaluated and bind no
+       parameter */
+    const struct type &called = type_table[entity_table[f].type.unqualified()];
+    uint32_t bound = count;
+    if (called.kind == type_kind::function && called.variadic &&
+        count > called.parameter_count)
+        bound = called.parameter_count;
     if (!body || semantics[body].kind != semantic_kind::function_body ||
         semantics[body].evaluation == constness::not_constant ||
-        semantics[body].count != count + with_this ||
+        semantics[body].count != bound + with_this ||
         (state.defined_before && semantics[body].at > state.defined_before)) {
         if (entity_table[f].held_because)
             evaluation_cause = entity_table[f].held_because;
@@ -4370,8 +4377,13 @@ constness semantic_analysis::evaluate_invocation(
     size_t before_arguments = state.objects.size();
     size_t before_argument_elements = state.elements.size();
     uint32_t frame = state.frames + 1;
-    const uint32_t *items = semantics.items(first);
-    const uint32_t *parameters = semantics.items(semantics[body].first);
+    /* (read at each use: evaluating may analyse a body, which moves the
+       tree's lists) */
+    auto items = [&](uint32_t i) { return semantics.items(first)[i]; };
+    uint32_t parameter_list = semantics[body].first;
+    auto parameters = [&](uint32_t i) {
+        return semantics.items(parameter_list)[i];
+    };
     /* the arguments first: a temporary one materializes (bound to a
        reference parameter) is the caller's, and lives until the end of
        the full-expression containing the call ([class.temporary]/6.9), so
@@ -4380,7 +4392,7 @@ constness semantic_analysis::evaluate_invocation(
     constness arguments = constness::constant;
     for (uint32_t i = 0; i < count; i++) {
         constant_value value;
-        constness c = evaluate_node(state, items[i], value);
+        constness c = evaluate_node(state, items(i), value);
         if (c == constness::unknown && state.potential)
             arguments = c;
         else if (c != constness::constant) {
@@ -4405,15 +4417,15 @@ constness semantic_analysis::evaluate_invocation(
     size_t saved_elements = state.elements.size();
     if (with_this) {
         constant_evaluation::object o;
-        o.entity = entity_index_in(parameters[0]);
+        o.entity = entity_index_in(parameters(0));
         o.frame = frame;
         o.value = self;
         append_object(state, o);
     }
-    for (uint32_t i = 0; i < count && arguments == constness::constant; i++) {
+    for (uint32_t i = 0; i < bound && arguments == constness::constant; i++) {
         constant_evaluation::object o;
         o.value = values[i];
-        o.entity = entity_index_in(parameters[i + with_this]);
+        o.entity = entity_index_in(parameters(i + with_this));
         o.frame = frame;
         append_object(state, o);
         /* [expr.call]/8: a parameter of a class type with a destructor is
@@ -4514,7 +4526,8 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
     const semantic_node x = semantics[node];
     const entity &k = entity_table[x.entity_b()];
     entity_index c_entity = evaluated_class(entity_table[k.enclosing].type);
-    if (k.implicit) {
+    /* (an inheriting constructor has its own definition, invoked as any) */
+    if (k.implicit && !k.inherited_constructor) {
         /* [class.default.ctor]/4: the implicit default constructor of a
            class with no members does nothing where its bases' do; one with a
            synthesized definition (default member initializers) is evaluated

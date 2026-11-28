@@ -72,6 +72,30 @@ static triviality assignment_triviality(const semantic_analysis &a,
     return triviality::trivial;
 }
 
+/* [class.copy.assign]/12, [dcl.stc]/9: a mutable member of a const source
+   is not const, so a template operator=(T &) of its class binds it better
+   than the implicit X &operator=(const X &) does: no trivial assignment */
+bool semantic_analysis::mutable_member_assigns_by_template(entity_index c)
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (!m.mutable_member)
+            continue;
+        entity_index k = element_class(m.type);
+        if (!k)
+            continue;
+        lookup_result found =
+            lookup_qualified(k, operator_name(preprocessing_op_or_punc::EQUAL),
+                             lookup_filter::any);
+        /* (a member template, and a name analysis does not follow, are
+           lookup's unknown entity) */
+        if (found.unknown_entity)
+            return true;
+    }
+    return false;
+}
+
 /* ( type-id , type-id ): which is 0 __is_assignable, 1
    __is_nothrow_assignable, 2 __is_trivially_assignable */
 analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
@@ -136,7 +160,12 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
                         n, "meta.unary.prop",
                         "a trivial-assignment trait whose assignment's "
                         "triviality is unknown");
-                value = k == triviality::trivial;
+                value = k == triviality::trivial &&
+                        !(lk.kind == type_kind::class_type &&
+                          left.type.unqualified() == right.type.unqualified() &&
+                          type_table[u.unqualified()].kind ==
+                              type_kind::lvalue_reference &&
+                          mutable_member_assigns_by_template(lk.entity));
             }
         } else if (which == 2 && lk.kind == type_kind::class_type &&
                    left.type.unqualified() == right.type.unqualified() &&

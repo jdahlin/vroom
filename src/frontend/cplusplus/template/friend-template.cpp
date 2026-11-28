@@ -140,6 +140,29 @@ static SyntaxElement last_component(SyntaxElement nested, bool &earlier_id)
     return last;
 }
 
+/* template<...> friend class-key C<...>::identifier ; where C's arguments
+   name no parameter of the head: the member class template of C */
+analysis_result
+semantic_analysis::friend_member_template(entity_index c, TemplateDeclaration n,
+                                          SyntaxElement elaborated)
+{
+    nominated_scope ns;
+    VTRY(r, nested_name_specifier(elaborated[1].index(), ns));
+    entity_index prior = 0;
+    if (ns.entity && !ns.dependent && elaborated.size() == 3 &&
+        elaborated[2].is_identifier() &&
+        entity_table[ns.entity].kind == entity_kind::class_type)
+        prior = entity_table.find(ns.entity,
+                                  tokens.identifier(elaborated[2].token()));
+    if (!prior || !class_template_of(prior))
+        return not_supported_because(n, "temp.friend",
+                                     "a friend member template of a class "
+                                     "that declares no class template of its "
+                                     "name");
+    befriend_template(c, function_templates[class_template_of(prior)].entity);
+    return analysis_result::well_formed;
+}
+
 /*
  * template<...> friend class-key nested-name-specifier identifier ;
  *
@@ -277,16 +300,23 @@ analysis_result semantic_analysis::dependent_member_friend(
             written.append(id[i]);
             expansion.append(false);
         }
+    /* [ext.clang] no parameter of the template-head named in C: the head
+       is a member template's own, and C names the class it is a member of
+       (libc++'s template <bool> friend class transform_view<_View,
+       _Fn>::__iterator;) */
+    size_t unused = 0;
+    bool unnamed = false;
     for (SyntaxRef parameter : parameters) {
         token_index name_at = 0;
         for (token_index t = parameter.first_token();
              t < tree[parameter].end_token; t++)
             if (tokens[t].kind == token_kind::identifier)
                 name_at = t;
-        if (!name_at)
-            return not_supported_because(
-                n, "temp.friend",
-                "a friend template with an unnamed template parameter");
+        if (!name_at) {
+            unnamed = true;
+            unused++;
+            continue;
+        }
         bool named_in_c = false;
         for (size_t a = 0; a < written.size(); a++) {
             /* a pack expansion: an ellipsis after the argument, or ending
@@ -307,12 +337,20 @@ analysis_result semantic_analysis::dependent_member_friend(
                     named_in_c = true;
         }
         if (!named_in_c)
-            return ill_formed(parameter,
-                              "the template parameters of a friend member "
-                              "of a dependent type shall be deducible from "
-                              "its class",
-                              "temp.friend");
+            unused++;
     }
+    if (unused == parameters.size() &&
+        declaration.is(syntax_kind::elaborated_type_specifier))
+        return friend_member_template(c, n, declaration);
+    if (unnamed)
+        return not_supported_because(
+            n, "temp.friend",
+            "a friend template with an unnamed template parameter");
+    if (unused)
+        return ill_formed(n,
+                          "the template parameters of a friend member of a "
+                          "dependent type shall be deducible from its class",
+                          "temp.friend");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY(sr, template_parameter_scope(n, parameters, enclosing_namespace(c), 0,

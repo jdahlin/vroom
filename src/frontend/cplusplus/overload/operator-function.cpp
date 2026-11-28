@@ -540,7 +540,8 @@ bool semantic_analysis::assigned_bitwise(entity_index c)
     for (entity_index o = found.entity; o; o = entity_table[o].next_overload) {
         if (entity_table[o].kind != entity_kind::function)
             return false;
-        if (copy_assignment_operator(o, c) || move_assignment_operator(o, c))
+        if (!entity_table[o].constraint_unsatisfied &&
+            (copy_assignment_operator(o, c) || move_assignment_operator(o, c)))
             return false;
     }
     owned_array<entity_index> classes;

@@ -60,6 +60,24 @@ void ast_builder_psabi_reporter(cc *c,
                                                const char *text),
                                 void *context);
 
+/* -g: the other front end's source locations, in its own terms, as the nodes
+   hold them for codegen's line table, and how codegen reads one (false:
+   none).  Without a describer the two setters below do nothing. */
+void ast_builder_location_describer(
+    cc *c,
+    bool (*describe)(void *context, uint32_t location, const char **name,
+                     uint32_t *line, uint32_t *column),
+    void *context);
+/* the location the nodes ast_builder_node makes from now on get; returns the
+   one before */
+uint32_t ast_builder_location(cc *c, uint32_t location);
+/* one node's */
+void ast_builder_node_location(cc *c, uint32_t n, uint32_t location);
+/* the source's identifier of a symbol named by its linkage name, for the
+   function's debug entry */
+void ast_builder_symbol_debug_name(cc *c, uint32_t s, const char *name,
+                                   size_t length);
+
 /* ---- types ---- */
 ast_qualified_type ast_builder_type_basic(int kind); /* AST_TYPE_VOID .. */
 ast_qualified_type ast_builder_type_qualified(cc *c, ast_qualified_type t,

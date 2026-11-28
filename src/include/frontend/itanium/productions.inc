@@ -230,8 +230,12 @@ ITANIUM_TERMINAL(Tt_template_parameter_decl, "Tt")
  * [abi:mangle.function-param]:
  *
  *     <function-param> ::= fp <top-level CV-qualifiers> _
+ *                      ::= fL <L-1 non-negative number> p <top-level CV-qualifiers> _
  */
 ITANIUM_TERMINAL(fp_function_param, "fp")
+ITANIUM_TERMINAL(fpT_this_parameter, "fpT")
+ITANIUM_TERMINAL(fL_outer_function_param, "fL")
+ITANIUM_TERMINAL(p_parameter_of_level, "p")
 /*
  * [abi:mangle.template-arg]:
  *
@@ -279,13 +283,18 @@ ITANIUM_TERMINAL(sz_sizeof_expression, "sz")
 ITANIUM_TERMINAL(at_alignof_type, "at")
 ITANIUM_TERMINAL(az_alignof_expression, "az")
 ITANIUM_TERMINAL(dt_member_access, "dt")
+ITANIUM_TERMINAL(on_operator_function_id, "on")
 ITANIUM_TERMINAL(sZ_sizeof_pack, "sZ")
 ITANIUM_TERMINAL(sp_pack_expansion_expression, "sp")
+/* a unary fold: left and right */
+ITANIUM_TERMINAL(fl_left_fold, "fl")
+ITANIUM_TERMINAL(fr_right_fold, "fr")
 ITANIUM_TERMINAL(gs_global_scope, "gs")
 ITANIUM_TERMINAL(sr_unresolved_scope, "sr")
 ITANIUM_TERMINAL(L_expr_primary, "L")
 ITANIUM_TERMINAL(L_Z_external_name, "L_Z")
 ITANIUM_TERMINAL(rq_requires_expression, "rq")
+ITANIUM_TERMINAL(rQ_requires_parameters, "rQ")
 ITANIUM_TERMINAL(X_requirement, "X")
 ITANIUM_TERMINAL(N_noexcept_requirement, "N")
 ITANIUM_TERMINAL(R_return_type_requirement, "R")

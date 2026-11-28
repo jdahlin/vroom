@@ -342,6 +342,15 @@ bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
             preprocessing_op_or_punc_primary(tokens[t - 1].op_or_punc) ==
                 preprocessing_op_or_punc::COLON_COLON)
             continue;
+        /* ... and after . or ->, in the object's class (not this's) */
+        if (t > first + 1 &&
+            tokens[t - 1].kind == token_kind::operator_or_punctuator &&
+            (preprocessing_op_or_punc_primary(tokens[t - 1].op_or_punc) ==
+                 preprocessing_op_or_punc::ARROW ||
+             preprocessing_op_or_punc_primary(tokens[t - 1].op_or_punc) ==
+                 preprocessing_op_or_punc::DOT) &&
+            syntax_parser.keyword_of(tokens[t - 2]) != standard_keyword::this_)
+            continue;
         uint32_t name = tokens.identifier(t);
         bool elsewhere = false;
         for (token_index u = defining_members_first;
@@ -372,7 +381,11 @@ bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
         uint32_t d = entity_table[found.entity].first_declaration;
         /* a type alias declared before: no later member of the name
            can overload it ([class.mem]/6 sees the same alias) */
-        if (d && entity_table[found.entity].kind == entity_kind::typedef_name &&
+        entity_kind kind = entity_table[found.entity].kind;
+        /* ... nor can a data member declared before */
+        if (d &&
+            (kind == entity_kind::typedef_name ||
+             kind == entity_kind::variable) &&
             entity_table.declaration(d).node.first_token() < first)
             continue;
         if (d &&
@@ -497,6 +510,16 @@ analysis_result semantic_analysis::parameter_scope_noexcept(SyntaxRef n,
     if (n.size() != 4)
         return noexcept_specifier(n, member, non_throwing);
     entity_index outer = current_scope;
+    /* a member's noexcept-specifier in a class defined outside its class
+       template, whose current scope binds that definition's template
+       parameters: the class's members are found */
+    bool inside = false;
+    for (entity_index k = current_scope; k && !inside;
+         k = entity_table[k].enclosing)
+        inside = k == defining_class;
+    if (member && defining_class && !inside &&
+        !entity_table[defining_class].size)
+        current_scope = defining_class;
     open_parameter_scope();
     analysis_result r = analysis_result::well_formed;
     bool friend_of_class =

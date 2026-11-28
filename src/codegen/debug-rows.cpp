@@ -56,9 +56,17 @@ VPRIV bool codegen_debug_location_get(codegen_context *e, uint32_t loc,
     const char *name;
     uint32_t len;
 
-    if (!pp_location_describe(e->compile_context->p, loc, &name, &len, line,
-                              col) ||
-        !*line)
+    const cc *c = e->compile_context;
+
+    if (c->describe_location) {
+        if (!c->describe_location(c->describe_location_context, loc, &name,
+                                  line, col))
+            return false;
+        len = (uint32_t)strlen(name);
+    } else if (!pp_location_describe(c->p, loc, &name, &len, line, col)) {
+        return false;
+    }
+    if (!*line)
         return false;
     *file = codegen_debug_file_find(e, name, len) +
             (CODEGEN_DWARF_VERSION(e->compile_context) <

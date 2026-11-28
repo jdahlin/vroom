@@ -222,7 +222,8 @@ uint32_t c_lowering::typeinfo(type_index t, token_index at)
             define = false;
         }
     } else {
-        flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
+        flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK |
+                 AST_SYMBOL_FLAG_COMDAT;
     }
     ast_qualified_type array = ast_builder_type_array(c, vp, length, true);
     uint32_t s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, name.data(),

@@ -946,7 +946,10 @@ analysis_result semantic_analysis::matching_specialization(
                 return not_supported_because(
                     at, "temp.class.order",
                     "partial specializations whose ordering is unknown");
-            best = forward && !backward;
+            /* [temp.func.order]/6.2.2: equivalent arguments, the more
+               constrained is more specialized */
+            best = forward && (!backward || more_constrained_specialization(
+                                                found[i], found[j]));
         }
         if (best)
             chosen = i;

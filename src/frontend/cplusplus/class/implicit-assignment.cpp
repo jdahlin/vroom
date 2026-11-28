@@ -101,8 +101,9 @@ bool semantic_analysis::variant_member_prevents_assignment(entity_index u,
         for (entity_index f = entity_table.find(m, name);
              f && entity_table[f].enclosing == m;
              f = entity_table[f].next_overload)
-            if (copy_assignment_operator(f, m) ||
-                (move && move_assignment_operator(f, m)))
+            if (!entity_table[f].constraint_unsatisfied &&
+                (copy_assignment_operator(f, m) ||
+                 (move && move_assignment_operator(f, m))))
                 return true;
         if (!move && copy_assignment_deleted(m))
             return true;
@@ -158,8 +159,10 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
         bool declared = false;
         for (entity_index f = found.entity; f && entity_table[f].enclosing == k;
              f = entity_table[f].next_overload)
-            if (!entity_table[f].implicit && (copy_assignment_operator(f, k) ||
-                                              move_assignment_operator(f, k)))
+            if (!entity_table[f].implicit &&
+                !entity_table[f].constraint_unsatisfied &&
+                (copy_assignment_operator(f, k) ||
+                 move_assignment_operator(f, k)))
                 declared = true;
         if (!declared && variant_member_prevents_assignment(k, move))
             return assignment_use::deleted;
@@ -478,7 +481,7 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
     bool user_copy = false, user_move = false;
     for (entity_index f = head; f && entity_table[f].enclosing == c;
          f = entity_table[f].next_overload) {
-        if (entity_table[f].implicit)
+        if (entity_table[f].implicit || entity_table[f].constraint_unsatisfied)
             continue;
         if (copy_assignment_operator(f, c))
             user_copy = true;

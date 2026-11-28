@@ -215,7 +215,9 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
     if (f.kind != type_kind::pointer) {
         if (maybe_null)
             return of_form(sequence::form::unknown);
-        if (f.kind == type_kind::fundamental)
+        /* ([conv.mem]: a pointer to member converts to no pointer) */
+        if (f.kind == type_kind::fundamental ||
+            f.kind == type_kind::pointer_to_member)
             return of_form(sequence::form::bad);
         return of_form(sequence::form::unknown);
     }
@@ -400,7 +402,8 @@ bool semantic_analysis::conversion_function_to_class(
         unknown = true;
         return false;
     }
-    entity_index chosen = 0;
+    entity_index chosen = 0, tied = 0;
+    conversion_sequence chosen_object;
     for (entity_index f : candidates) {
         /* [over.match.copy]/1.2: only non-explicit conversion functions are
            candidates for an implicit conversion sequence */
@@ -417,18 +420,40 @@ bool semantic_analysis::conversion_function_to_class(
         }
         if (r.entity != c1 && !base_step(r.entity, c1, ambiguous) && !ambiguous)
             continue;
-        /* a ref-qualified one: [class.copy.elision]/3's first overload
-           resolution takes the returned lvalue as an rvalue, which the
-           sequence of an argument is not told apart from */
-        if (ambiguous || chosen ||
-            (entity_table[f].member_cv & (cv_ref_lvalue | cv_ref_rvalue))) {
+        /* a ref-qualified one for an lvalue: [class.copy.elision]/3's
+           first overload resolution takes the returned lvalue as an
+           rvalue, which the sequence of an argument is not told apart
+           from */
+        if (ambiguous ||
+            (a.category == value_category::lvalue &&
+             (entity_table[f].member_cv & (cv_ref_lvalue | cv_ref_rvalue)))) {
             unknown = true;
             return false;
         }
         /* the implicit object parameter ([over.match.funcs]/4) */
-        if (object_sequence(a, f).kind == sequence::form::bad)
+        conversion_sequence object = object_sequence(a, f);
+        if (object.kind == sequence::form::bad)
             continue;
-        chosen = f;
+        if (!chosen) {
+            chosen = f;
+            chosen_object = object;
+            continue;
+        }
+        /* [over.match.best]/2: the better implicit object argument
+           ([over.ics.rank]/3.2.3: && for an rvalue over const&); two that
+           it does not order are not ranked here */
+        int order = compare_conversions(object, chosen_object);
+        if (order < 0) {
+            chosen = f;
+            chosen_object = object;
+            tied = 0;
+        } else if (!order) {
+            tied = f;
+        }
+    }
+    if (tied) {
+        unknown = true;
+        return false;
     }
     if (!chosen)
         return false;
@@ -737,6 +762,12 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                             fr.entity == c1 && !(res.type.cv() & ~t1.cv())) {
                             if (yields_lvalue && !rvalue_reference)
                                 return found;
+                            /* /5.4.4: an rvalue reference binds no lvalue
+                               the one conversion function yields
+                               (std::reference_wrapper's operator T&
+                               beside f(T&&) = delete) */
+                            if (yields_lvalue)
+                                return of_form(sequence::form::bad);
                             if (!yields_lvalue && binds_rvalues) {
                                 found.reference = true;
                                 found.rvalue_reference = rvalue_reference;
@@ -898,6 +929,30 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
            conversion to the target type") */
         if (!user_defined)
             return of_form(sequence::form::bad);
+        /* [expr.prim.lambda.closure]/8: a generic lambda without a
+           lambda-capture converts to a pointer to function of its
+           parameter count by the conversion function template */
+        if (p.kind == type_kind::pointer && y.entity &&
+            entity_table[y.entity].lambda &&
+            entity_table[y.entity].member_count == 0 &&
+            entity_table[y.entity].call_operator) {
+            entity_index call = entity_table[y.entity].call_operator;
+            const struct type &to = type_table[p.operand.unqualified()];
+            if (entity_table[call].kind == entity_kind::template_entity &&
+                entity_table[call].template_record &&
+                to.kind == type_kind::function && !to.variadic) {
+                const function_template &f =
+                    function_templates[entity_table[call].template_record];
+                const struct type &pattern =
+                    type_table[entity_table[f.entity].type.unqualified()];
+                if (pattern.kind == type_kind::function && !pattern.variadic &&
+                    pattern.parameter_count == to.parameter_count) {
+                    sequence made = of_form(sequence::form::user_defined);
+                    made.function = call;
+                    return made;
+                }
+            }
+        }
         bool ambiguous = false, unknown = false;
         entity_index f =
             conversion_function_for(a, parameter, false, ambiguous, unknown);

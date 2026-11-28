@@ -98,6 +98,8 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     vtt_parameter = 0;
     if (failure.what)
         return false;
+    /* -g: the function's own line is its body's '{' */
+    ast_builder_node_location(c, block_node, tokens.location(node(body.a).at));
     struct node &b = ast_builder_ast(c)->nodes[block_node];
     uint32_t count = static_cast<uint32_t>(parameters.size());
     b.a = ast_builder_list(c, parameters.data(), count);
@@ -424,7 +426,9 @@ bool c_lowering::translation_unit()
                 return false;
         }
     }
-    if (!initializers.empty() && !dynamic_initialization())
+    if (!(initializers.empty() && constant_initializers.empty() &&
+          constant_member_initializers.empty()) &&
+        !dynamic_initialization())
         return false;
     /* [abi:vague-vtable]: the virtual table of each class whose key
        function this translation unit defines */

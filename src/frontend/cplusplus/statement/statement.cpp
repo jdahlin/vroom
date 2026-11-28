@@ -1017,10 +1017,66 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
     return r;
 }
 
+/*
+ * [stmt.switch]/2, [conv]/5: a condition of class type is
+ * contextually implicitly converted: its non-explicit conversion functions
+ * to integral or enumeration types (or references to them) shall all yield
+ * one type, and the conversion function overload resolution chooses for it
+ * is called
+ */
+analysis_result semantic_analysis::switch_class_condition(SyntaxRef at,
+                                                          expression_meaning &m)
+{
+    entity_index cls = type_table[m.type.unqualified()].entity;
+    require_complete(cls);
+    owned_array<entity_index> functions, templates;
+    bool followed = visible_conversion_functions(cls, functions, &templates);
+    type_index to = 0;
+    unsigned types = 0;
+    for (entity_index f : functions) {
+        if (entity_table[f].explicit_)
+            continue;
+        qualified_type result = conversion_function_result(f).type;
+        const struct type &r = type_table[result.unqualified()];
+        if (r.kind == type_kind::lvalue_reference ||
+            r.kind == type_kind::rvalue_reference)
+            result = r.operand;
+        if (!is_integral(result) &&
+            type_table[result.unqualified()].kind != type_kind::enumeration)
+            continue;
+        if (!types || result.unqualified() != to)
+            types++;
+        to = result.unqualified();
+        /* [ext:gnu_attributes] diagnose_if on a conversion function: its
+           condition (on the object converted) is not checked here */
+        if (entity_table[f].gnu_flags & gnu_diagnose_if)
+            followed = false;
+    }
+    /* before C++14 a single such function (N3323) */
+    if (tokens.files.behavior.edition < standard_edition::cplusplus_14 &&
+        functions.size() != 1)
+        followed = false;
+    bool converted = false;
+    if (followed && types == 1) {
+        VTRY(r,
+             conversion_function_call(at, m, qualified_type::make(to, cv_none),
+                                      false, converted));
+    }
+    if (!converted)
+        return not_supported_because(
+            at, "stmt.switch",
+            "a switch condition of class type without one integral or "
+            "enumeration conversion function that analysis follows");
+    return analysis_result::well_formed;
+}
+
 /* [stmt.switch]/2: the value of a switch's condition, m */
 analysis_result semantic_analysis::switch_condition(SyntaxRef at,
                                                     expression_meaning &m)
 {
+    if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
+        VTRY(c, switch_class_condition(at, m));
+    }
     VTRY(r, operand_value(at, m));
     /* [stmt.switch]/2: "The condition shall be of integral type,
        enumeration type, or class type. ... If the (possibly converted) type

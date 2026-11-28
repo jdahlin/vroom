@@ -705,6 +705,9 @@ struct decl_specifier_facts {
     /* in: [temp.res]/5's contexts, where a qualified-id that names a member
        of an unknown specialization is assumed to name a type */
     bool implicit_typename = false;
+    /* in: an alias-declaration's type-id, whose first specifier is a type
+       ([dcl.typedef]/2) */
+    bool alias_type_id = false;
     /* out: a name in the sequence depends on a template parameter */
     bool dependent = false;
     /* [dcl.type.elab]/1: an elaborated-type-specifier, whether it has the
@@ -1421,6 +1424,7 @@ class parser
     /* the lookahead after the '>' of the template-argument-list whose '<'
        is at tokens[ahead], brackets balanced; 0 when none ends before a
        ';', '{' or '}' */
+    bool less_than_operator(unsigned i);
     unsigned angle_group_end(unsigned ahead);
     /* angle_group_end of the current token, then a ( or a :: */
     bool angle_group_follows_call();

@@ -748,6 +748,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         if (!as_cast && !vector_value && !zero_vector && !array_value &&
             record.kind != type_kind::fundamental &&
             record.kind != type_kind::pointer &&
+            record.kind != type_kind::pointer_to_member &&
             record.kind != type_kind::enumeration)
             return not_supported_because(
                 n, "expr.type.conv",
@@ -1041,6 +1042,98 @@ bool semantic_analysis::copy_candidate_wins(template_ref ct)
 }
 
 /*
+ * [over.match.class.deduct]/1 (P1816, C++20): the aggregate deduction
+ * candidate of a class template with no constructors, for a braced list of
+ * elements: its bases, then its members.  Here the simple form only: an
+ * unconstrained template, a braced element for each base and each element
+ * after them for a member whose type is a type parameter itself
+ * (Filler{{dataset}, &S::member}), so that no brace elision takes part.
+ * false when the aggregate is of another form.
+ */
+bool semantic_analysis::aggregate_deduction(
+    template_ref ct, const owned_array<expression_meaning> &arguments,
+    const owned_array<bool> &braced, owned_array<template_argument> &values,
+    owned_array<bool> &set)
+{
+    const function_template record = function_templates[ct];
+    if (!record.definition ||
+        !record.definition.is(syntax_kind::class_specifier) ||
+        !tokens.files.behavior.has(language_feature::designated_initializers) ||
+        template_head_constrained(record.declaration))
+        return false;
+    for (uint32_t i = 0; i < record.parameter_count; i++) {
+        values.append(template_argument());
+        set.append(false);
+    }
+    auto parameter_named = [&](token_index t) {
+        uint32_t found = UINT32_MAX;
+        if (tokens[t].kind != token_kind::identifier)
+            return found;
+        for (uint32_t i = 0; i < record.parameter_count; i++)
+            if (entity_table
+                    [template_parameter_entities[record.first_parameter + i]]
+                        .name == tokens.identifier(t))
+                found = i;
+        return found;
+    };
+    size_t element = 0;
+    auto specifier = record.definition.class_specifier();
+    if (SyntaxElement bases = specifier.class_head().base_clause()) {
+        for (token_index t = bases.first_token(); t < bases.end_token(); t++)
+            if (parameter_named(t) != UINT32_MAX)
+                return false;
+        for (SyntaxElement x : bases.elements()) {
+            if (x.is(syntax_kind::base_specifier_list))
+                for (SyntaxElement b : x.elements())
+                    element +=
+                        !b.is_token() || !b.is(preprocessing_op_or_punc::COMMA);
+            else if (!x.is(preprocessing_op_or_punc::COLON))
+                element++;
+        }
+    }
+    for (size_t i = 0; i < element && i < braced.size(); i++)
+        if (!braced[i])
+            return false;
+    for (SyntaxElement member : specifier.member_specification().elements()) {
+        if (element >= arguments.size())
+            break;
+        if (!member.is(syntax_kind::member_declaration,
+                       syntax_kind::simple_declaration))
+            continue;
+        uint32_t at = leading_gnu_attributes(member.index());
+        if (at + 1 >= member.size() ||
+            !member[at].is(syntax_kind::decl_specifier_seq))
+            continue;
+        DeclaratorParts d(member[at + 1]);
+        if (!d.direct || !d.id.is_identifier() || d.parameters())
+            continue;
+        SyntaxElement type = member[at];
+        uint32_t parameter = UINT32_MAX;
+        bool dependent = false;
+        for (token_index t = type.first_token(); t < type.end_token(); t++)
+            if (parameter_named(t) != UINT32_MAX) {
+                parameter = parameter_named(t);
+                dependent = true;
+            }
+        if (!dependent || type.end_token() != type.first_token() + 1 ||
+            !member[at + 1].is_identifier() || braced[element])
+            return false;
+        {
+            template_argument a;
+            a.kind = template_argument::kind_t::type;
+            a.type = qualified_type::make(arguments[element].type.unqualified(),
+                                          cv_none);
+            if (set[parameter] && !(values[parameter] == a))
+                return false;
+            values[parameter] = a;
+            set[parameter] = true;
+        }
+        element++;
+    }
+    return element >= arguments.size();
+}
+
+/*
  * [over.match.class.deduct]/1: "When resolving a placeholder for a deduced
  * class type ([dcl.type.simple]) where the template-name names a primary
  * class template C, a set of functions and function templates, called the
@@ -1081,13 +1174,23 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, template_ref ct,
     size_t expressions_before = expressions.size();
     size_t uses_before = name_uses.size();
     owned_array<expression_meaning> arguments;
+    owned_array<bool> braced;
+    bool any_braced = false;
     for (SyntaxElement a : clauses) {
-        if (a.is(syntax_kind::braced_init_list) ||
-            a.is(preprocessing_op_or_punc::ELLIPSIS))
+        if (a.is(preprocessing_op_or_punc::ELLIPSIS))
             return not_supported_because(n, "over.match.class.deduct",
                                          "class template argument deduction "
-                                         "from a braced list or a pack");
+                                         "from a pack");
         expression_meaning e;
+        braced.append(a.is(syntax_kind::braced_init_list));
+        if (a.is(syntax_kind::braced_init_list)) {
+            /* [temp.deduct.type]/5.6: a braced-init-list deduces nothing
+               for a parameter that is no initializer_list or array; one
+               that is leaves its template parameter undeduced here */
+            any_braced = true;
+            arguments.append(e);
+            continue;
+        }
         VTRY(r, passed_expression(a, e));
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
             return not_supported_because(
@@ -1190,8 +1293,12 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, template_ref ct,
                             static_cast<uint32_t>(arguments.size()), candidates,
                             &first_arguments, &all, nullptr, 0));
             if (!candidates.empty()) {
-                VTRY(best, best_viable_function(n, candidates, nullptr,
-                                                arguments, chosen));
+                const owned_array<SyntaxElement> *lists = nullptr;
+                if (any_braced)
+                    lists = &clauses;
+                VTRY(best,
+                     best_viable_function(n, candidates, nullptr, arguments,
+                                          chosen, nullptr, false, lists));
                 chosen_ok = true;
             }
         }
@@ -1323,6 +1430,8 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, template_ref ct,
             }
             bool ok = true;
             for (uint32_t i = 0; i < ftype.parameter_count && ok; i++) {
+                if (braced[i])
+                    continue;
                 qualified_type atype = arguments[i].type;
                 if (type_table[params[i].unqualified()].kind !=
                         type_kind::lvalue_reference &&
@@ -1346,6 +1455,19 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, template_ref ct,
         function_cv = saved_cv;
         function_parameters =
             static_cast<owned_array<parameter_meaning> &&>(saved_params);
+        if (!has_constructor && parts.braced_list() && arguments.size()) {
+            owned_array<template_argument> values;
+            owned_array<bool> set;
+            if (aggregate_deduction(ct, arguments, braced, values, set) &&
+                default_template_arguments(n, ct, values, set) ==
+                    analysis_result::well_formed) {
+                expressions.resize(expressions_before);
+                name_uses.resize(uses_before);
+                return instantiate_class(n, ct, values.data(),
+                                         static_cast<uint32_t>(values.size()),
+                                         c);
+            }
+        }
         /* [over.match.class.deduct]/1.2: if the primary class template has no
            user-declared constructors, an additional fictional function
            template corresponding to a hypothetical default constructor */
@@ -1402,6 +1524,15 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             return not_supported_because(
                 n, "expr.call", "a call without a parenthesized argument list");
     }
+    /* [expr.prim.paren]/1: (std::max)(a, b) calls what std::max names; the
+       parentheses only keep argument-dependent lookup away
+       ([basic.lookup.argdep]/1), which a qualified name has none of */
+    SyntaxElement within = callee;
+    while (within.is(syntax_kind::primary_expression) && within.size() == 3 &&
+           within[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        within = within[1];
+    if (within.is(syntax_kind::qualified_id))
+        callee = within;
     if (builtin_addressof_call(n))
         return builtin_addressof(n, m);
     if (builtin_shufflevector_call(n))
@@ -1576,6 +1707,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
     /* the namespace whose functions declared after the template are no
        candidates ([temp.dep.candidate]/1) */
     entity_index hides_late = 0;
+    /* (0 is the global namespace: hiding is its own flag) */
+    bool hiding_late = false;
+    entity_index late_associated = 0;
     token_index adl_token = 0;
     uint32_t adl_name = 0;
     if (callee.is_token() && callee.is_identifier()) {
@@ -1707,9 +1841,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                     "argument-dependent lookup that could not be completed");
             /* [temp.dep.candidate]/1: of the functions declared after the
                template, only argument-dependent lookup's are candidates,
-               and only for a dependent call: which of the two an
-               associated namespace that unqualified lookup also searched
-               is for is not told apart */
+               and only for a dependent call.  Whether this one is is not
+               known here: those of an associated namespace are candidates
+               marked late (as an operator's) */
             entity_index first_early = 0;
             if (x.past_horizon) {
                 owned_array<entity_index> associated_classes, associated_spaces;
@@ -1719,21 +1853,24 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                         n, "basic.lookup.argdep",
                         "a call whose associated namespaces could not be "
                         "determined");
+                bool associated = false;
                 for (entity_index space : associated_spaces)
                     if (space == x.found_in)
-                        return not_supported_because(
-                            n, "temp.dep.candidate",
-                            "a function declared after the template in an "
-                            "associated namespace");
+                        associated = true;
                 if (!held.empty() || several)
                     return not_supported_because(
                         n, "temp.dep.candidate",
                         "functions declared after the template beside "
                         "function templates or other namespaces' functions");
-                hides_late = x.found_in;
+                if (associated)
+                    late_associated = x.found_in;
+                else {
+                    hides_late = x.found_in;
+                    hiding_late = true;
+                }
                 for (entity_index o = x.entity; o && !first_early;
                      o = entity_table[o].next_overload)
-                    if (!declared_past_horizon(o, hides_late))
+                    if (!declared_past_horizon(o, x.found_in))
                         first_early = o;
             }
             if (!held.empty()) {
@@ -1950,16 +2087,18 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         overload_set(named, set);
     for (entity_index e : found_by_adl)
         overload_set(e, set);
-    if (hides_late) {
+    if (hiding_late) {
         size_t kept = 0;
         for (entity_index e : set)
             if (!declared_past_horizon(e, hides_late))
                 set[kept++] = e;
         set.resize(kept);
     }
-    if (set.size() > 1 || (hides_late && set.size() == 1)) {
+    if (set.size() > 1 || (hiding_late && set.size() == 1)) {
         {
             resolving_call scope(resolving_calls);
+            scoped_value<entity_index> late(late_candidates_in,
+                                            late_associated);
             VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
         }
         function_type = f.type;
@@ -1980,10 +2119,15 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         }
     } else if (set.size() == 1 && f.node) {
         /* the one function the name names is the function called (its use
-           is not the name's, a callee's); [dcl.fct.def.delete]/2's deleted
-           calls of it are not diagnosed here yet (a template argument's
-           substitution error is attributed to the use) */
-        VTRY(du, unavailable_use(semantics[f.node].at, set[0]));
+           is not the name's, a callee's), and [dcl.fct.def.delete]/2's
+           reference to it if deleted, followed in a substitution, where it
+           is a failure (a requires-expression's): elsewhere the call of a
+           template's definition may not be resolved yet */
+        if (substituting) {
+            VTRY(du, deleted_use(semantics[f.node].at, set[0]));
+        } else {
+            VTRY(du, unavailable_use(semantics[f.node].at, set[0]));
+        }
     }
     return call_with(n, f, function_type, object, member, arguments, early, m);
 }
@@ -2439,8 +2583,13 @@ analysis_result semantic_analysis::template_candidates(
                     break;
             }
         }
+        bool value_use =
+            target_function &&
+            type_table[target_function->unqualified()].kind == type_kind::none;
         if (r == analysis_result::well_formed && !failed) {
-            if (target_function) {
+            if (value_use) {
+                r = arguments_without_deduction(n, g, d, failed);
+            } else if (target_function) {
                 /* [temp.deduct.funcaddr]/1 */
                 owned_array<template_argument> given;
                 for (const template_argument &a : d)
@@ -2461,7 +2610,8 @@ analysis_result semantic_analysis::template_candidates(
                             static_cast<uint32_t>(d.size()), e);
             unevaluated--;
         }
-        if (r == analysis_result::well_formed && !failed && target_function) {
+        if (r == analysis_result::well_formed && !failed && target_function &&
+            !value_use) {
             /* [over.over]/3: selected when the specialization's type is
                the target's, after the [conv.fctptr] conversion */
             qualified_type t = entity_table[e].type;
@@ -2764,12 +2914,32 @@ analysis_result semantic_analysis::template_call(
         VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
                                 ft.parameter_count, specialization));
     } else {
+        /* [temp.deduct]/8: in an immediate context, a deduction that fails
+           is a substitution failure */
+        bool failed = false;
+        bool *soft = nullptr;
+        if (substituting)
+            soft = &failed;
         VTRY(r, deduce_from_call(n, function_template, meanings,
-                                 static_cast<uint32_t>(early.size()), deduced));
+                                 static_cast<uint32_t>(early.size()), deduced,
+                                 soft));
+        if (failed)
+            return analysis_result::ill_formed;
         VTRY_SET(r,
                  instantiate(n, function_templates[function_template].entity,
                              &deduced[0], static_cast<uint32_t>(deduced.size()),
                              specialization));
+        /* the only template of the name, its definition deleted
+           (std::ranges::swap's poison pill) */
+        if (substituting && specialization &&
+            entity_table[specialization].deleted) {
+            VTRY(referred, deleted_use(name, specialization));
+        }
+    }
+    /* [dcl.fct.def.delete]/2: the specialization chosen, in a substitution
+       (partial ordering by constraints is not followed everywhere) */
+    if (substituting) {
+        VTRY(deleted, deleted_use(name, specialization));
     }
     analysis_result r = analysis_result::well_formed;
     /* no claim is made about the name, whose declaration clang finds is
@@ -2839,6 +3009,14 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
                           "shall have enough parameters to agree in number "
                           "with the arguments in the list",
                           "over.match.viable");
+    /* [dcl.fct.def.delete]/2: the only function of its name, deleted (a
+       requires-expression's requirement then unsatisfied); one chosen by
+       overload resolution is checked there */
+    if (called && entity_table[called].kind == entity_kind::function &&
+        entity_table[called].deleted && !entity_table[called].instantiation &&
+        (substituting || function_state.active)) {
+        VTRY(referred, deleted_use(n.first_token(), called));
+    }
     for (size_t i = 0; i < arguments.size(); i++) {
         SyntaxElement a = arguments[i];
         initialized_value value;

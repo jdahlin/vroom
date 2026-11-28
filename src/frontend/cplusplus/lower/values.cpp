@@ -182,6 +182,9 @@ uint32_t c_lowering::discard(uint32_t n)
 uint32_t c_lowering::constant(const semantic_node &n)
 {
     const struct type &r = record(n.type);
+    /* [expr.type.conv]/2: T() of a pointer to member is its null value */
+    if (r.kind == type_kind::pointer_to_member && !n.value)
+        return null_member_pointer(n.type, n.at);
     ast_qualified_type t = type(n.type, n.at);
     if (r.kind == type_kind::pointer ||
         (r.kind == type_kind::fundamental &&

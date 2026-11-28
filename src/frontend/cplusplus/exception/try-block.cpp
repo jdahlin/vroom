@@ -131,23 +131,37 @@ node_index parser::exception_declaration()
  * handler."  The try-block's compound-statement and each handler are
  * block scopes ([basic.scope.block]/1).
  */
-/* a labeled-statement (a label, case or default) anywhere in n: a jump may enter the try-block or a handler
-   ([stmt.dcl]/3, [except.handle]/2), which is not analysed */
-static bool has_label(SyntaxElement n)
+/*
+ * [stmt.dcl]/3, [except.handle]/2: whether n has a label a jump from outside
+ * the try-block could target: an identifier label, or a case or default
+ * whose switch is not within it (switched)
+ */
+bool semantic_analysis::entry_label(SyntaxElement n, bool switched) const
 {
     if (n.is_token())
         return false;
-    if (n.is(syntax_kind::labeled_statement))
-        return true;
+    if (n.is(syntax_kind::labeled_statement)) {
+        uint32_t i = 0;
+        while (i < n.size() && !n[i].is_token())
+            i++;
+        if (!switched || i == n.size() ||
+            tokens[n[i].token()].kind != token_kind::keyword)
+            return true;
+    }
+    if (n.size() && n[0].is_token() &&
+        tokens[n[0].token()].kind == token_kind::keyword &&
+        syntax_parser.keyword_of(tokens[n[0].token()]) ==
+            standard_keyword::switch_)
+        switched = true;
     for (auto c : n.elements())
-        if (has_label(c))
+        if (entry_label(c, switched))
             return true;
     return false;
 }
 
 analysis_result semantic_analysis::try_block(TryBlock n, uint32_t &built)
 {
-    if (has_label(n))
+    if (entry_label(n, false))
         return not_supported_because(n, "except.handle", "a labeled try block");
     /* try compound-statement handler-seq (one handler alone is a child) */
     if (n.size() < 3 || !n[1].is(syntax_kind::compound_statement))

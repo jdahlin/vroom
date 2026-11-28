@@ -132,6 +132,9 @@ struct mangling_candidate {
     entity_index member_class = 0;
     /* Dp <type>, the expansion of the pattern type */
     bool expansion = false;
+    /* a type naming a parameter by its level (TL0__, in leveled_template's
+       constraint), not the candidate the same type written T_ is */
+    entity_index level_of = 0;
 };
 
 /*
@@ -350,6 +353,11 @@ class itanium_mangler
        a fold's pattern is mangled for */
     uint32_t written_first = 0, written_count = 0;
     uint32_t pack_element = UINT32_MAX;
+    /* the local parameters of the requires-expression being mangled */
+    const owned_array<semantic_analysis::requirement_parameter>
+        *requirement_parameters = nullptr;
+    /* the requires-clause being mangled is a template-head's */
+    bool in_head_constraint = false;
     /* (set by type_operand_of_written when a type it mangled is dependent) */
     bool operand_dependent = false;
     /* (the dependent values being mangled, template_arg_of_dependent_value) */
@@ -451,6 +459,7 @@ class itanium_mangler
     bool template_template_arg(entity_index t, uint32_t parameter);
     void template_template_param_decl(entity_index parameter);
     bool own_pack_expansion(qualified_type pattern);
+    bool constrained_parameter_decl(entity_index t, SyntaxRef q);
     bool non_type_parameter_type(entity_index c, uint32_t i,
                                  qualified_type declared);
     bool template_arg_of_dependent_value(entity_index d);
@@ -465,7 +474,7 @@ class itanium_mangler
     bool expr_primary_end(bool negative, uint64_t magnitude);
     static void template_argument_elements(SyntaxElement id,
                                            owned_array<SyntaxElement> &out);
-    void function_param(uint32_t position);
+    void function_param(uint32_t position, uint32_t cv = 0, bool outer = false);
     void sizeof_pack(uint64_t position);
     bool expr_primary_of_variable(entity_index t, SyntaxElement name);
     bool expr_primary_of_enumerator(entity_index e);
@@ -507,6 +516,12 @@ class itanium_mangler
     form postfix_of_written(SyntaxElement expression);
     form primary_of_written(SyntaxElement expression);
     bool fold_of_written(SyntaxElement fold);
+    bool type_of_cast(qualified_type t);
+    bool type_operand_of_cast(SyntaxElement a);
+    const semantic_analysis::written_binding *
+    written_value_binding(SyntaxElement name) const;
+    bool value_expansion(SyntaxElement pattern, uint32_t &count) const;
+    entity_index written_call(SyntaxElement call) const;
     /* an initializer-list's expressions, a pattern followed by ... as
        sp <expression> */
     bool expression_list_of_written(SyntaxElement list);
@@ -532,16 +547,24 @@ class itanium_mangler
 
     /* ---- expressions-dependent-value.cpp, expressions-structure.cpp ---- */
     bool expression_of_dependent_value(entity_index d);
+    bool expression_of_bound_value(entity_index d);
     bool namespace_levels(entity_index s, uint64_t value);
     bool namespace_levels_of(entity_index s, uint32_t depth);
     bool expression_of_structure(uint32_t s);
 
     /* ---- compression.cpp: [abi:mangling-compression], the builder's side ---- */
+    entity_index level_of_type(qualified_type t) const
+    {
+        if (leveled_template && analysis.type_depends_on_template_parameter(t))
+            return leveled_template;
+        return 0;
+    }
     void add_candidate(qualified_type t, entity_index member_class = 0)
     {
         candidate c;
         c.type = t;
         c.member_class = member_class;
+        c.level_of = level_of_type(t);
         enc.add_candidate(c);
     }
     void add_candidate(entity_index scope)
