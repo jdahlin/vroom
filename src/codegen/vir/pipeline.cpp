@@ -101,6 +101,7 @@ VPRIV bool virbuild_function_to_vir(codegen_context *e)
                 (x->insn.op == VIR_OP_STORE && x->slot_plus_one &&
                  !(x->insn.flags & VIR_INSN_FLAG_VOL) &&
                  !V->slots[x->slot_plus_one - 1].exposed &&
+                 !V->slots[x->slot_plus_one - 1].is_pinned &&
                  !V->slots[x->slot_plus_one - 1].used))
                 continue; /* (a dead store) */
             if (x->location != lastloc) {

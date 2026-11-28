@@ -25,8 +25,14 @@ registers; D3 changes that and measures run time and compile time.
   with it exactly (not a result's, not under a pointer, array or qualifier:
   the AST's types are canonical); vectors, `_BitInt` and scalable types are
   `DW_TAG_unspecified_type`.  C++ functions have no types yet (D4).
-- **D3, variables at -O0**: locals and parameters in memory; globals, formal
-  parameters and locals in lexical blocks (`DW_OP_fbreg`).
+- **D3a, locals in memory at -O0** (done): VIR pins the slot of a named local
+  or parameter.  x86-64, SQLite amalgamation, `-O0`, against D2: compiler
+  instructions 3.85 G -> 2.96 G, text 1457 kB -> 1187 kB; speedtest1
+  (`--size 20 :memory:`) instructions executed +2.5 % (task clock too noisy
+  to say).
+- **D3b, variables**: globals, formal parameters and locals in lexical blocks
+  (`DW_OP_fbreg`, `DW_AT_frame_base`), with a debugger test that prints
+  values.
 - **D4, C++ types**: classes, members, bases, references, namespaces,
   templates.
 - **D5, optimized code**: location lists at `-O1` and up; until then a
