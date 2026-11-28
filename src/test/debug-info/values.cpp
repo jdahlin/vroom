@@ -19,6 +19,14 @@ template <class T> struct Box {
     T item;
 };
 
+struct Counter {
+    int m;
+    static int count;
+    static int twice(int a) { return 2 * a; }
+    int get(int d) const { return m + d; }
+};
+int Counter::count = 4;
+
 namespace outer
 {
 namespace
@@ -50,7 +58,10 @@ __attribute__((noinline)) static int use(const S &s, Box<long> box, S *p,
 
     int sum = x + total + ns::hidden + p->b + moved + alias;
 
+    Counter counter{5};
+
     sum += outer::anonymous + (int)many.item[1].item;
+    sum += counter.get(1) + Counter::twice(2) + Counter::count;
     return sum; /* STOP */
 }
 
@@ -62,5 +73,5 @@ int main()
 
     return use(s, box, &s, 4) == 0;
 }
-/* PRINT s.m s.b s.r box.item p->m p->b moved x alias total ns::hidden outer::anonymous shade plains */
-/* WHATIS box many s p shade plains */
+/* PRINT s.m s.b s.r box.item p->m p->b moved x alias total ns::hidden outer::anonymous shade plains Counter::count counter */
+/* WHATIS box many s p shade plains counter */

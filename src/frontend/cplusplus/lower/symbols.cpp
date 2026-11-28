@@ -351,8 +351,16 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         debug_scope(e, scope.get());
         ast_builder_symbol_debug_scope(c, s, scope.data(), scope.size());
     }
+    /* -g: a class's member is declared in its class (complete: type()) */
+    if (ast_builder_debugging(c) && x.enclosing &&
+        analysis.entity_table[x.enclosing].kind == entity_kind::class_type &&
+        analysis.entity_table[x.enclosing].defined)
+        ast_builder_symbol_debug_class(
+            c, s, type(analysis.entity_table[x.enclosing].type, at));
     if (x.name) {
         owned_buffer identifier;
+        if (x.special == special_member::destructor)
+            vbuffer_string_append(identifier.get(), "~");
         spelling(e, identifier);
         ast_builder_symbol_debug_name(c, s, identifier.data(),
                                       identifier.size());

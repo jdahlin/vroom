@@ -95,6 +95,7 @@ typedef struct attrs { /* the attributes of one declaration */
     uint8_t debug_kind;   /* AST_DEBUG_*: a reference, for -g */
     uint32_t debug_scope; /* string index: the namespaces around it, for -g */
     uint32_t debug_type;  /* the type -g says in place of C's (0: C's) */
+    uint32_t debug_class; /* a class's member: the class's struct, for -g */
 } attrs;
 
 typedef struct ast_asm_operand {

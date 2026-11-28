@@ -78,6 +78,9 @@ void ast_builder_node_location(cc *c, uint32_t n, uint32_t location);
 /* the source's identifier of a symbol named by its linkage name, for the
    function's debug entry */
 void ast_builder_symbol_debug_kind(cc *c, uint32_t s, int kind);
+/* a member function or static data member of the class whose struct is record */
+void ast_builder_symbol_debug_class(cc *c, uint32_t s,
+                                    ast_qualified_type record);
 /* -g, where C's type of a declaration lost what C++'s says (an enumeration
    lowered to its underlying type): the type a debugger is told instead, of a
    variable, a function's result or a field */

@@ -402,6 +402,13 @@ uint32_t ast_builder_debug_enumerator(cc *c, const char *name, size_t length,
     return s;
 }
 
+void ast_builder_symbol_debug_class(cc *c, uint32_t s,
+                                    ast_qualified_type record)
+{
+    if (c->describe_location) /* (-g) */
+        ast_builder_attributes(c, s)->debug_class = record;
+}
+
 void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,
                                 size_t length)
 {

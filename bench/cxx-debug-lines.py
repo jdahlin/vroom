@@ -39,11 +39,18 @@ def undescribed(obj):
     they differ"""
     out = subprocess.run([DWARFDUMP, '--debug-info', obj], capture_output=True,
                          text=True, check=True).stdout
-    described = set()
+    entries = {}
     for entry in re.split(r'\n(?=0x[0-9a-f]+: )', out):
-        if 'DW_TAG_subprogram' in entry:
-            names = dict(re.findall(r'DW_AT_(name|linkage_name)\s+\("(.*?)"\)', entry))
-            described.add(names.get('linkage_name', names.get('name')))
+        if m := re.match(r'(0x[0-9a-f]+):\s+DW_TAG_subprogram', entry.lstrip('\n')):
+            entries[int(m[1], 16)] = entry
+    described = set()
+    for entry in entries.values():
+        if 'DW_AT_low_pc' not in entry:
+            continue  # (a member's declaration in its class)
+        if m := re.search(r'DW_AT_specification\s+\((0x[0-9a-f]+)', entry):
+            entry = entries[int(m[1], 16)]
+        names = dict(re.findall(r'DW_AT_(name|linkage_name)\s+\("(.*?)"\)', entry))
+        described.add(names.get('linkage_name', names.get('name')))
     nm = subprocess.run([ct.llvm('llvm-nm'), '--defined-only', obj],
                         capture_output=True, text=True, check=True).stdout
     defined = {p[2] for p in map(str.split, nm.splitlines())

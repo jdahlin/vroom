@@ -49,8 +49,11 @@ registers; D3 changes that and measures run time and compile time.
   `DW_TAG_enumeration_type` built for the debugger (code generation still
   sees the underlying type).  Its enumerators are found by scanning every
   entity, once per enumeration.
-- **D4d**: member functions and static members inside their class, virtual
-  bases.
+- **D4d, class members** (done): member functions and static data members
+  defined in the unit are declared in their class (object parameter
+  artificial), their definitions refer to the declaration.  Members only
+  declared or never used here are not listed.
+- **D4e**: virtual bases (`DW_AT_data_member_location` through the vtable).
 - **D5, optimized code**: location lists at `-O1` and up; until then a
   variable there is optimized out.
 
