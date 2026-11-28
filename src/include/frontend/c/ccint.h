@@ -152,6 +152,12 @@ struct cc {
     /* C++'s diagnostics, for -Wpsabi (ast_builder_psabi_reporter) */
     bool (*psabi_report)(void *context, uint32_t location, const char *text);
     void *psabi_context;
+    /* -g with C++: its source locations, which the nodes hold in place of
+       pp's (ast_builder_location_describer) */
+    bool (*describe_location)(void *context, uint32_t location,
+                              const char **name, uint32_t *line,
+                              uint32_t *column);
+    void *describe_location_context;
     uint32_t *ptag, nptag, cptag;
     /* tags declared in the outermost parameter list: a definition's body sees them */ /* parameter declarations being parsed: a new tag there is -Wvisibility */
     uint32_t uv_asg;
@@ -284,6 +290,8 @@ struct cc {
     /* VCC_DR / VCC_DRREC: per-region declaration replay (frontend/c/replay.cpp) */
     struct drrec *dr;
     uint8_t dr_on; /* a region is being recorded: the hooks log */
+    /* ast-builder.cpp: the location its nodes get (0: none) */
+    uint32_t builder_location;
 };
 _Static_assert(offsetof(struct cc, ast) == 0,
                "struct ast is struct cc's first member");

@@ -32,6 +32,26 @@
 namespace cplusplus::lowering
 {
 
+/* while it lives, the nodes built are at this source location */
+class located
+{
+  public:
+    located(cc *c, source_location location)
+        : unit(c), previous(ast_builder_location(c, location))
+    {
+    }
+    ~located()
+    {
+        ast_builder_location(unit, previous);
+    }
+    located(const located &) = delete;
+    located &operator=(const located &) = delete;
+
+  private:
+    cc *unit;
+    uint32_t previous;
+};
+
 /* C nodes said once */
 inline uint32_t c_variable(cc *c, uint32_t s, ast_qualified_type t)
 {

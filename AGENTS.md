@@ -372,6 +372,7 @@ bench/cxx-sema.py selftest          # the type and layout claims' paths through 
 bench/cxx-run.py -j 6 [-O 0123] [PAT]  # src/test/cxx/run: vpp -c (the driver: frontend/cplusplus lowered to C's AST, frontend/c/ast-builder.h) at -O0..3 vs clang++ -O2, run under qemu; -O0 symbols = clang's; /* cxx-run-flags: */ in a test adds flags for both (<10 s)
 bench/cxx-depfile.py                # C++ -MD/-MMD/-MP depfiles byte for byte vs clang++, also run from another directory as vccd does (<2 s)
 bench/cxx-include-guard.py [-v]      # the C++ preprocessor's multiple-include guard skip: src/test/cxx/include-guard, text and diagnostics vs clang -E -P (<1 s)
+bench/cxx-debug-lines.py            # C++ -g line tables: the marked lines of src/test/cxx/debug-lines have rows, as clang++ -g's (<2 s)
 bench/cxx-thread.py [-v] [PAT]     # src/test/cxx/thread: C++ programs that need threads, built by vpp, linked by clang++ -pthread, self-checking (a variable that should be thread-local or a local emitted as a shared static; <5 s)
 bench/cxx-mangle-unit.py [--clang] [-v] [PAT]   # the mangler's unit tests (src/test/cxx/mangle, a file per ABI section): every `// MANGLE: SYMBOL` in vpp -c's object; --clang: and in clang++'s, so the expectations are clang's (<2 s)
 bench/cxx-mangle-same.py -j 6 --save F | --against F   # the mangler's identity gate (doc/PLAN-mangling.md M0): every -fcxx-dump=symbols symbol and refusal and vpp -c's symbols over cxx/run, clang's mangling tests, json, Stockfish, byte for byte against a saved run (~2.5 min at -j 12)
