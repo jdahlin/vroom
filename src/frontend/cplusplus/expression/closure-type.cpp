@@ -51,7 +51,7 @@ analysis_result semantic_analysis::closure_class(entity_index c, SyntaxRef n,
     SyntaxRef declaration = current_declaration;
     /* (a generic lambda's conversion function template is not
        declared) */
-    entity_index call = entity_table[c].call_operator;
+    entity_index call = entity_table[c].details().call_operator;
     if (!has_capture && entity_table[call].kind == entity_kind::function)
         r = closure_conversion(c, call, n);
     if (r == analysis_result::well_formed)
@@ -160,9 +160,9 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
             static_cast<uint32_t>(instantiations.size());
     }
     if (entity_index existing = entity_table.find(c, conversion_name)) {
-        entity_table[conversion].next_overload =
-            entity_table[existing].next_overload;
-        entity_table[existing].next_overload = conversion;
+        entity_table[conversion].edit().next_overload =
+            entity_table[existing].details().next_overload;
+        entity_table[existing].edit().next_overload = conversion;
     } else {
         entity_table.bind(c, conversion_name, conversion);
     }
@@ -291,7 +291,7 @@ analysis_result semantic_analysis::generic_closure_conversion(
         return not_supported_because(
             at, "expr.prim.lambda.closure",
             "a generic lambda converted to no non-variadic function pointer");
-    entity_index call_tpl = entity_table[c].call_operator;
+    entity_index call_tpl = entity_table[c].details().call_operator;
     uint32_t ft = entity_table[call_tpl].template_record;
     if (!ft)
         return not_supported_because(

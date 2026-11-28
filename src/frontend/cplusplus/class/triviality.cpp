@@ -28,8 +28,8 @@ bool semantic_analysis::trivial_defaulted_default_constructor(
     const entity &x = entity_table[c];
     if (!x.defaulted_default_constructor)
         return false;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor)
         if (!type_table[entity_table[k].type.unqualified()].parameter_count &&
             !entity_table[k].constraint_unsatisfied)
             return false;
@@ -56,13 +56,13 @@ bool semantic_analysis::trivial_default_constructor(entity_index c,
 {
     const entity &x = entity_table[c];
     /* (3.1) */
-    if (x.dynamic || x.virtual_base_count)
+    if (x.details().dynamic || x.details().virtual_base_count)
         return false;
     /* not user-provided */
     bool user_declared = false;
     bool deleted_default = false;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
         /* [special]/6: one whose constraint is not satisfied is none
            beside X() = default */
         if (entity_table[k].implicit ||
@@ -81,7 +81,7 @@ bool semantic_analysis::trivial_default_constructor(entity_index c,
         /* a user-provided default constructor ([class.default.ctor]/1: one
            "for which each parameter that is not a function parameter pack
            has a default argument") */
-        if (f.parameter_count == entity_table[k].default_arguments &&
+        if (f.parameter_count == entity_table[k].details().default_arguments &&
             !entity_table[k].constraint_unsatisfied)
             return false;
         /* (one whose requires-clause is not satisfied is none, but
@@ -91,7 +91,8 @@ bool semantic_analysis::trivial_default_constructor(entity_index c,
        X() = default it is not the one default-initialization selects
        ([over.match.best]/2.4: "F1 is not a function template
        specialization and F2 is") */
-    if ((x.constructor_template || x.constructor_templates) &&
+    if ((x.details().constructor_template ||
+         x.details().constructor_templates) &&
         !x.defaulted_default_constructor) {
         known = false;
         return false;
@@ -103,7 +104,9 @@ bool semantic_analysis::trivial_default_constructor(entity_index c,
         return false;
     /* (3.2) */
     for (uint32_t i = 0; i < x.member_count; i++)
-        if (entity_table[class_members[x.first_member + i]].default_initializer)
+        if (entity_table[class_members[x.first_member + i]]
+                .details()
+                .default_initializer)
             return false;
     /* (3.3), (3.4) */
     owned_array<entity_index> classes;
@@ -131,13 +134,13 @@ bool semantic_analysis::trivial_copy_constructor(entity_index c) const
 {
     const entity &x = entity_table[c];
     /* (11.1): a virtual base makes the class dynamic too */
-    if (x.dynamic)
+    if (x.details().dynamic)
         return false;
     /* not user-provided: an implicit one is an entity for overload
        resolution (declared beside a constructor template, /6) or because
        a subobject's is not trivial, which (11.2) and (11.3) say */
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor)
         if (!entity_table[k].implicit && copy_or_move_constructor(c, k))
             return false;
     /* (11.2), (11.3) */
@@ -155,12 +158,12 @@ semantic_analysis::select_copy_constructor(entity_index c, bool rvalue,
 {
     copy_selection selected;
     const entity &x = entity_table[c];
-    if (x.constructor_template || x.constructor_templates) {
+    if (x.details().constructor_template || x.details().constructor_templates) {
         selected.known = false;
         return selected;
     }
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
         if (!copy_or_move_constructor(c, k))
             continue;
         const struct type &p =
@@ -212,7 +215,7 @@ bool semantic_analysis::trivial_copy_selected(entity_index c, bool rvalue,
                                               bool &known) const
 {
     const entity &x = entity_table[c];
-    if (x.dynamic)
+    if (x.details().dynamic)
         return false;
     /* [over.ics.rank]/3.2.6: from a non-const lvalue a constructor
        template X(T&) (T deduced as X) binds better than X(const X&), and
@@ -220,7 +223,7 @@ bool semantic_analysis::trivial_copy_selected(entity_index c, bool rvalue,
        conversions: the template is chosen when viable (its viability, a
        substitution, is not followed: taken as viable), and a template is
        no copy constructor ([class.copy.ctor]/1), never trivial */
-    if (!rvalue && !source_const && x.constructor_templates)
+    if (!rvalue && !source_const && x.details().constructor_templates)
         return false;
     copy_selection selected = select_copy_constructor(c, rvalue, source_const);
     if (!selected.known) {
@@ -260,9 +263,10 @@ bool semantic_analysis::trivial_copy_selected(entity_index c, bool rvalue,
         sub_rvalue = true;
     }
     if (!have_best && rvalue && !declares_copy_constructor(c) &&
-        !x.defaulted_copy_constructor && !x.user_copy_assignments &&
+        !x.defaulted_copy_constructor && !x.details().user_copy_assignments &&
         !x.defaulted_copy_assignment && !user_move_assignment &&
-        !(x.destructor && !entity_table[x.destructor].implicit)) {
+        !(x.details().destructor &&
+          !entity_table[x.details().destructor].implicit)) {
         sub_const = false;
         sub_rvalue = true;
     }
@@ -275,17 +279,17 @@ bool semantic_analysis::trivial_copy_selected(entity_index c, bool rvalue,
        const, so X(const X&) copies it from a non-const lvalue (a
        TemplateCtor(T&) may be selected, clang's
        CXX/special/class.copy/p12-0x.cpp) */
-    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++) {
         entity_index k =
-            type_table
-                [entity_table[class_virtual_bases[x.first_virtual_base + i]]
-                     .type.unqualified()]
-                    .entity;
+            type_table[entity_table[class_virtual_bases
+                                        [x.details().first_virtual_base + i]]
+                           .type.unqualified()]
+                .entity;
         if (!trivial_copy_selected(k, sub_rvalue, sub_const, known))
             return false;
     }
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = entity_table[class_bases[x.first_base + i]];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        const entity &b = entity_table[class_bases[x.details().first_base + i]];
         if (b.virtual_base)
             continue;
         entity_index k = type_table[b.type.unqualified()].entity;
@@ -324,7 +328,7 @@ bool semantic_analysis::copies_bytes(entity_index c) const
  */
 bool semantic_analysis::destroys(entity_index c) const
 {
-    if (entity_table[c].destructor)
+    if (entity_table[c].details().destructor)
         return true;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
@@ -355,8 +359,8 @@ bool semantic_analysis::trivial_class(entity_index c) const
 bool semantic_analysis::trivial_special_members(entity_index c) const
 {
     const entity &x = entity_table[c];
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
         if (entity_table[k].implicit)
             continue;
         const struct type &f = type_table[entity_table[k].type.unqualified()];
@@ -366,10 +370,13 @@ bool semantic_analysis::trivial_special_members(entity_index c) const
         if (!f.parameter_count || copy_or_move_constructor(c, k))
             return false;
     }
-    if (x.dynamic || x.destructor || x.user_copy_assignments)
+    if (x.details().dynamic || x.details().destructor ||
+        x.details().user_copy_assignments)
         return false;
     for (uint32_t i = 0; i < x.member_count; i++)
-        if (entity_table[class_members[x.first_member + i]].default_initializer)
+        if (entity_table[class_members[x.first_member + i]]
+                .details()
+                .default_initializer)
             return false;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);

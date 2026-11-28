@@ -340,13 +340,13 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
     /* [temp.over.link]/5: an expression naming a non-type template
        parameter that has no structure above (I + 1) is equivalent to
        another of the same structure (expression_structure): one entity */
-    if (entity_table[e].value || entity_table[e].expression ||
+    if (entity_table[e].value || entity_table[e].details().expression ||
         written.is_token() || !value_parameter_in(written))
         return e;
     uint32_t structure = expression_structure(written);
     if (entity_index d = expression_nodes[structure].dependent_value)
         return d;
-    entity_table[e].expression = structure;
+    entity_table[e].edit().expression = structure;
     expression_nodes[structure].dependent_value = e;
     dependent_values.append(e);
     return e;
@@ -1308,10 +1308,10 @@ analysis_result semantic_analysis::template_argument_for(
     if (type_table[m.type.unqualified()].kind == type_kind::enumeration) {
         const entity &en =
             entity_table[type_table[m.type.unqualified()].entity];
-        if (!en.scoped && en.underlying != fundamental_type::none) {
-            fundamental_type promoted = en.promoted;
+        if (!en.scoped && en.details().underlying != fundamental_type::none) {
+            fundamental_type promoted = en.details().promoted;
             if (en.fixed_underlying)
-                promoted = promotion_of(en.underlying);
+                promoted = promotion_of(en.details().underlying);
             if (promoted != fundamental_type::none)
                 m.type = qualified_type::make(type_table.fundamental(promoted),
                                               cv_none);
@@ -1417,12 +1417,12 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
     /* [temp.spec]/6 checks the base-clause of a specialization, which is
        analysed only once the specialization is instantiated: one whose
        head selects from an overload set is not accepted unchecked */
-    if (selected && x.next_overload && explicit_declaration_names)
+    if (selected && x.details().next_overload && explicit_declaration_names)
         return not_supported_because(
             at, "temp.spec",
             "an overloaded function's address as a specialization's argument");
     /* /3: "... the result of a typeid expression" */
-    if (x.typeinfo_of)
+    if (x.details().typeinfo_of)
         return ill_formed(at,
                           "the reference or pointer value shall not refer to "
                           "or be the address of the result of a typeid "
@@ -1439,7 +1439,7 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
         static_member = !x.nonstatic_member && !x.member_body_deferred;
     if ((x.kind != entity_kind::variable && x.kind != entity_kind::function) ||
         (x.instantiation && x.kind != entity_kind::function) ||
-        (x.next_overload && !selected) ||
+        (x.details().next_overload && !selected) ||
         (!is_namespace(x.enclosing) && !static_member) || x.c11_thread_local)
         /* (an object of thread storage duration has no address that is
            the same in each thread: [temp.arg.nontype]/2's constant
@@ -1498,8 +1498,8 @@ semantic_analysis::member_pointer_argument(SyntaxRef at, qualified_type to,
     if (!e ||
         (entity_table[e].kind != entity_kind::variable &&
          entity_table[e].kind != entity_kind::function) ||
-        entity_table[e].instantiation || entity_table[e].next_overload ||
-        entity_table[e].immediate ||
+        entity_table[e].instantiation ||
+        entity_table[e].details().next_overload || entity_table[e].immediate ||
         (entity_table[e].kind == entity_kind::function &&
          entity_table[e].constexpr_))
         /* (a consteval member function is not recorded: a constexpr one is

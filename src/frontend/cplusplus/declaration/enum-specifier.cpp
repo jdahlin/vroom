@@ -412,8 +412,8 @@ unsigned signed_bits(__int128 v)
 
 bool enumeration_holds(const struct entity &e, __int128 n)
 {
-    unsigned neg = e.negative_bits;
-    unsigned width = e.positive_bits;
+    unsigned neg = e.details().negative_bits;
+    unsigned width = e.details().positive_bits;
     __int128 low = 0;
     if (neg) {
         if (width + 1 > neg)
@@ -456,7 +456,7 @@ analysis_result semantic_analysis::enum_specifier(SyntaxRef n, type_index &type)
         type_table[type].kind == type_kind::enumeration) {
         entity &x = entity_table[type_table[type].entity];
         if (!x.defined)
-            x.underlying = fundamental_type::none;
+            x.edit().underlying = fundamental_type::none;
     }
     return r;
 }
@@ -611,7 +611,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                underlying type"; scoped-ness the same) */
             const entity &x = entity_table[prior];
             if (!x.fixed_underlying || !is_fixed || x.scoped != scoped ||
-                x.underlying != fixed)
+                x.details().underlying != fixed)
                 return ill_formed_at_token(name_at,
                                            "each redeclaration of an "
                                            "enumeration shall have the same "
@@ -684,10 +684,10 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
        incomplete type from its point of declaration
        ([basic.scope.pdecl]) to immediately after its enum-base (if any),
        at which point it becomes a complete type." */
-    entity_table[e].underlying = fixed;
+    entity_table[e].edit().underlying = fixed;
     if (opaque) {
         /* [conv.prom]/4: a fixed underlying type promotes as itself */
-        entity_table[e].promoted = fixed;
+        entity_table[e].edit().promoted = fixed;
         return analysis_result::well_formed;
     }
 
@@ -992,11 +992,11 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     /* [dcl.enum]/5: "Following the closing brace of an enum-specifier,
        each enumerator has the type of its enumeration." */
     entity &z = entity_table[e];
-    z.underlying = underlying;
-    z.promoted = promoted;
+    z.edit().underlying = underlying;
+    z.edit().promoted = promoted;
     if (!is_fixed) {
-        z.positive_bits = static_cast<uint8_t>(positive_bits);
-        z.negative_bits = static_cast<uint8_t>(negative_bits);
+        z.edit().positive_bits = static_cast<uint8_t>(positive_bits);
+        z.edit().negative_bits = static_cast<uint8_t>(negative_bits);
     }
     z.defined = true;
     for (entity_index en : enumerators_declared) {

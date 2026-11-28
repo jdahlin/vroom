@@ -78,7 +78,7 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
     }
     if ((local_class_function(e) ||
          (x.enclosing &&
-          (analysis.entity_table[x.enclosing].lambda ||
+          (analysis.entity_table[x.enclosing].details().lambda ||
            (analysis.entity_table[x.enclosing].kind ==
                 entity_kind::class_type &&
             analysis.entity_table[x.enclosing].instantiation &&
@@ -198,11 +198,11 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
 {
     /* (a copy: mangling the symbol makes entities, which moves the table) */
     const entity x = analysis.entity_table[e];
-    if (x.unsupported_body && !declaring_symbols) {
+    if (x.details().unsupported_body && !declaring_symbols) {
         /* [temp.inst]/4: the definition of a member function used: its body
            has a construct the analysis has no rules for */
         const unsupported_construct &u =
-            analysis.body_failures[x.unsupported_body - 1];
+            analysis.body_failures[x.details().unsupported_body - 1];
         failure.subclause = u.subclause;
         failure.file = u.file;
         failure.line = u.line;
@@ -282,10 +282,10 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         gnu_attributes(e, s);
         return s;
     }
-    if (x.typeinfo_of) {
+    if (x.details().typeinfo_of) {
         /* [expr.typeid]: the object is the type's type_info; its node's
            type is the entity's, the symbol's is the ABI's */
-        *slot = typeinfo(x.typeinfo_of, at);
+        *slot = typeinfo(x.details().typeinfo_of, at);
         return *slot;
     }
     owned_buffer why;
@@ -348,13 +348,13 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         ast_builder_symbol_debug_name(c, s, identifier.data(),
                                       identifier.size());
     }
-    if (x.asm_label) {
+    if (x.details().asm_label) {
         /* [ext:gnu_asm_labels] the symbol is the label's characters, as
            written (codegen writes an assembler name as given): the
            characters between each piece's quotes (sema took no escape
            sequence) */
         owned_buffer written, label;
-        tokens.spelling(x.asm_label, written.get());
+        tokens.spelling(x.details().asm_label, written.get());
         bool inside = false;
         for (size_t i = 0; i < written.size(); i++) {
             if (written.data()[i] == '"')
@@ -401,15 +401,15 @@ void c_lowering::gnu_attributes(entity_index e, uint32_t s)
             ast_builder_symbol_constructor(c, s);
         else
             ast_builder_symbol_destructor(c, s);
-        if (x.gnu_priority)
-            ast_builder_symbol_priority(c, s, x.gnu_priority);
+        if (x.details().gnu_priority)
+            ast_builder_symbol_priority(c, s, x.details().gnu_priority);
         ast_builder_symbol_keep(c, s);
     }
     /* cleanup: the function of a local variable, called with its address
        when it goes out of scope (C's code generator does it at each way
        out of the scope) */
     if (x.gnu_flags & gnu_cleanup) {
-        uint32_t function = symbol(x.gnu_cleanup, 0);
+        uint32_t function = symbol(x.details().gnu_cleanup, 0);
         if (function)
             ast_builder_symbol_cleanup(c, s, function);
     }
@@ -423,16 +423,16 @@ void c_lowering::gnu_attributes(entity_index e, uint32_t s)
         hidden = analysis.entity_table[k].gnu_flags & gnu_hidden_visibility;
     if (hidden)
         ast_builder_symbol_visibility(c, s, "hidden", 6);
-    if (x.section) {
+    if (x.details().section) {
         /* the string-literal's characters between its quotes (sema took
            one with no escape sequence) */
         owned_buffer written;
-        tokens.spelling(x.section, written.get());
+        tokens.spelling(x.details().section, written.get());
         ast_builder_symbol_section(c, s, written.data() + 1,
                                    written.size() - 2);
     }
-    if (x.kind == entity_kind::variable && x.alignment)
-        ast_builder_symbol_align(c, s, x.alignment);
+    if (x.kind == entity_kind::variable && x.details().alignment)
+        ast_builder_symbol_align(c, s, x.details().alignment);
 }
 
 /* [abi:mangling-special-ctor-dtor]: an inline constructor or destructor

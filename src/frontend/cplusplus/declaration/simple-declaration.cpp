@@ -1054,7 +1054,7 @@ analysis_result semantic_analysis::defer_unsupported_body(SyntaxRef n,
     if (!in_system_header(n.first_token()))
         return r;
     body_failures.append(unsupported[before]);
-    entity_table[f].unsupported_body =
+    entity_table[f].edit().unsupported_body =
         static_cast<uint32_t>(body_failures.size());
     entity_table[f].defined = false;
     unsupported.resize(before);
@@ -1396,7 +1396,8 @@ analysis_result semantic_analysis::default_initialize_variable(
                           "as deleted",
                           "class.default.ctor");
     }
-    if (is_class_entity(record) && entity_table[record].first_constructor &&
+    if (is_class_entity(record) &&
+        entity_table[record].details().first_constructor &&
         !trivial_defaulted_default_constructor(record)) {
         /* [dcl.init]/7.2: "If T is an array type, each element is
            default-initialized": one element's construction, which the
@@ -1420,11 +1421,12 @@ analysis_result semantic_analysis::default_initialize_variable(
            a member before its lifetime, which the evaluator does not
            see) */
         bool written = false;
-        for (entity_index k = entity_table[record].first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = entity_table[record].details().first_constructor;
+             k; k = entity_table[k].details().next_constructor)
             if (!entity_table[k].implicit &&
                 type_table[entity_table[k].type.unqualified()]
-                        .parameter_count == entity_table[k].default_arguments)
+                        .parameter_count ==
+                    entity_table[k].details().default_arguments)
                 written = true;
         if (constexpr_variable && entity_table[e].automatic && !written)
             return not_supported_because(
@@ -1438,7 +1440,7 @@ analysis_result semantic_analysis::default_initialize_variable(
             constness c = constness::unknown;
             /* [class.default.ctor]/4: a constructor of a class with
                virtual bases is not constexpr */
-            if (!entity_table[record].virtual_base_count)
+            if (!entity_table[record].details().virtual_base_count)
                 c = evaluate_variable(object, value.node,
                                       semantics[value.node].at, data);
             /* each element's value, an array's elements alike */
@@ -1548,7 +1550,7 @@ analysis_result semantic_analysis::declare_with_initializer(
         const struct type &record = type_table[element.unqualified()];
         uint64_t natural = 0;
         if (record.kind == type_kind::class_type)
-            natural = entity_table[record.entity].alignment;
+            natural = entity_table[record.entity].details().alignment;
         else if (record.kind == type_kind::fundamental &&
                  record.fundamental != fundamental_type::builtin_va_list &&
                  record.fundamental != fundamental_type::builtin_va_list_tag)
@@ -1865,11 +1867,11 @@ analysis_result semantic_analysis::declare_with_initializer(
                default-initialized below, and its evaluation must be a
                constant ([dcl.constexpr]/10) */
             bool by_constructor =
-                c.first_constructor &&
+                c.details().first_constructor &&
                 !trivial_defaulted_default_constructor(record.entity);
             if (!by_constructor &&
-                (c.dynamic || c.member_count ||
-                 (c.first_constructor &&
+                (c.details().dynamic || c.member_count ||
+                 (c.details().first_constructor &&
                   !trivial_defaulted_default_constructor(record.entity))))
                 return not_supported_because(
                     declaration, "dcl.init",
@@ -1957,8 +1959,8 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (r == analysis_result::well_formed && m.operator_function &&
             kind == entity_kind::function) {
             entity_table[declared_entity].operator_function = true;
-            entity_table[declared_entity].implemented = m.implemented;
-            entity_table[declared_entity].allocation = m.allocation;
+            entity_table[declared_entity].edit().implemented = m.implemented;
+            entity_table[declared_entity].edit().allocation = m.allocation;
             r = operator_function_declaration(declaration, declared_entity);
         }
         if (r == analysis_result::well_formed && m.literal_operator)
@@ -1991,7 +1993,7 @@ analysis_result semantic_analysis::declare_with_initializer(
         entity_table[declared_entity].placeholder_return = true;
     if (r == analysis_result::well_formed && typedef_alignment &&
         entity_table[declared_entity].kind == entity_kind::typedef_name)
-        entity_table[declared_entity].alignment = typedef_alignment;
+        entity_table[declared_entity].edit().alignment = typedef_alignment;
     if (r == analysis_result::well_formed && !s.typedef_ &&
         (aligned || gnu_flags || object_alignment)) {
         entity &x = entity_table[declared_entity];
@@ -2031,19 +2033,19 @@ analysis_result semantic_analysis::declare_with_initializer(
                 return not_supported_because(
                     declaration, "ext.gnu",
                     "a cleanup attribute on this variable or function");
-            x.gnu_cleanup = cleanup_function;
+            x.edit().gnu_cleanup = cleanup_function;
         }
         x.gnu_flags |= gnu_flags;
         if (gnu_flags & (gnu_constructor | gnu_destructor))
-            x.gnu_priority = gnu_priority;
+            x.edit().gnu_priority = gnu_priority;
         if (section)
-            x.section = section;
+            x.edit().section = section;
         if (abi_tag)
             x.abi_tag = abi_tag;
-        if (aligned > x.alignment)
-            x.alignment = static_cast<uint32_t>(aligned);
-        if (object_alignment > x.alignment)
-            x.alignment = object_alignment;
+        if (aligned > x.details().alignment)
+            x.edit().alignment = static_cast<uint32_t>(aligned);
+        if (object_alignment > x.details().alignment)
+            x.edit().alignment = object_alignment;
         if (gnu_flags & gnu_diagnose_if)
             diagnose_if_declared(declaration, declared_entity);
     }
@@ -2097,11 +2099,12 @@ analysis_result semantic_analysis::declare_with_initializer(
              x.kind != entity_kind::variable))
             return not_supported_because(declaration, "ext.gnu",
                                          "an asm label on this declaration");
-        if (x.asm_label && !same_token_spelling(x.asm_label, m.asm_label))
+        if (x.details().asm_label &&
+            !same_token_spelling(x.details().asm_label, m.asm_label))
             return not_supported_because(
                 declaration, "ext.gnu",
                 "a redeclaration with a different asm label");
-        x.asm_label = m.asm_label;
+        x.edit().asm_label = m.asm_label;
     }
     /* [dcl.array]/8: the bound of an earlier declaration (declare took it)
        is the one the initializer fills */
@@ -2150,8 +2153,9 @@ analysis_result semantic_analysis::declare_with_initializer(
                               "class.dtor");
         /* [class.access]/1: a private or protected one is named from
            here, by the declaration's context */
-        if (is_class_entity(record) && entity_table[record].destructor &&
-            !accessible(entity_table[record].destructor))
+        if (is_class_entity(record) &&
+            entity_table[record].details().destructor &&
+            !accessible(entity_table[record].details().destructor))
             return ill_formed(declaration,
                               "the destructor of the object is potentially "
                               "invoked and it is private or protected",
@@ -2204,7 +2208,7 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r == analysis_result::well_formed && function_state.active &&
         entity_table[declared_entity].automatic) {
         entity_index k = element_class(entity_table[declared_entity].type);
-        if (is_class_entity(k) && entity_table[k].destructor) {
+        if (is_class_entity(k) && entity_table[k].details().destructor) {
             jump_point point;
             point.scope = current_scope;
             point.at = m.id;
@@ -2495,7 +2499,8 @@ analysis_result semantic_analysis::declare_with_initializer(
                     type_kind::lvalue_reference &&
                 type_table[r2.type.unqualified()].kind !=
                     type_kind::rvalue_reference)
-                entity_table[declared_entity].constant_referent = referent;
+                entity_table[declared_entity].edit().constant_referent =
+                    referent;
         }
     }
     return analysis_result::well_formed;

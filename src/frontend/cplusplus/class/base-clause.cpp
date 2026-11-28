@@ -408,8 +408,9 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         named_bases.append(base);
         named_ids.append(id);
     }
-    entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());
-    entity_table[c].base_count = 0;
+    entity_table[c].edit().first_base =
+        static_cast<uint32_t>(class_bases.size());
+    entity_table[c].edit().base_count = 0;
     for (size_t si = 0; si < specifiers.size(); si++) {
         SyntaxElement specifier = specifiers[si];
         uint8_t access = 0;
@@ -453,11 +454,11 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         const entity &bx = entity_table[base];
         /* (a class whose definition the analysis could not follow: not
            known to be incomplete) */
-        if (!bx.size && bx.kind != entity_kind::class_type)
+        if (!bx.details().size && bx.kind != entity_kind::class_type)
             return not_supported_because(
                 specifier.index(), "class.derived",
                 "a base that names no class type and has no size");
-        if (!bx.size)
+        if (!bx.details().size)
             return ill_formed_at_token(id,
                                        "the class-or-decltype shall denote a "
                                        "class type that is not an "
@@ -468,8 +469,9 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
                                        "a class marked final shall not be "
                                        "specified as a direct base class",
                                        "class.derived");
-        for (uint32_t k = 0; k < entity_table[c].base_count; k++)
-            if (entity_table[class_bases[entity_table[c].first_base + k]]
+        for (uint32_t k = 0; k < entity_table[c].details().base_count; k++)
+            if (entity_table[class_bases[entity_table[c].details().first_base +
+                                         k]]
                     .type.unqualified() == bx.type.unqualified())
                 return ill_formed_at_token(id,
                                            "a class shall not be specified as "
@@ -502,7 +504,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
             entity_table[c].member_count++;
         }
         class_bases.append(e);
-        entity_table[c].base_count++;
+        entity_table[c].edit().base_count++;
     }
     /* [class.base.init]/13.1: the virtual base classes "in the order they
        appear on a depth-first left-to-right traversal of the directed
@@ -511,12 +513,13 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
     owned_array<entity_index> order;
     owned_array<entity_index> direct;
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index b = class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index b = class_bases[x.details().first_base + i];
         entity_index of = type_table[entity_table[b].type.unqualified()].entity;
         const entity &bx = entity_table[of];
-        for (uint32_t k = 0; k < bx.virtual_base_count; k++) {
-            entity_index v = class_virtual_bases[bx.first_virtual_base + k];
+        for (uint32_t k = 0; k < bx.details().virtual_base_count; k++) {
+            entity_index v =
+                class_virtual_bases[bx.details().first_virtual_base + k];
             entity_index vc =
                 type_table[entity_table[v].type.unqualified()].entity;
             bool seen = false;
@@ -555,8 +558,9 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         }
         class_virtual_bases.append(v);
     }
-    entity_table[c].first_virtual_base = first;
-    entity_table[c].virtual_base_count = static_cast<uint32_t>(order.size());
+    entity_table[c].edit().first_virtual_base = first;
+    entity_table[c].edit().virtual_base_count =
+        static_cast<uint32_t>(order.size());
     return analysis_result::well_formed;
 }
 
@@ -564,8 +568,9 @@ entity_index semantic_analysis::virtual_base_of(entity_index c,
                                                 entity_index v) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
-        entity_index b = class_virtual_bases[x.first_virtual_base + i];
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++) {
+        entity_index b =
+            class_virtual_bases[x.details().first_virtual_base + i];
         if (type_table[entity_table[b].type.unqualified()].entity == v)
             return b;
     }
@@ -578,8 +583,8 @@ void semantic_analysis::virtual_bases_in_graph_order(
     entity_index c, owned_array<entity_index> &out) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index b = class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index b = class_bases[x.details().first_base + i];
         entity_index of = type_table[entity_table[b].type.unqualified()].entity;
         if (entity_table[b].virtual_base) {
             bool seen = false;
@@ -588,7 +593,7 @@ void semantic_analysis::virtual_bases_in_graph_order(
             if (!seen)
                 out.append(of);
         }
-        if (entity_table[of].virtual_base_count)
+        if (entity_table[of].details().virtual_base_count)
             virtual_bases_in_graph_order(of, out);
     }
 }
@@ -598,8 +603,8 @@ uint32_t semantic_analysis::nonvirtual_subobjects(entity_index c,
 {
     const entity &x = entity_table[c];
     uint32_t count = 0;
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index b = class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index b = class_bases[x.details().first_base + i];
         if (entity_table[b].virtual_base)
             continue;
         entity_index of = type_table[entity_table[b].type.unqualified()].entity;
@@ -615,12 +620,12 @@ uint32_t semantic_analysis::base_subobjects(entity_index c,
 {
     uint32_t count = nonvirtual_subobjects(c, base);
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++) {
         entity_index v =
-            type_table
-                [entity_table[class_virtual_bases[x.first_virtual_base + i]]
-                     .type.unqualified()]
-                    .entity;
+            type_table[entity_table[class_virtual_bases
+                                        [x.details().first_virtual_base + i]]
+                           .type.unqualified()]
+                .entity;
         if (v == base)
             count++;
         count += nonvirtual_subobjects(v, base);
@@ -674,14 +679,15 @@ bool semantic_analysis::in_dependent_base_only(entity_index c, uint32_t name,
     unknown = false;
     const entity x = entity_table[c];
     bool dependent = false;
-    for (uint32_t k = 0; k < x.base_count; k++)
-        if (entity_table[class_bases[x.first_base + k]].dependent_base)
+    for (uint32_t k = 0; k < x.details().base_count; k++)
+        if (entity_table[class_bases[x.details().first_base + k]]
+                .dependent_base)
             dependent = true;
     if (!dependent || entity_table.find(c, name))
         return false;
     bool in_dependent = false, in_other = false;
-    for (uint32_t k = 0; k < x.base_count; k++) {
-        const entity &b = entity_table[class_bases[x.first_base + k]];
+    for (uint32_t k = 0; k < x.details().base_count; k++) {
+        const entity &b = entity_table[class_bases[x.details().first_base + k]];
         entity_index of = type_table[b.type.unqualified()].entity;
         bool ambiguous = false;
         entity_index e = class_member_lookup(of, name, ambiguous);
@@ -711,8 +717,8 @@ entity_index semantic_analysis::base_step(entity_index c, entity_index base,
 {
     const entity &x = entity_table[c];
     entity_index found = 0;
-    for (uint32_t i = 0; i < x.base_count && !found; i++) {
-        entity_index b = class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count && !found; i++) {
+        entity_index b = class_bases[x.details().first_base + i];
         entity_index of = type_table[entity_table[b].type.unqualified()].entity;
         if (of == base || base_subobjects(of, base))
             found = b;
@@ -740,10 +746,11 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
         return e;
     const entity &x = entity_table[c];
     entity_index found = 0;
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index of = type_table[entity_table[class_bases[x.first_base + i]]
-                                         .type.unqualified()]
-                              .entity;
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index of =
+            type_table[entity_table[class_bases[x.details().first_base + i]]
+                           .type.unqualified()]
+                .entity;
         entity_index one = class_member_lookup(of, name, ambiguous);
         /* [class.pre]/2: a base's injected-class-name is a member of it
            (not of a specialization's here: before '<' it is the
@@ -852,7 +859,8 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
                xvalue's object, or a prvalue's temporary materialized by
                [conv.rval]) */
             if (m.category == value_category::prvalue &&
-                (aggregate_prvalue(m) || entity_table[c].destructor)) {
+                (aggregate_prvalue(m) ||
+                 entity_table[c].details().destructor)) {
                 /* [basic.lval]/7, [class.temporary]/4: an aggregate's
                    prvalue or one with a destructor is held in a temporary
                    as a reference bound to it holds it: the glvalue the
@@ -1039,7 +1047,7 @@ analysis_result semantic_analysis::pointer_along_path(
         size_t i = k;
         if (to_derived)
             i = steps.size() - 1 - k;
-        if (entity_table[steps[i]].offset)
+        if (entity_table[steps[i]].details().offset)
             shifts.append(i);
     }
     conversion_kind kind = conversion_kind::derived_to_base;
@@ -1128,8 +1136,8 @@ entity_index semantic_analysis::nonvirtual_step(entity_index c,
                                                 entity_index base) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index b = class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index b = class_bases[x.details().first_base + i];
         if (entity_table[b].virtual_base)
             continue;
         entity_index of = type_table[entity_table[b].type.unqualified()].entity;
@@ -1145,12 +1153,12 @@ entity_index semantic_analysis::virtual_route(entity_index c,
                                               entity_index base) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++) {
         entity_index v =
-            type_table
-                [entity_table[class_virtual_bases[x.first_virtual_base + i]]
-                     .type.unqualified()]
-                    .entity;
+            type_table[entity_table[class_virtual_bases
+                                        [x.details().first_virtual_base + i]]
+                           .type.unqualified()]
+                .entity;
         if (v == base || nonvirtual_subobjects(v, base))
             return v;
     }
@@ -1165,8 +1173,8 @@ bool semantic_analysis::virtual_base_accessible(entity_index c,
 {
     bool inside = current_class() == c || in_friend_of(c);
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index b = class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index b = class_bases[x.details().first_base + i];
         if (entity_table[b].access && !inside)
             continue;
         entity_index of = type_table[entity_table[b].type.unqualified()].entity;
@@ -1182,8 +1190,8 @@ bool semantic_analysis::virtual_base_accessible(entity_index c,
 bool semantic_analysis::public_path_to(entity_index c, entity_index v) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index b = class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index b = class_bases[x.details().first_base + i];
         if (entity_table[b].access)
             continue;
         entity_index of = type_table[entity_table[b].type.unqualified()].entity;

@@ -52,7 +52,7 @@ bool semantic_analysis::move_assignment_operator(entity_index f,
        parameter) */
     if (x.instantiation || !x.nonstatic_member || x.enclosing != c ||
         !x.operator_function ||
-        x.implemented != preprocessing_op_or_punc::EQUAL)
+        x.details().implemented != preprocessing_op_or_punc::EQUAL)
         return false;
     const struct type &function = type_table[x.type.unqualified()];
     if (function.parameter_count != 1 || function.variadic)
@@ -100,7 +100,7 @@ bool semantic_analysis::variant_member_prevents_assignment(entity_index u,
         uint32_t name = operator_name(preprocessing_op_or_punc::EQUAL);
         for (entity_index f = entity_table.find(m, name);
              f && entity_table[f].enclosing == m;
-             f = entity_table[f].next_overload)
+             f = entity_table[f].details().next_overload)
             if (!entity_table[f].constraint_unsatisfied &&
                 (copy_assignment_operator(f, m) ||
                  (move && move_assignment_operator(f, m))))
@@ -145,7 +145,8 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
     bool move_may_be_template =
         move && !kx.defaulted_move_assignment &&
         (declares_copy_constructor(k) ||
-         (kx.destructor && !entity_table[kx.destructor].implicit));
+         (kx.details().destructor &&
+          !entity_table[kx.details().destructor].implicit));
     if ((found.entity || found.unknown) &&
         kx.defaulted_copy_assignment == kx.defaulted_move_assignment &&
         !move_may_be_template && assigned_bitwise(k)) {
@@ -158,7 +159,7 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
     if (kx.union_) {
         bool declared = false;
         for (entity_index f = found.entity; f && entity_table[f].enclosing == k;
-             f = entity_table[f].next_overload)
+             f = entity_table[f].details().next_overload)
             if (!entity_table[f].implicit &&
                 !entity_table[f].constraint_unsatisfied &&
                 (copy_assignment_operator(f, k) ||
@@ -177,7 +178,8 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
             return assignment_use::deleted;
         return assignment_use::usable;
     }
-    bool has_templates = bool(entity_table[found.entity].member_templates);
+    bool has_templates =
+        bool(entity_table[found.entity].details().member_templates);
     bool other_class_op = false;
     /* the candidates for the source: a const lvalue binds to X, const X&;
        an xvalue also to X&& */
@@ -185,7 +187,8 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
     uint32_t copies = 0, movings = 0;
     bool defaulted_usable = false;
     bool from_base = false;
-    for (entity_index f = found.entity; f; f = entity_table[f].next_overload) {
+    for (entity_index f = found.entity; f;
+         f = entity_table[f].details().next_overload) {
         const entity &x = entity_table[f];
         if (x.enclosing != k && entity_table[found.entity].enclosing == k &&
             x.kind == entity_kind::function) {
@@ -197,11 +200,11 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
         }
         if (x.enclosing != k || x.kind != entity_kind::function ||
             !x.nonstatic_member || !x.operator_function ||
-            x.implemented != preprocessing_op_or_punc::EQUAL)
+            x.details().implemented != preprocessing_op_or_punc::EQUAL)
             return assignment_use::unknown;
         const struct type &function = type_table[x.type.unqualified()];
         if (function.parameter_count != 1 || function.variadic ||
-            x.default_arguments || (x.member_cv & cv_const))
+            x.details().default_arguments || (x.member_cv & cv_const))
             return assignment_use::unknown;
         qualified_type p = type_table.parameters(x.type.unqualified())[0];
         const struct type &r = type_table[p.unqualified()];
@@ -274,7 +277,7 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
         for (entity_index m : classes)
             if (!assigned_bitwise(m))
                 trivially = false;
-        if (!trivially || kx.dynamic)
+        if (!trivially || kx.details().dynamic)
             return assignment_use::unknown;
         if (bytewise_const_member(k))
             return assignment_use::deleted;
@@ -344,14 +347,14 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
 analysis_result semantic_analysis::defaulted_assignment_access(entity_index c,
                                                                SyntaxRef n)
 {
-    bool copy = entity_table[c].defaulted_copy_access;
-    bool move = entity_table[c].defaulted_move_access;
+    bool copy = entity_table[c].details().defaulted_copy_access;
+    bool move = entity_table[c].details().defaulted_move_access;
     if (!copy && !move)
         return analysis_result::well_formed;
     entity_index head =
         entity_table.find(c, operator_name(preprocessing_op_or_punc::EQUAL));
     for (entity_index f = head; f && entity_table[f].enclosing == c;
-         f = entity_table[f].next_overload) {
+         f = entity_table[f].details().next_overload) {
         if (!entity_table[f].implicit)
             continue;
         if (copy_assignment_operator(f, c))
@@ -373,7 +376,7 @@ analysis_result semantic_analysis::defaulted_assignment_access(entity_index c,
  */
 bool semantic_analysis::assignment_not_trivial(entity_index c)
 {
-    if (entity_table[c].dynamic)
+    if (entity_table[c].details().dynamic)
         return true;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
@@ -417,7 +420,7 @@ void semantic_analysis::declare_implicit_assignment(entity_index c, bool move,
     f.type = type;
     f.nonstatic_member = true;
     f.operator_function = true;
-    f.implemented = preprocessing_op_or_punc::EQUAL;
+    f.edit().implemented = preprocessing_op_or_punc::EQUAL;
     f.inline_ = true;
     f.defined = true;
     f.implicit = true;
@@ -425,9 +428,9 @@ void semantic_analysis::declare_implicit_assignment(entity_index c, bool move,
     /* [dcl.fct.def.default]/2: one explicitly defaulted has the access
        of its declaration */
     if (move)
-        f.access = entity_table[c].defaulted_move_access;
+        f.access = entity_table[c].details().defaulted_move_access;
     else
-        f.access = entity_table[c].defaulted_copy_access;
+        f.access = entity_table[c].details().defaulted_copy_access;
     f.linkage_of_name = entity_table[c].linkage_of_name;
     entity_index head = entity_table.find(c, name);
     if (head && entity_table[head].kind == entity_kind::none &&
@@ -436,22 +439,24 @@ void semantic_analysis::declare_implicit_assignment(entity_index c, bool move,
         /* [temp.mem]/2: member function templates of the name are
            overloaded with it: it heads the name's chain and keeps their
            held name (as a declared one does, class-specifier.cpp) */
-        entity_table[e].member_templates = head;
+        entity_table[e].edit().member_templates = head;
         entity_table.bind(c, name, e);
         return;
     }
     if (!head || entity_table[head].enclosing != c) {
-        entity_table[e].next_overload = head;
+        entity_table[e].edit().next_overload = head;
         entity_table.bind(c, name, e);
         return;
     }
     /* last of the class's own chain, before a base's functions */
     entity_index last = head;
-    while (entity_table[last].next_overload &&
-           entity_table[entity_table[last].next_overload].enclosing == c)
-        last = entity_table[last].next_overload;
-    entity_table[e].next_overload = entity_table[last].next_overload;
-    entity_table[last].next_overload = e;
+    while (entity_table[last].details().next_overload &&
+           entity_table[entity_table[last].details().next_overload].enclosing ==
+               c)
+        last = entity_table[last].details().next_overload;
+    entity_table[e].edit().next_overload =
+        entity_table[last].details().next_overload;
+    entity_table[last].edit().next_overload = e;
 }
 
 /*
@@ -468,7 +473,7 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
         return analysis_result::well_formed;
     /* a virtual base is assigned once, not by each class that has it: not
        analysed */
-    if (x.virtual_base_count)
+    if (x.details().virtual_base_count)
         return analysis_result::well_formed;
     uint32_t name = operator_name(preprocessing_op_or_punc::EQUAL);
     entity_index head = entity_table.find(c, name);
@@ -480,7 +485,7 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
         return analysis_result::well_formed;
     bool user_copy = false, user_move = false;
     for (entity_index f = head; f && entity_table[f].enclosing == c;
-         f = entity_table[f].next_overload) {
+         f = entity_table[f].details().next_overload) {
         if (entity_table[f].implicit || entity_table[f].constraint_unsatisfied)
             continue;
         if (copy_assignment_operator(f, c))
@@ -498,13 +503,14 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
     bool defaulted_copy = x.defaulted_copy_assignment;
     bool defaulted_move = x.defaulted_move_assignment;
     /* [class.dtor]/4 (an implicit destructor is no user-declared one) */
-    bool user_destructor = x.destructor && !entity_table[x.destructor].implicit;
+    bool user_destructor = x.details().destructor &&
+                           !entity_table[x.details().destructor].implicit;
     bool user_copy_constructor =
         declares_copy_constructor(c) || x.defaulted_copy_constructor;
     /* (declares_move_constructor counts the implicit one too) */
     bool user_move_constructor = x.defaulted_move_constructor;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor)
         if (!entity_table[k].implicit && copy_or_move_constructor(c, k) &&
             type_table[type_table
                            .parameters(entity_table[k].type.unqualified())[0]
@@ -609,7 +615,8 @@ semantic_analysis::implicit_assignment_definitions(entity_index c, SyntaxRef n)
     uint32_t name = operator_name(preprocessing_op_or_punc::EQUAL);
     owned_array<entity_index> operators;
     for (entity_index f = entity_table.find(c, name);
-         f && entity_table[f].enclosing == c; f = entity_table[f].next_overload)
+         f && entity_table[f].enclosing == c;
+         f = entity_table[f].details().next_overload)
         if (entity_table[f].implicit && !entity_table[f].deleted)
             operators.append(f);
     qualified_type self =
@@ -645,7 +652,7 @@ semantic_analysis::implicit_assignment_definitions(entity_index c, SyntaxRef n)
                                   "definition could not be formed");
         entity_table[f].defined = false;
         body_failures.append(unsupported[before]);
-        entity_table[f].unsupported_body =
+        entity_table[f].edit().unsupported_body =
             static_cast<uint32_t>(body_failures.size());
         unsupported.resize(before);
     }
@@ -668,7 +675,7 @@ semantic_analysis::defaulted_assignment_definition(SyntaxRef n, entity_index f)
             n, "dcl.fct.def.default",
             "an out-of-class default of a function that is no copy or move "
             "assignment operator");
-    if (entity_table[c].union_ || entity_table[c].virtual_base_count)
+    if (entity_table[c].union_ || entity_table[c].details().virtual_base_count)
         return not_supported_because(
             n, "class.copy.assign",
             "a defaulted assignment of a union or a class with virtual bases");

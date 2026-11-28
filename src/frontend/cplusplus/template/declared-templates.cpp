@@ -695,7 +695,7 @@ entity_index semantic_analysis::member_templates_of(entity_index e) const
     if (!e)
         return 0;
     if (entity_table[e].kind == entity_kind::function)
-        return entity_table[e].member_templates;
+        return entity_table[e].details().member_templates;
     if (entity_table[e].kind == entity_kind::none &&
         member_function_template_of(e))
         return e;
@@ -727,7 +727,8 @@ void semantic_analysis::function_template_overloads(
     };
     /* the templates the held entity, or one it shadows, holds */
     const record_chains &chains = held_templates();
-    for (entity_index h = held; h; h = entity_table[h].using_shadow_of)
+    for (entity_index h = held; h;
+         h = entity_table[h].details().using_shadow_of)
         for (uint32_t i = chains.first(h); i; i = chains.after(i))
             if (usable(i))
                 out.append(i);

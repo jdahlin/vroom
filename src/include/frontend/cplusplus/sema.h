@@ -601,9 +601,16 @@ struct exception_specification {
     uint32_t first_type = 0;
 };
 
-struct entity {
-    entity_kind kind = entity_kind::none;
-    linkage linkage_of_name = linkage::none;
+/*
+ * The members of an entity that few entities set (under 2% of a large
+ * translation unit's records set any one of them): made on the entity's first
+ * write to one (entity::edit), and until then read as the defaults
+ * (entity::details).  A member goes here if few records set it.  A write may
+ * make a new record, so a reference to details() is not held across one.
+ */
+struct entity_details {
+    /* more than one entity record refers to this: a write makes a copy */
+    bool shared = false;
     /* an instantiated member function whose body analysis does not support:
        left undefined, and a use of it is refused (body_failures' index
        plus one) */
@@ -612,9 +619,6 @@ struct entity {
        attribute and [ext:clang_pragma_attribute] pragmas give it, the offset
        plus one of a string in target_strings (0: none) */
     uint32_t target_features = 0;
-    /* [except.spec]/1: the function's exception specification, compared
-       by redeclarations ([except.spec]/4) */
-    exception_specification exceptions;
     /* the declaration of the translation unit whose use first needed the
        definition ([temp.inst]/4), 0 if none: an argument-dependent error
        of the instantiated body makes it ill-formed (clang: "in
@@ -624,17 +628,6 @@ struct entity {
        dependent arguments (CWG 1558) whose type-id is not dependent: that
        type, which clang mangles ([impl.clang]) */
     qualified_type alias_expansion;
-    /* the preprocessor's identifier number, 0 for an unnamed entity */
-    uint32_t name = 0;
-    /* the entity whose scope the name is declared in (a namespace, a
-       class, a function); 0 at global namespace scope */
-    entity_index enclosing = 0;
-    qualified_type type;
-    /* [expr.const]/4: a variable usable in constant expressions: whether
-       it is (constant, with its value as expression_meaning keeps one),
-       is not, or analysis could not tell (unknown) */
-    constness usable = constness::not_constant;
-    uint64_t value = 0;
     /* [expr.const]/3-4: a reference (potentially-constant) whose
        initializer names a variable of static storage duration is usable
        in constant expressions; that variable, which a name of the
@@ -653,10 +646,6 @@ struct entity {
     /* with no held_because: why the declaration that held the name was
        not analysed, told in a refusal's detail */
     held_cause held_by = held_cause::refused;
-    /* the declaration that held the name (declaration() sets it), 0 if
-       not known: a refusal of a use of the name gives it
-       (unsupported_construct::holder) */
-    SyntaxRef holder = 0;
     /* with unknown_names: the subclause whose missing rules made the
        declaration that left the scope's names not all known not
        analysed (declaration() sets it), else the using-directive's */
@@ -669,28 +658,6 @@ struct entity {
        or enumerator name is visible.": the class or enumeration this entity's
        name hides in its scope, 0 if none */
     entity_index hidden_type = 0;
-    /* a block_scope: the scope whose names it shall not redeclare (the
-       function parameter scope for the outermost block of a function
-       definition, the scope of a statement's condition for its
-       substatements' outermost blocks), and whether that is the parameter
-       scope */
-    entity_index conflicts = 0;
-    /* [basic.link]: its declarations, in order, are a chain through
-       `declarations`: the first and the last */
-    uint32_t first_declaration = 0, last_declaration = 0;
-    /* the semantic tree of its definition: a function's
-       semantic_kind::function_body, a variable's initializer (0: none) */
-    uint32_t definition = 0;
-    /* [class.access]: a member's access (0 public, 1 protected, 2
-       private) */
-    uint8_t access = 0;
-    /* a non-static member function: [class.mfct.non-static]/5 the
-       cv-qualifier-seq of its declarator, which qualifies `this` */
-    uint32_t member_cv = 0;
-    /* a non-static data member: its number among the class's and, once
-       the class is complete, its offset in bytes ([class.mem]/19,
-       [abi:class-types]) */
-    uint32_t field = 0;
     /* an anonymous union (or clang's anonymous struct): the unnamed
        member object of it in the enclosing class ([class.union.anon]/1),
        through which a member's name in that class designates it */
@@ -708,12 +675,6 @@ struct entity {
        entity declared at the class's end takes */
     uint8_t defaulted_copy_access = 0, defaulted_move_access = 0;
     uint64_t offset = 0;
-    /* a class: its non-static data members, in declaration order, are
-       semantic_analysis::class_members[first_member .. first_member +
-       member_count); its size and alignment once it is complete
-       ([class.mem]/6: "A class is considered a completely-defined object
-       type ... at the closing } of the class-specifier") */
-    uint32_t first_member = 0, member_count = 0;
     uint64_t size = 0;
     /* a class: [abi:general] its data size (dsize), the size without the
        tail padding a derived class may reuse (its size, for a POD for the
@@ -736,10 +697,6 @@ struct entity {
        by the declaration to be that class type ... is used to denote the
        class type ... for linkage purposes only" */
     uint32_t linkage_name = 0;
-    /* a member function that is a constructor ([class.ctor]) or a
-       destructor ([class.dtor]); named by its class's name, not bound in
-       the class's scope */
-    special_member special = special_member::none;
     /* a constructor: the class's next one, 0 at the last */
     entity_index next_constructor = 0;
     /* a function: [over.pre]/1 "When two or more different declarations
@@ -790,14 +747,7 @@ struct entity {
     uint64_t bit_offset = 0;
     /* a class that is defined: the class-key of its class-specifier */
     token_index class_key = 0;
-    /* a function or variable: [ext:gnu_attributes] the GNU attributes
-       its declarations gave it (gnu_attribute_flag) and a section
-       attribute's string-literal, 0 if none; its aligned attribute's
-       alignment is alignment */
-    uint32_t gnu_flags = 0;
     token_index section = 0;
-    /* ... and an abi_tag attribute's string-literal, 0 if none */
-    token_index abi_tag = 0;
     /* ... gnu_constructor's or gnu_destructor's priority (0: the default)
        and gnu_cleanup's function */
     uint32_t gnu_priority = 0;
@@ -828,13 +778,6 @@ struct entity {
     /* ... and, its underlying type not fixed, the type it promotes to
        ([conv.prom]/4) */
     fundamental_type promoted = fundamental_type::none;
-    /* a specialization ([temp.spec]): its instantiation record
-       (semantic_analysis::instantiations) plus one */
-    uint32_t instantiation = 0;
-    /* a template (template_entity) or a template parameter: its
-       function_template record (semantic_analysis::function_templates)
-       plus one */
-    uint32_t template_record = 0;
     /* a function template's specialization, a member function of a class
        template's specialization or such a class: the subject of an
        explicit instantiation ([temp.explicit]/2) declaration (extern) or
@@ -880,6 +823,134 @@ struct entity {
        first_binding + binding_count, which name it ([abi:mangle.name]) */
     entity_index first_binding = 0;
     uint32_t binding_count = 0;
+};
+
+/* the defaults: what an entity without details reads */
+inline constexpr entity_details no_entity_details{};
+
+/* where the thread's translation unit makes details (entities) */
+inline thread_local stable_array<entity_details> *entity_details_table =
+    nullptr;
+
+/*
+ * An entity's details.  A copy of an entity shares them until either writes
+ * one, so a copy of a record keeps its values.
+ */
+class entity_details_pointer
+{
+  public:
+    constexpr entity_details_pointer() = default;
+    entity_details_pointer(const entity_details_pointer &other)
+        : details(other.share())
+    {
+    }
+    entity_details_pointer &operator=(const entity_details_pointer &other)
+    {
+        details = other.share();
+        return *this;
+    }
+    const entity_details &read() const
+    {
+        if (details)
+            return *details;
+        return no_entity_details;
+    }
+    entity_details &write()
+    {
+        if (!details || details->shared) {
+            entity_details &made = entity_details_table->append(read());
+            made.shared = false;
+            details = &made;
+        }
+        return *details;
+    }
+
+  private:
+    entity_details *share() const
+    {
+        if (details)
+            details->shared = true;
+        return details;
+    }
+    entity_details *details = nullptr;
+};
+
+struct entity {
+    entity_kind kind = entity_kind::none;
+    linkage linkage_of_name = linkage::none;
+    /* [except.spec]/1: the function's exception specification, compared
+       by redeclarations ([except.spec]/4) */
+    exception_specification exceptions;
+    /* the preprocessor's identifier number, 0 for an unnamed entity */
+    uint32_t name = 0;
+    /* the entity whose scope the name is declared in (a namespace, a
+       class, a function); 0 at global namespace scope */
+    entity_index enclosing = 0;
+    qualified_type type;
+    /* [expr.const]/4: a variable usable in constant expressions: whether
+       it is (constant, with its value as expression_meaning keeps one),
+       is not, or analysis could not tell (unknown) */
+    constness usable = constness::not_constant;
+    uint64_t value = 0;
+    /* the declaration that held the name (declaration() sets it), 0 if
+       not known: a refusal of a use of the name gives it
+       (unsupported_construct::holder) */
+    SyntaxRef holder = 0;
+    /* a block_scope: the scope whose names it shall not redeclare (the
+       function parameter scope for the outermost block of a function
+       definition, the scope of a statement's condition for its
+       substatements' outermost blocks), and whether that is the parameter
+       scope */
+    entity_index conflicts = 0;
+    /* [basic.link]: its declarations, in order, are a chain through
+       `declarations`: the first and the last */
+    uint32_t first_declaration = 0, last_declaration = 0;
+    /* the semantic tree of its definition: a function's
+       semantic_kind::function_body, a variable's initializer (0: none) */
+    uint32_t definition = 0;
+    /* [class.access]: a member's access (0 public, 1 protected, 2
+       private) */
+    uint8_t access = 0;
+    /* a non-static member function: [class.mfct.non-static]/5 the
+       cv-qualifier-seq of its declarator, which qualifies `this` */
+    uint32_t member_cv = 0;
+    /* a non-static data member: its number among the class's and, once
+       the class is complete, its offset in bytes ([class.mem]/19,
+       [abi:class-types]) */
+    uint32_t field = 0;
+    /* a class: its non-static data members, in declaration order, are
+       semantic_analysis::class_members[first_member .. first_member +
+       member_count); its size and alignment once it is complete
+       ([class.mem]/6: "A class is considered a completely-defined object
+       type ... at the closing } of the class-specifier") */
+    uint32_t first_member = 0, member_count = 0;
+    /* a member function that is a constructor ([class.ctor]) or a
+       destructor ([class.dtor]); named by its class's name, not bound in
+       the class's scope */
+    special_member special = special_member::none;
+    /* a function or variable: [ext:gnu_attributes] the GNU attributes
+       its declarations gave it (gnu_attribute_flag) and a section
+       attribute's string-literal, 0 if none; its aligned attribute's
+       alignment is alignment */
+    uint32_t gnu_flags = 0;
+    /* ... and an abi_tag attribute's string-literal, 0 if none */
+    token_index abi_tag = 0;
+    /* a specialization ([temp.spec]): its instantiation record
+       (semantic_analysis::instantiations) plus one */
+    uint32_t instantiation = 0;
+    /* a template (template_entity) or a template parameter: its
+       function_template record (semantic_analysis::function_templates)
+       plus one */
+    uint32_t template_record = 0;
+    entity_details_pointer rest;
+    const entity_details &details() const
+    {
+        return rest.read();
+    }
+    entity_details &edit()
+    {
+        return rest.write();
+    }
     /*
      * The flags, one bit each and together: a translation unit has more than a
      * million records, and a bool of its own among the members above cost a
@@ -1081,6 +1152,9 @@ struct entity {
     bool placeholder_return : 1 = false;
 };
 
+/* its copies share their details (entity_details_pointer); its bytes move */
+template <> inline constexpr bool relocatable_record<entity> = true;
+
 /* [class.virtual], [abi:vtable-components]: what a dynamic class adds to
    its entity: its primary base (a base class subobject entity sharing the
    virtual table pointer at offset 0, [abi:class-types] I; 0: the class
@@ -1147,6 +1221,7 @@ class entities
 {
   public:
     entities();
+    ~entities();
     entities(const entities &) = delete;
     entities &operator=(const entities &) = delete;
 
@@ -1196,6 +1271,9 @@ class entities
     }
 
   private:
+    /* made before records, which refer into it */
+    stable_array<entity_details> detail_records;
+    stable_array<entity_details> *outer_details = nullptr;
     stable_array<entity, entity_index> records;
     stable_array<entity_declaration> declarations;
     /* the names bound in scopes: open addressing over (scope, name); an
@@ -2190,9 +2268,9 @@ class semantic_analysis
     void dynamic_class_offsets(entity_index c);
     const dynamic_class *dynamic_of(entity_index c) const
     {
-        if (!entity_table[c].dynamic)
+        if (!entity_table[c].details().dynamic)
             return nullptr;
-        return &dynamic_classes[entity_table[c].dynamic - 1];
+        return &dynamic_classes[entity_table[c].details().dynamic - 1];
     }
     /* t, or the type a reference t refers to ([dcl.ref]) */
     qualified_type referenced_type(qualified_type t) const

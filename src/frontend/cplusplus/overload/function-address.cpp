@@ -58,7 +58,7 @@ entity_index semantic_analysis::named_overload_set(SyntaxElement e,
     if (!found.entity || found.unknown || found.ambiguous)
         return 0;
     const entity &first = entity_table[found.entity];
-    if (first.kind != entity_kind::function || !first.next_overload)
+    if (first.kind != entity_kind::function || !first.details().next_overload)
         return 0;
     return found.entity;
 }
@@ -99,7 +99,7 @@ bool semantic_analysis::function_set_at(token_index at, function_set &out) const
     if (!found.entity)
         return false;
     const entity &first = entity_table[found.entity];
-    if (first.kind != entity_kind::function || !first.next_overload)
+    if (first.kind != entity_kind::function || !first.details().next_overload)
         return false;
     overload_set(found.entity, out.functions);
     return true;
@@ -158,11 +158,12 @@ bool semantic_analysis::qualified_function_set(token_index qualifier,
     const entity &first = entity_table[found.entity];
     if (first.kind != entity_kind::function)
         return false;
-    if (!first.next_overload && !first.member_templates)
+    if (!first.details().next_overload && !first.details().member_templates)
         return false;
     overload_set(found.entity, out.functions);
-    if (first.member_templates)
-        function_template_overloads(first.member_templates, out.templates);
+    if (first.details().member_templates)
+        function_template_overloads(first.details().member_templates,
+                                    out.templates);
     return true;
 }
 

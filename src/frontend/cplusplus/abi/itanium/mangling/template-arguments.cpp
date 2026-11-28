@@ -139,6 +139,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
         /* (a generic lambda's is in its closure type's lambda-sig) */
         if (function &&
             !analysis.entity_table[analysis.entity_table[function].enclosing]
+                 .details()
                  .lambda)
             q = analysis.parameter_type_constraint(function, i);
         if (q) {

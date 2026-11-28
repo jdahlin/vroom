@@ -66,13 +66,15 @@ static void unqualified_function_name(semantic_analysis &a, entity_index f,
     if (x.operator_function) {
         vbuffer_string_append(out.get(), "operator");
         /* the call and subscript operators are two tokens */
-        if (x.implemented == preprocessing_op_or_punc::LEFT_PARENTHESIS)
+        if (x.details().implemented ==
+            preprocessing_op_or_punc::LEFT_PARENTHESIS)
             vbuffer_string_append(out.get(), "()");
-        else if (x.implemented == preprocessing_op_or_punc::LEFT_BRACKET)
+        else if (x.details().implemented ==
+                 preprocessing_op_or_punc::LEFT_BRACKET)
             vbuffer_string_append(out.get(), "[]");
         else
-            vbuffer_string_append(
-                out.get(), preprocessing_op_or_punc_spelling(x.implemented));
+            vbuffer_string_append(out.get(), preprocessing_op_or_punc_spelling(
+                                                 x.details().implemented));
         return;
     }
     if (x.conversion_function) {
@@ -229,7 +231,7 @@ static void type_scope_prefix(semantic_analysis &a, entity_index e,
         type_scope_prefix(a, x.enclosing, e, out);
         if (x.name)
             append_identifier(a, x.name, out);
-        else if (x.lambda)
+        else if (x.details().lambda)
             vbuffer_string_append(out.get(), "(lambda)");
         else if (x.kind == entity_kind::class_type)
             vbuffer_string_append(out.get(), "(unnamed struct)");
@@ -252,8 +254,8 @@ static void spell_class(semantic_analysis &a, entity_index e, owned_buffer &out)
     /* a preferred name of its template that denotes it, once the
        specialization is instantiated (clang's specialization takes the
        attribute from its pattern then; one only named keeps its own) */
-    if (x.instantiation && x.kind == entity_kind::class_type && x.size &&
-        a.specialized_template(e))
+    if (x.instantiation && x.kind == entity_kind::class_type &&
+        x.details().size && a.specialized_template(e))
         for (const semantic_analysis::preferred_name &p : a.preferred_names) {
             if (p.template_entity != a.specialized_template(e))
                 continue;
@@ -268,7 +270,7 @@ static void spell_class(semantic_analysis &a, entity_index e, owned_buffer &out)
     type_scope_prefix(a, x.enclosing, e, out);
     if (x.name)
         append_identifier(a, x.name, out);
-    else if (x.lambda)
+    else if (x.details().lambda)
         append(out, "(lambda)");
     else if (x.union_)
         append(out, "(unnamed union)");
@@ -784,9 +786,9 @@ static bool written_signature(semantic_analysis &a, entity_index f,
     const entity &x = a.entity_table[f];
     entity_index closure = x.enclosing;
     if (closure && a.entity_table[closure].kind == entity_kind::class_type &&
-        a.entity_table[closure].lambda &&
-        a.entity_table[closure].call_operator == f) {
-        SyntaxRef l = a.entity_table[closure].lambda;
+        a.entity_table[closure].details().lambda &&
+        a.entity_table[closure].details().call_operator == f) {
+        SyntaxRef l = a.entity_table[closure].details().lambda;
         for (uint32_t i = 0; i < l.size(); i++)
             if (SyntaxElement(l[i]).is(syntax_kind::lambda_declarator)) {
                 SyntaxElement d = l[i];
@@ -910,7 +912,7 @@ static bool function_prefix(semantic_analysis &a, entity_index e,
             return false;
         if (x.name)
             append_identifier(a, x.name, out);
-        else if (x.lambda)
+        else if (x.details().lambda)
             append(out, "(lambda)");
         else if (x.kind == entity_kind::class_type) {
             if (x.union_)

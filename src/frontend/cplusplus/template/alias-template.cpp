@@ -202,7 +202,7 @@ analysis_result semantic_analysis::alias_template_specialization(
         unsupported.resize(refusals_before);
         type = dependent_specialization(ft.entity, arguments);
         if (r == analysis_result::well_formed && !t.cv())
-            entity_table[type_table[type].entity].alias_expansion = t;
+            entity_table[type_table[type].entity].edit().alias_expansion = t;
         return analysis_result::well_formed;
     }
     /* [impl.clang] a closure type created by substituting an alias template
@@ -212,7 +212,7 @@ analysis_result semantic_analysis::alias_template_specialization(
     if (r == analysis_result::well_formed &&
         type_table[t.unqualified()].kind == type_kind::class_type) {
         entity_index c = type_table[t.unqualified()].entity;
-        if (entity_table[c].lambda && c.index() >= entities_before) {
+        if (entity_table[c].details().lambda && c.index() >= entities_before) {
             entity_index fn = saved_scope;
             while (fn && entity_table[fn].kind != entity_kind::function)
                 fn = entity_table[fn].enclosing;
@@ -252,7 +252,7 @@ analysis_result semantic_analysis::alias_template_specialization(
                each instantiation, where a failure is the deduction's */
             type = dependent_specialization(ft.entity, arguments);
             /* (the type it denotes, which [impl.clang] clang mangles) */
-            entity_table[type_table[type].entity].alias_expansion =
+            entity_table[type_table[type].entity].edit().alias_expansion =
                 qualified_type::make(t.unqualified(), cv_none);
             if (cv)
                 *cv = t.cv();

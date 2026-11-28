@@ -73,11 +73,12 @@ bool semantic_analysis::offsetof_member(entity_index c, uint32_t name,
         return true;
     }
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = entity_table[class_bases[x.first_base + i]];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        const entity &b = entity_table[class_bases[x.details().first_base + i]];
         const struct type &t = type_table[b.type.unqualified()];
         if (b.virtual_base || t.kind != type_kind::class_type ||
-            !offsetof_member(t.entity, name, at + b.offset, found, offset))
+            !offsetof_member(t.entity, name, at + b.details().offset, found,
+                             offset))
             return false;
     }
     return true;
@@ -131,7 +132,7 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
         }
         require_complete(record.entity);
         if (record.kind != type_kind::class_type ||
-            !entity_table[record.entity].size)
+            !entity_table[record.entity].details().size)
             return ill_formed(n, "offsetof requires a complete class type",
                               "ext.gnu");
         owned_array<entity_index> found;
@@ -147,19 +148,19 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
         offset += base_offset;
         const entity &e = entity_table[member];
         if (e.kind != entity_kind::variable || !e.nonstatic_member ||
-            e.anonymous_object)
+            e.details().anonymous_object)
             return not_supported_because(n, "ext.gnu",
                                          "offsetof of a name that is not a "
                                          "plain non-static data member");
-        offset += e.offset;
+        offset += e.details().offset;
         /* [class.union.anon]/1: a member of an anonymous union is one of the
            class whose member its unnamed object is, at that object's offset
            (and so on, outwards) */
         entity_index member_of = e.enclosing;
-        while (entity_table[member_of].anonymous_object) {
-            const entity &object =
-                entity_table[entity_table[member_of].anonymous_object];
-            offset += object.offset;
+        while (entity_table[member_of].details().anonymous_object) {
+            const entity &object = entity_table
+                [entity_table[member_of].details().anonymous_object];
+            offset += object.details().offset;
             member_of = object.enclosing;
         }
         t = e.type;

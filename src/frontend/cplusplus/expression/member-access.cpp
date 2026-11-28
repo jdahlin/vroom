@@ -125,7 +125,7 @@ bool semantic_analysis::overload_set_called(token_index t, entity_index e) const
 {
     return t == overloaded_callee &&
            entity_table[e].kind == entity_kind::function &&
-           entity_table[e].next_overload;
+           entity_table[e].details().next_overload;
 }
 
 /*
@@ -140,7 +140,7 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
     m.binding = 0;
     entity_index object_class = type_table[m.type.unqualified()].entity;
     entity_index through =
-        entity_table[entity_table[e].enclosing].anonymous_object;
+        entity_table[entity_table[e].enclosing].details().anonymous_object;
     if (entity_table[e].nonstatic_member && through) {
         /* [class.union.anon]/1: a member of an anonymous union, of its
            unnamed object */
@@ -225,7 +225,7 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
                                       e.index());
         /* [expr.ref]/6.2: "If E2 is a bit-field, E1.E2 is a bit-field." */
         if (x.bit_field)
-            result.bit_field_width = x.bit_width;
+            result.bit_field_width = x.details().bit_width;
         m = result;
         return analysis_result::well_formed;
     }
@@ -236,8 +236,8 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
     bool mixed_set = false;
     if (x.kind == entity_kind::function && !x.nonstatic_member &&
         at == overloaded_callee)
-        for (entity_index o = x.next_overload; o;
-             o = entity_table[o].next_overload)
+        for (entity_index o = x.details().next_overload; o;
+             o = entity_table[o].details().next_overload)
             if (entity_table[o].nonstatic_member)
                 mixed_set = true;
     if (x.kind == entity_kind::function && (x.nonstatic_member || mixed_set)) {
@@ -260,15 +260,15 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         /* [over.over]/1 (named_entity); with more than one function the
            cv-qualifiers are the implicit object parameter's, of
            overload resolution ([over.match.funcs]/4) */
-        if (x.next_overload && at != overloaded_callee)
+        if (x.details().next_overload && at != overloaded_callee)
             return not_supported_because(
                 current_declaration, "over.over",
                 "an overloaded member function named without a call");
-        if (!x.next_overload) {
+        if (!x.details().next_overload) {
             /* [dcl.fct.def.delete]/2 */
             VTRY(r, deleted_use(at, e));
         }
-        if ((m.type.cv() & ~x.member_cv) && !x.next_overload)
+        if ((m.type.cv() & ~x.member_cv) && !x.details().next_overload)
             return ill_formed_at_token(at,
                                        "a member function can be called on "
                                        "an object expression only if its "
@@ -282,7 +282,8 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         address.evaluation = constness::not_constant;
         address.node =
             expression_node(semantic_kind::address, address, at, m.node);
-        for (entity_index fn = e; fn; fn = entity_table[fn].next_overload)
+        for (entity_index fn = e; fn;
+             fn = entity_table[fn].details().next_overload)
             if (contains_placeholder(
                     type_table[entity_table[fn].type.unqualified()].operand))
                 deduce_member_body_now(fn);
@@ -301,7 +302,7 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
     }
     if ((x.kind == entity_kind::variable || x.kind == entity_kind::function ||
          x.kind == entity_kind::enumerator) &&
-        !x.nonstatic_member && !x.next_overload) {
+        !x.nonstatic_member && !x.details().next_overload) {
         /* [expr.ref]/6.1: "If E2 is a static data member and the type of E2
            is T, then E1.E2 is an lvalue; the expression designates the named
            member of the class."  /6.3.1: "If it refers to a static member
@@ -355,9 +356,10 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
     /* [class.union.anon]/1: a member of an anonymous union is one of the
        class whose member its unnamed object is */
     entity_index member_of = entity_table[e].enclosing;
-    while (entity_table[member_of].anonymous_object)
+    while (entity_table[member_of].details().anonymous_object)
         member_of =
-            entity_table[entity_table[member_of].anonymous_object].enclosing;
+            entity_table[entity_table[member_of].details().anonymous_object]
+                .enclosing;
     entity_index cls = current_class();
     if (!cls)
         cls = defining_class;
@@ -390,7 +392,8 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
            (overload resolution selects the static overloads) */
         if (entity_table[e].kind == entity_kind::function) {
             entity_index static_fn = 0;
-            for (entity_index o = e; o; o = entity_table[o].next_overload)
+            for (entity_index o = e; o;
+                 o = entity_table[o].details().next_overload)
                 if (!entity_table[o].nonstatic_member) {
                     static_fn = o;
                     break;
@@ -532,7 +535,7 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         require_complete(qscope.entity);
         if (qscope.global || qscope.dependent || !qscope.entity ||
             entity_table[qscope.entity].kind != entity_kind::class_type ||
-            !entity_table[qscope.entity].size)
+            !entity_table[qscope.entity].details().size)
             return not_supported_because(n, "expr.ref",
                                          "a qualified pseudo-member name whose "
                                          "scope is not a complete class");
@@ -619,19 +622,19 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     }
     /* a specialization whose definition could not be analysed is no
        incomplete class */
-    if (!entity_table[c].size && entity_table[c].instantiation &&
+    if (!entity_table[c].details().size && entity_table[c].instantiation &&
         instantiations[entity_table[c].instantiation - 1].has_failure)
         return not_supported_caused_by(
             n, "temp.inst",
             "member access on a class whose instantiation failed",
             instantiations[entity_table[c].instantiation - 1].failure);
-    if (!entity_table[c].size && entity_table[c].defined)
+    if (!entity_table[c].details().size && entity_table[c].defined)
         /* [expr.ref]/4: in the definition of the class, a complete-class
            context ([class.mem]/6) whose layout is not known yet */
         return not_supported_because(
             n, "expr.ref",
             "a member access of the class being defined before its layout");
-    if (!entity_table[c].size)
+    if (!entity_table[c].details().size)
         return ill_formed(n,
                           "the class type shall be complete unless the class "
                           "member access appears in the definition of that "
@@ -664,7 +667,7 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         return not_supported_because(n, "class.member.lookup",
                                      "an ambiguous member name");
     if (e && (entity_table[e].kind == entity_kind::none ||
-              entity_table[e].member_templates)) {
+              entity_table[e].details().member_templates)) {
         if (uint32_t vt = variable_template_of(e)) {
             SyntaxElement id = member_template_id(n);
             if (id.is(syntax_kind::simple_template_id,

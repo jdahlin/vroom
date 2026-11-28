@@ -77,11 +77,11 @@ bool empty_class(const semantic_analysis &a, entity_index c)
     const entity &x = a.entity_table[c];
     /* "no virtual functions": a dynamic class has its virtual table
        pointer */
-    if (x.dynamic)
+    if (x.details().dynamic)
         return false;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = a.entity_table[a.class_members[x.first_member + i]];
-        if (m.bit_field && !m.bit_width)
+        if (m.bit_field && !m.details().bit_width)
             continue;
         if (m.base_subobject && empty_class(a, class_of_component(a, m)))
             continue;
@@ -109,8 +109,10 @@ bool pod_for_layout(const semantic_analysis &a, entity_index c)
     const entity &x = a.entity_table[c];
     /* [impl.clang] a destructor or copy assignment operator deleted on its
        first declaration is no user-declared one here, as constructors */
-    if ((x.destructor && !a.entity_table[x.destructor].deleted) ||
-        x.base_count || x.user_copy_assignments || x.dynamic)
+    if ((x.details().destructor &&
+         !a.entity_table[x.details().destructor].deleted) ||
+        x.details().base_count || x.details().user_copy_assignments ||
+        x.details().dynamic)
         return false;
     /* [impl.clang] a constructor deleted on its first declaration is no
        user-declared one here (C++11's aggregates allow it) */
@@ -118,8 +120,8 @@ bool pod_for_layout(const semantic_analysis &a, entity_index c)
        on its first declaration, as the constructors) */
     if (a.has_user_constructor_template(c))
         return false;
-    for (entity_index k = x.first_constructor; k;
-         k = a.entity_table[k].next_constructor)
+    for (entity_index k = x.details().first_constructor; k;
+         k = a.entity_table[k].details().next_constructor)
         if (!a.entity_table[k].deleted)
             return false;
     for (uint32_t i = 0; i < x.member_count; i++) {
@@ -128,7 +130,7 @@ bool pod_for_layout(const semantic_analysis &a, entity_index c)
             continue;
         /* [impl.clang] a default member initializer (no aggregate in
            C++11, so no C++03 POD) */
-        if (m.access || m.default_initializer)
+        if (m.access || m.details().default_initializer)
             return false;
         /* C++03 clause 9 paragraph 4: a POD-struct has no "non-static data members of
            type ... reference" */
@@ -207,16 +209,18 @@ class class_layout
         if (empty_class(analysis, of))
             return true;
         const entity &x = table[of];
-        for (uint32_t i = 0; i < x.base_count; i++) {
-            const entity &b = table[analysis.class_bases[x.first_base + i]];
+        for (uint32_t i = 0; i < x.details().base_count; i++) {
+            const entity &b =
+                table[analysis.class_bases[x.details().first_base + i]];
             if (b.virtual_base)
                 continue;
             if (has_empty_subobject(class_of_component(analysis, b), false))
                 return true;
         }
-        for (uint32_t i = 0; complete && i < x.virtual_base_count; i++) {
-            const entity &b =
-                table[analysis.class_virtual_bases[x.first_virtual_base + i]];
+        for (uint32_t i = 0; complete && i < x.details().virtual_base_count;
+             i++) {
+            const entity &b = table[analysis.class_virtual_bases
+                                        [x.details().first_virtual_base + i]];
             if (has_empty_subobject(class_of_component(analysis, b), false))
                 return true;
         }
@@ -239,7 +243,7 @@ class class_layout
        of them) is, at most most_recorded_elements (too_many past it) */
     uint64_t elements(const entity &m, entity_index of)
     {
-        uint64_t element = table[of].size;
+        uint64_t element = table[of].details().size;
         uint64_t count = 1;
         if (element)
             count = analysis.size_of_type(m.type) / element;
@@ -280,21 +284,23 @@ bool class_layout::each_subobject(entity_index of, uint64_t at, bool complete,
     if (!f(of, at))
         return false;
     const entity &x = table[of];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = table[analysis.class_bases[x.first_base + i]];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        const entity &b =
+            table[analysis.class_bases[x.details().first_base + i]];
         /* a virtual base is placed by the most derived class (III) */
         if (b.virtual_base)
             continue;
-        if (!each_subobject(class_of_component(analysis, b), at + b.offset,
-                            false, f))
+        if (!each_subobject(class_of_component(analysis, b),
+                            at + b.details().offset, false, f))
             return false;
     }
     /* a complete object (a member's) has its virtual bases too */
-    for (uint32_t i = 0; complete && i < x.virtual_base_count; i++) {
+    for (uint32_t i = 0; complete && i < x.details().virtual_base_count; i++) {
         const entity &b =
-            table[analysis.class_virtual_bases[x.first_virtual_base + i]];
-        if (!each_subobject(class_of_component(analysis, b), at + b.offset,
-                            false, f))
+            table[analysis
+                      .class_virtual_bases[x.details().first_virtual_base + i]];
+        if (!each_subobject(class_of_component(analysis, b),
+                            at + b.details().offset, false, f))
             return false;
     }
     for (uint32_t i = 0; i < x.member_count; i++) {
@@ -302,10 +308,11 @@ bool class_layout::each_subobject(entity_index of, uint64_t at, bool complete,
         entity_index inner = class_of_component(analysis, m);
         if (!inner || m.base_subobject || !has_empty_subobject(inner, true))
             continue;
-        uint64_t element = table[inner].size;
+        uint64_t element = table[inner].details().size;
         uint64_t count = elements(m, inner);
         for (uint64_t k = 0; k < count; k++)
-            if (!each_subobject(inner, at + m.offset + k * element, true, f))
+            if (!each_subobject(inner, at + m.details().offset + k * element,
+                                true, f))
                 return false;
     }
     return true;
@@ -360,8 +367,8 @@ const char *class_layout::initialization()
     data_bits = 0;
     /* [dcl.align]: the class's own alignment-specifiers, before its
        bases and members (clang's) */
-    if (table[c].requested_alignment)
-        raise_alignment(table[c].requested_alignment);
+    if (table[c].details().requested_alignment)
+        raise_alignment(table[c].details().requested_alignment);
     const dynamic_class *d = analysis.dynamic_of(c);
     if (d && !d->primary_base) {
         uint64_t pointer = analysis.pointer_size();
@@ -384,17 +391,18 @@ static uint64_t nonvirtual_size(semantic_analysis &analysis, entity_index of)
 {
     const entities &table = analysis.entity_table;
     const entity &d = table[of];
-    uint64_t end = d.data_size;
-    if (d.virtual_base_count)
-        end = d.nv_size;
-    for (uint32_t i = 0; i < d.base_count; i++) {
-        const entity &b = table[analysis.class_bases[d.first_base + i]];
+    uint64_t end = d.details().data_size;
+    if (d.details().virtual_base_count)
+        end = d.details().nv_size;
+    for (uint32_t i = 0; i < d.details().base_count; i++) {
+        const entity &b =
+            table[analysis.class_bases[d.details().first_base + i]];
         if (b.virtual_base)
             continue;
         entity_index bc = class_of_component(analysis, b);
-        uint64_t to = b.offset + table[bc].size;
+        uint64_t to = b.details().offset + table[bc].details().size;
         if (!empty_class(analysis, bc))
-            to = b.offset + nonvirtual_size(analysis, bc);
+            to = b.details().offset + nonvirtual_size(analysis, bc);
         if (to > end)
             end = to;
     }
@@ -415,13 +423,13 @@ const char *class_layout::base(entity &b)
 {
     entity_index of = class_of_component(analysis, b);
     const entity &d = table[of];
-    uint64_t base_alignment = d.alignment;
-    if (d.virtual_base_count)
-        base_alignment = d.nv_alignment;
+    uint64_t base_alignment = d.details().alignment;
+    if (d.details().virtual_base_count)
+        base_alignment = d.details().nv_alignment;
     /* [ext.clang] #pragma pack caps a base's alignment as a member's */
-    if (table[c].max_field_alignment &&
-        base_alignment > table[c].max_field_alignment)
-        base_alignment = table[c].max_field_alignment;
+    if (table[c].details().max_field_alignment &&
+        base_alignment > table[c].details().max_field_alignment)
+        base_alignment = table[c].details().max_field_alignment;
     raise_alignment(base_alignment);
     bool empty = empty_class(analysis, of);
     uint64_t at = 0;
@@ -433,10 +441,10 @@ const char *class_layout::base(entity &b)
         while (conflicts(of, at, false))
             at += base_alignment;
     }
-    b.offset = at;
+    b.edit().offset = at;
     record(of, at, false);
     if (empty) {
-        raise_size(at + d.size);
+        raise_size(at + d.details().size);
     } else {
         data_bits = (at + nonvirtual_size(analysis, of)) * 8;
         raise_size(data_size());
@@ -470,16 +478,16 @@ void class_layout::bit_field(entity &m, bool packed)
     /* [ext.clang] #pragma pack(n) caps the alignment a
        bit-field gives the class, and no padding is put before one to keep
        it within a unit of its type (clang's MaxFieldAlignment) */
-    uint64_t cap = table[c].max_field_alignment;
+    uint64_t cap = table[c].details().max_field_alignment;
     if (cap && cap < class_alignment)
         class_alignment = cap;
     uint64_t bit_alignment = type_alignment * 8;
     if (table[c].union_) {
         /* [class.union]/2: each member "as if it were the sole member of
            a non-union class": at offset 0, its bytes the union's data */
-        m.offset = 0;
-        m.bit_offset = 0;
-        uint64_t bits = align_up(m.bit_width, 8);
+        m.edit().offset = 0;
+        m.edit().bit_offset = 0;
+        uint64_t bits = align_up(m.details().bit_width, 8);
         if (bits > data_bits)
             data_bits = bits;
         raise_size(data_size());
@@ -488,11 +496,12 @@ void class_layout::bit_field(entity &m, bool packed)
     }
     uint64_t at = data_bits;
     if (!packed && !cap &&
-        (!m.bit_width || (at % bit_alignment) + m.bit_width > unit))
+        (!m.details().bit_width ||
+         (at % bit_alignment) + m.details().bit_width > unit))
         at = align_up(at, bit_alignment);
-    m.offset = at / 8;
-    m.bit_offset = at;
-    data_bits = at + m.bit_width;
+    m.edit().offset = at / 8;
+    m.edit().bit_offset = at;
+    data_bits = at + m.details().bit_width;
     raise_size(data_size());
     raise_alignment(class_alignment);
 }
@@ -511,20 +520,20 @@ void class_layout::potentially_overlapping_member(entity &m, entity_index of,
                                                   uint64_t member_alignment)
 {
     if (empty_class(analysis, of)) {
-        m.offset = 0;
+        m.edit().offset = 0;
         if (conflicts(of, 0, true)) {
-            m.offset = align_up(data_size(), member_alignment);
-            while (conflicts(of, m.offset, true))
-                m.offset += member_alignment;
+            m.edit().offset = align_up(data_size(), member_alignment);
+            while (conflicts(of, m.details().offset, true))
+                m.edit().offset += member_alignment;
         }
-        record(of, m.offset, true);
-        raise_size(m.offset + table[of].size);
+        record(of, m.details().offset, true);
+        raise_size(m.details().offset + table[of].details().size);
     } else {
-        m.offset = align_up(data_size(), member_alignment);
-        while (conflicts(of, m.offset, true))
-            m.offset += member_alignment;
-        record(of, m.offset, true);
-        data_bits = (m.offset + table[of].data_size) * 8;
+        m.edit().offset = align_up(data_size(), member_alignment);
+        while (conflicts(of, m.details().offset, true))
+            m.edit().offset += member_alignment;
+        record(of, m.details().offset, true);
+        data_bits = (m.details().offset + table[of].details().data_size) * 8;
         raise_size(data_size());
     }
     raise_alignment(member_alignment);
@@ -553,24 +562,24 @@ const char *class_layout::data_member(entity &m)
     }
     if (m.gnu_flags & gnu_packed)
         member_alignment = 1;
-    if (m.alignment > member_alignment)
-        member_alignment = m.alignment;
+    if (m.details().alignment > member_alignment)
+        member_alignment = m.details().alignment;
     /* [ext.clang] #pragma pack caps it, an aligned attribute's too: the
        member is kept as a packed one aligned to the cap */
-    uint32_t cap = table[c].max_field_alignment;
+    uint32_t cap = table[c].details().max_field_alignment;
     if (cap && member_alignment > cap) {
         member_alignment = cap;
         m.gnu_flags |= gnu_packed;
-        m.alignment = 0;
+        m.edit().alignment = 0;
         if (cap > 1)
-            m.alignment = cap;
+            m.edit().alignment = cap;
     }
     if (table[c].union_) {
         /* [class.union]/2: "The size of a union is sufficient to contain
            the largest of its non-static data members.  Each non-static
            data member is allocated as if it were the sole member of a
            non-union class." */
-        m.offset = 0;
+        m.edit().offset = 0;
         if (member_size > data_size())
             data_bits = member_size * 8;
         else
@@ -587,15 +596,15 @@ const char *class_layout::data_member(entity &m)
         }
         uint64_t element = 0, count = 0;
         if (of && has_empty_subobject(of, true)) {
-            element = table[of].size;
+            element = table[of].details().size;
             count = elements(m, of);
         }
-        m.offset = align_up(data_size(), member_alignment);
-        while (elements_conflict(of, m.offset, element, count))
-            m.offset += member_alignment;
+        m.edit().offset = align_up(data_size(), member_alignment);
+        while (elements_conflict(of, m.details().offset, element, count))
+            m.edit().offset += member_alignment;
         for (uint64_t k = 0; k < count; k++)
-            record(of, m.offset + k * element, true);
-        data_bits = (m.offset + member_size) * 8;
+            record(of, m.details().offset + k * element, true);
+        data_bits = (m.details().offset + member_size) * 8;
     }
     raise_size(data_size());
     raise_alignment(member_alignment);
@@ -618,11 +627,13 @@ const char *class_layout::allocation_of_members()
        a base or a virtual table pointer clang packs them too, in rules this
        does not follow yet */
     if ((x.gnu_flags & gnu_packed) &&
-        (x.base_count || x.virtual_base_count || x.dynamic))
+        (x.details().base_count || x.details().virtual_base_count ||
+         x.details().dynamic))
         return "ext.gnu";
     /* [ext.clang] #pragma pack with virtual bases or a virtual table
        pointer: rules this does not follow yet */
-    if (x.max_field_alignment && (x.virtual_base_count || x.dynamic))
+    if (x.details().max_field_alignment &&
+        (x.details().virtual_base_count || x.details().dynamic))
         return "cpp.pragma";
     /* [abi:class-types] II: the primary base (virtual or non-virtual) is
        allocated first, at offset 0 */
@@ -632,8 +643,9 @@ const char *class_layout::allocation_of_members()
         if (rule)
             return rule;
     }
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index specifier = analysis.class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index specifier =
+            analysis.class_bases[x.details().first_base + i];
         entity &b = table[specifier];
         if (b.virtual_base || (dyn && dyn->primary_base == specifier))
             continue;
@@ -647,13 +659,13 @@ const char *class_layout::allocation_of_members()
             continue;
         if (m.bit_field) {
             /* (a zero-width one under #pragma pack: not followed) */
-            if (x.max_field_alignment && !m.bit_width)
+            if (x.details().max_field_alignment && !m.details().bit_width)
                 return "cpp.pragma";
             /* a packed bit-field starts at the next bit whatever its
                type's alignment */
             if ((m.gnu_flags | x.gnu_flags) & gnu_packed) {
                 /* (a zero-width one aligns to its type: not followed) */
-                if (!m.bit_width)
+                if (!m.details().bit_width)
                     return "ext.gnu";
                 bit_field(m, true);
                 continue;
@@ -679,9 +691,9 @@ const char *class_layout::allocation_of_members()
 const char *class_layout::virtual_base_allocation()
 {
     entity &x = table[c];
-    x.nv_size = size;
-    x.nv_alignment = alignment;
-    if (!x.virtual_base_count)
+    x.edit().nv_size = size;
+    x.edit().nv_alignment = alignment;
+    if (!x.details().virtual_base_count)
         return nullptr;
     owned_array<entity_index> order;
     analysis.virtual_bases_in_graph_order(c, order);
@@ -694,12 +706,13 @@ const char *class_layout::virtual_base_allocation()
             const entity &pb = table[dyn->primary_base];
             entity_index pk = class_of_component(analysis, pb);
             if (dyn->primary_is_virtual && pk == v) {
-                b.offset = pb.offset;
+                b.edit().offset = pb.details().offset;
                 continue;
             }
             if (analysis.primary_chain_has(pk, v)) {
-                b.offset =
-                    pb.offset + table[analysis.virtual_base_of(pk, v)].offset;
+                b.edit().offset =
+                    pb.details().offset +
+                    table[analysis.virtual_base_of(pk, v)].details().offset;
                 continue;
             }
         }
@@ -720,13 +733,14 @@ const char *class_layout::virtual_base_allocation()
  */
 bool class_layout::zero_size_members_only(const entity &x) const
 {
-    if (x.dynamic || x.base_count || x.virtual_base_count)
+    if (x.details().dynamic || x.details().base_count ||
+        x.details().virtual_base_count)
         return false;
     bool any = false;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = table[analysis.class_members[x.first_member + i]];
         const struct type &t = analysis.type_table[m.type.unqualified()];
-        if (m.bit_field && !m.bit_width)
+        if (m.bit_field && !m.details().bit_width)
             continue;
         if (t.kind != type_kind::array || analysis.size_of_type(m.type))
             return false;
@@ -738,23 +752,23 @@ bool class_layout::zero_size_members_only(const entity &x) const
 const char *class_layout::finalization()
 {
     entity &x = table[c];
-    x.alignment = alignment;
+    x.edit().alignment = alignment;
     raise_size(data_size());
-    x.size = align_up(size, alignment);
+    x.edit().size = align_up(size, alignment);
     /* (a class whose data members are all arrays of zero elements or of
        unknown bound (flexible), with
        no base class or virtual table pointer, takes no bytes: clang's and
        GCC's size is zero, which analysis takes for an incomplete class's) */
-    if (!x.size && zero_size_members_only(x))
+    if (!x.details().size && zero_size_members_only(x))
         return "class.mem";
-    if (!x.size)
-        x.size = alignment;
-    x.data_size = data_size();
+    if (!x.details().size)
+        x.edit().size = alignment;
+    x.edit().data_size = data_size();
     if (pod_for_layout(analysis, c))
-        x.data_size = x.size;
-    if (!x.virtual_base_count) {
-        x.nv_size = x.data_size;
-        x.nv_alignment = x.alignment;
+        x.edit().data_size = x.details().size;
+    if (!x.details().virtual_base_count) {
+        x.edit().nv_size = x.details().data_size;
+        x.edit().nv_alignment = x.details().alignment;
     }
     return nullptr;
 }
@@ -772,7 +786,7 @@ const char *itanium_class_layout(semantic_analysis &analysis, entity_index c)
     if (!rule)
         rule = layout.finalization();
     if (rule)
-        analysis.entity_table[c].size = 0;
+        analysis.entity_table[c].edit().size = 0;
     return rule;
 }
 

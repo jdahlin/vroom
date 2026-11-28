@@ -100,7 +100,7 @@ bool semantic_analysis::unnamed_class_object(qualified_type t) const
 {
     entity_index k = element_class(t);
     return is_class_entity(k) && !entity_table[k].name &&
-           !entity_table[k].linkage_name;
+           !entity_table[k].details().linkage_name;
 }
 
 /*
@@ -177,11 +177,12 @@ bool semantic_analysis::unit_local(entity_index e) const
 {
     for (entity_index k = e; k; k = entity_table[k].enclosing) {
         const entity &x = entity_table[k];
-        if (x.kind == entity_kind::class_type && !x.closure_variable) {
+        if (x.kind == entity_kind::class_type &&
+            !x.details().closure_variable) {
             bool namespace_scope =
                 !x.enclosing ||
                 entity_table[x.enclosing].kind == entity_kind::namespace_entity;
-            if (x.lambda && namespace_scope)
+            if (x.details().lambda && namespace_scope)
                 return true;
             /* a local class or closure type of a function that no other
                translation unit defines too */
@@ -240,7 +241,8 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
         /* [basic.link]/4: an unnamed enumeration of namespace scope with
            no typedef name for linkage purposes has no name another
            translation unit could write (for a template argument) */
-        if (arguments && !x.name && !x.linkage_name && !x.lambda &&
+        if (arguments && !x.name && !x.details().linkage_name &&
+            !x.details().lambda &&
             (!x.enclosing ||
              entity_table[x.enclosing].kind == entity_kind::namespace_entity))
             return true;
@@ -303,17 +305,17 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
 bool semantic_analysis::const_default_constructible(entity_index c) const
 {
     const entity &x = entity_table[c];
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor)
         if (!entity_table[k].implicit &&
             type_table[entity_table[k].type.unqualified()].parameter_count ==
-                entity_table[k].default_arguments)
+                entity_table[k].details().default_arguments)
             return true;
     /* a constructor template callable without arguments, its parameters
        a pack or defaulted, is user-provided too */
-    if (x.constructor_templates)
+    if (x.details().constructor_templates)
         for (const function_template &f : function_templates) {
-            if (f.name != x.constructor_templates)
+            if (f.name != x.details().constructor_templates)
                 continue;
             qualified_type of = entity_table[f.entity].type;
             uint32_t required = type_table[of.unqualified()].parameter_count;
@@ -334,12 +336,12 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
             continue;
         /* (7.4): "each direct non-variant non-static data member
            M of T has a default member initializer or ..." */
-        if (m.default_initializer && !x.union_)
+        if (m.details().default_initializer && !x.union_)
             continue;
         entity_index member = class_members[x.first_member + i];
         const struct type &own = type_table[m.type.unqualified()];
         if (!x.union_ && own.kind == type_kind::class_type &&
-            entity_table[own.entity].anonymous_object == member &&
+            entity_table[own.entity].details().anonymous_object == member &&
             entity_table[own.entity].union_) {
             /* (7.6): an anonymous union member has an initialized member */
             if (variant_initialized(member))
@@ -353,8 +355,8 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
             !const_default_constructible(type_table[t.unqualified()].entity))
             return false;
     }
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = entity_table[class_bases[x.first_base + i]];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        const entity &b = entity_table[class_bases[x.details().first_base + i]];
         if (!const_default_constructible(
                 type_table[b.type.unqualified()].entity))
             return false;
@@ -724,7 +726,7 @@ analysis_result semantic_analysis::declare(
         }
         if (record.kind == type_kind::class_type) {
             require_complete(record.entity);
-            if (definition && !entity_table[record.entity].size &&
+            if (definition && !entity_table[record.entity].details().size &&
                 entity_table[record.entity].instantiation &&
                 !entity_table[record.entity].defined) {
                 /* [temp.inst]/2: a class template specialization named before
@@ -761,7 +763,7 @@ analysis_result semantic_analysis::declare(
                 return refused;
             }
             /* [basic.def]/5 */
-            if (definition && !c.size)
+            if (definition && !c.details().size)
                 return ill_formed_at_token(id,
                                            "in the definition of an object, "
                                            "the type of that object shall "
@@ -799,8 +801,8 @@ analysis_result semantic_analysis::declare(
         (record.kind == type_kind::class_type ||
          record.kind == type_kind::enumeration)) {
         entity &c = entity_table[record.entity];
-        if (!c.name && !c.linkage_name) {
-            c.linkage_name = name;
+        if (!c.name && !c.details().linkage_name) {
+            c.edit().linkage_name = name;
             c.linkage_of_name = linkage::external;
             /* (and its unnamed member classes have it now,
                class_specifier) */
@@ -808,7 +810,8 @@ analysis_result semantic_analysis::declare(
                  k.index() < entity_table.size(); k++) {
                 entity &m = entity_table[k];
                 if (m.kind == entity_kind::class_type && !m.name &&
-                    !m.linkage_name && !m.lambda && m.enclosing &&
+                    !m.details().linkage_name && !m.details().lambda &&
+                    m.enclosing &&
                     entity_table[m.enclosing].kind == entity_kind::class_type &&
                     entity_table[m.enclosing].linkage_of_name ==
                         linkage::external)
@@ -909,7 +912,7 @@ analysis_result semantic_analysis::declare(
            enable_if is another than one of the same parameters without */
         entity_index same = 0;
         for (entity_index o = prior; o && !same;
-             o = entity_table[o].next_overload)
+             o = entity_table[o].details().next_overload)
             if (same_parameters(type_table, entity_table[o].type.unqualified(),
                                 type.unqualified()) &&
                 !((entity_table[o].gnu_flags ^ s.gnu_flags) & gnu_enable_if))
@@ -923,16 +926,17 @@ analysis_result semantic_analysis::declare(
             entity_index u = declared_unbound(scope, name, type);
             if (u) {
                 if (entity_table[prior].named_by_using ||
-                    entity_table[u].next_overload)
+                    entity_table[u].details().next_overload)
                     return not_supported_because(
                         declaration, "class.friend",
                         "a friend-declared function that cannot join the "
                         "overload set");
                 entity_index last = prior;
-                while (entity_table[last].next_overload)
-                    last = entity_table[last].next_overload;
-                entity_table[last].next_overload = u;
-                entity_table[u].hidden_type = entity_table[prior].hidden_type;
+                while (entity_table[last].details().next_overload)
+                    last = entity_table[last].details().next_overload;
+                entity_table[last].edit().next_overload = u;
+                entity_table[u].edit().hidden_type =
+                    entity_table[prior].details().hidden_type;
                 same = u;
             }
         }
@@ -951,7 +955,8 @@ analysis_result semantic_analysis::declare(
                function names with external linkage, and variable names with
                external linkage have a language linkage": a function with
                internal linkage has none */
-            for (entity_index o = prior; o; o = entity_table[o].next_overload)
+            for (entity_index o = prior; o;
+                 o = entity_table[o].details().next_overload)
                 if (c_language && !s.static_ && !in_unnamed &&
                     !(s.gnu_flags & gnu_overloadable) &&
                     entity_table[o].c_language_linkage &&
@@ -972,11 +977,11 @@ analysis_result semantic_analysis::declare(
         if (e.kind == entity_kind::none) {
             analysis_result refused =
                 not_supported(declaration, "basic.scope.declarative");
-            if (e.held_by == held_cause::refused)
+            if (e.details().held_by == held_cause::refused)
                 name_unsupported_detail(id, "is declared by a declaration "
                                             "with no rules yet");
             else
-                name_held_detail(id, e.held_by);
+                name_held_detail(id, e.details().held_by);
             last_unsupported_held_by(prior);
             return refused;
         }
@@ -1142,11 +1147,12 @@ analysis_result semantic_analysis::declare(
            the new function goes in front of it, and this scope's name to
            the new head */
         bool shared = false;
-        for (entity_index o = overloads; o; o = entity_table[o].next_overload)
+        for (entity_index o = overloads; o;
+             o = entity_table[o].details().next_overload)
             if (entity_table[o].named_by_using)
                 shared = true;
         entity_index e = entity_table.make(kind, name, scope);
-        entity_table[e].hidden_type = hides;
+        entity_table[e].edit().hidden_type = hides;
         entity_table[e].unnamed_type_linkage = unnamed_type;
         entity_table[e].type = type;
         entity_table[e].linkage_of_name = implied;
@@ -1155,17 +1161,19 @@ analysis_result semantic_analysis::declare(
             entity_table[e].exceptions = exceptions;
         entity_table.add_declaration(e, declaration);
         if (overloads && shared) {
-            entity_table[e].next_overload = overloads;
-            entity_table[e].hidden_type = entity_table[overloads].hidden_type;
+            entity_table[e].edit().next_overload = overloads;
+            entity_table[e].edit().hidden_type =
+                entity_table[overloads].details().hidden_type;
             entity_table.bind(scope, name, e);
         } else if (overloads) {
             /* another function of the set: last in its chain, the name
                still bound to the first */
             entity_index last = overloads;
-            while (entity_table[last].next_overload)
-                last = entity_table[last].next_overload;
-            entity_table[last].next_overload = e;
-            entity_table[e].hidden_type = entity_table[overloads].hidden_type;
+            while (entity_table[last].details().next_overload)
+                last = entity_table[last].details().next_overload;
+            entity_table[last].edit().next_overload = e;
+            entity_table[e].edit().hidden_type =
+                entity_table[overloads].details().hidden_type;
         } else if (held_name) {
             template_name_function x;
             x.name = held_name;
@@ -1621,7 +1629,7 @@ analysis_result semantic_analysis::declare_local(
     }
     no_claims_after_hiding(name);
     entity_index e = entity_table.make(kind, name, scope);
-    entity_table[e].hidden_type = hides;
+    entity_table[e].edit().hidden_type = hides;
     entity_table[e].type = type;
     entity_table[e].argument_bound =
         argument_named && argument_bound_type(type);

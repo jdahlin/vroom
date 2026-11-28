@@ -359,7 +359,7 @@ void semantic_analysis::record_target_features(SyntaxRef definition,
     if (!features.size())
         return;
     vbuffer_append(features.get(), "", 1);
-    entity_table[f].target_features =
+    entity_table[f].edit().target_features =
         static_cast<uint32_t>(target_strings.size() + 1);
     vbuffer_append(target_strings.get(), features.data(), features.size());
 }
@@ -388,8 +388,8 @@ analysis_result semantic_analysis::analyse_function_body(
     analysis_result result =
         analyse_function_body_of(definition, compound, ctor_init);
     if (result == analysis_result::unsupported && unsupported.size() > before &&
-        f && !entity_table[f].held_because)
-        entity_table[f].held_because = unsupported[before].subclause;
+        f && !entity_table[f].details().held_because)
+        entity_table[f].edit().held_because = unsupported[before].subclause;
     /* the body's own declarations (a local alias, a variable) are not the
        function: its definition's caller asks which function it defined */
     last_declared = f;
@@ -555,7 +555,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
                  subobject_destructor_inaccessible(owner, sub))) {
                 result = worse(
                     result, ill_formed_at_token(
-                                entity_table[owner].class_key,
+                                entity_table[owner].details().class_key,
                                 "the destructor of a potentially constructed "
                                 "subobject is potentially invoked by the "
                                 "destructor and it is deleted or inaccessible",

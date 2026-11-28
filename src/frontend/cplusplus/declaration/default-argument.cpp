@@ -98,8 +98,8 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
     nodes.resize(count);
     for (size_t i = 0; i < count; i++) {
         nodes[i] = 0;
-        if (x.first_default)
-            nodes[i] = default_argument_nodes[x.first_default + i];
+        if (x.details().first_default)
+            nodes[i] = default_argument_nodes[x.details().first_default + i];
     }
     for (size_t i = 0; i < count; i++) {
         const parameter_meaning &p = function_parameters[i];
@@ -257,11 +257,11 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
     }
     if (default_argument_nodes.empty())
         default_argument_nodes.append(0);
-    entity_table[f].first_default =
+    entity_table[f].edit().first_default =
         static_cast<uint32_t>(default_argument_nodes.size());
     for (size_t i = 0; i < count; i++)
         default_argument_nodes.append(nodes[i]);
-    entity_table[f].default_arguments = trailing;
+    entity_table[f].edit().default_arguments = trailing;
     return analysis_result::well_formed;
 }
 

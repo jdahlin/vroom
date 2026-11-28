@@ -7,12 +7,13 @@ tens of percent; the RSS figures repeat to a few MB.
 
 | file | before | after | clang++ | after / clang |
 |---|---|---|---|---|
-| network/network_command.cpp | 2119 MB, 8.3 s | 941 MB, 6.2 s | 963 MB, 9.9 s | 0.98 |
-| openttd.cpp | 973 MB, 2.8 s | 583 MB, 2.9 s | 430 MB, 4.7 s | 1.36 |
-| window.cpp | 504 MB, 1.6 s | 345 MB, 1.5 s | 281 MB, 2.5 s | 1.23 |
+| network/network_command.cpp | 2119 MB | 648 MB | 963 MB | 0.67 |
+| openttd.cpp | 973 MB | 464 MB | 430 MB | 1.08 |
+| window.cpp | 504 MB | 289 MB | 281 MB | 1.03 |
 
 The objects `vpp -c` writes for the three are byte for byte the same before
-and after.  The target of using significantly less than clang is not met.
+and after.  The target of using significantly less than clang is met for the largest
+file, not for the other two.
 
 ## Where it went (network_command.cpp, before)
 
@@ -35,26 +36,27 @@ template-arguments (125 k).
 
 Afterwards there are about 1.44 M entities.
 
+## Splitting the entity
+
+A dump of every record after the changes above (network_command.cpp):
+1 437 333 records, 1 164 092 of them distinct, and 366 621 distinct once the
+name, type, value, enclosing scope and declaration chain are left out, so
+interning whole records gains little (and records are mutable, their index
+their identity).  A record had 16.7 bytes of non-zero members on average of
+384; 75 members, 276 bytes, were set in under 2 % of the records.
+
+So `entity` (120 bytes) keeps what many records set, and `entity_details`
+(296 bytes) the rest, made on the first write (`e.edit().x`) and read as the
+defaults until then (`e.details().x`).  Copies of an entity share the details
+until either writes.  network_command.cpp 941 -> 648 MB, openttd.cpp 583 ->
+464 MB, window.cpp 345 -> 289 MB.  cxx-fe-bench: +0.28 % instructions against
+main for all the changes here.
+
 ## What is left
 
-At the point of the last measurement the entity table was still most of the
-memory (690 MB of about 900 mapped and resident before the bit-fields;
-about 550 MB at 384 bytes).  A dump of every record (before the rebase):
-
-- 1 437 333 records, 1 164 092 of them distinct; 366 621 distinct once the
-  name, type, value, enclosing scope and declaration chain are left out.
-  Interning whole records therefore gains little, and records are mutable
-  with their index as identity.
-- A record has 16.7 bytes of non-zero members on average, of 384.
-- Typedef-names (34 %) use at most 25 bytes, block scopes (22 %) at most 9.
-- 75 members, 276 bytes, are set in fewer than 2 % of the records.
-
-So the next step is not dedup but splitting `entity`: a core of what every
-kind uses (about 40-48 bytes) and records per kind (class, function, data
-member) made when first written.  Estimated, not measured: the entity table
-falls from about 550 MB to under 150 MB, and network_command.cpp to about
-550 MB.  It changes every access to a moved member.
-
-Smaller, not done: `substitute_specialization` makes its own binding scope
-(sharing it gained under 3 MB), and the specializations' own scopes
-(`record_instantiation`) are kept per specialization.
+openttd.cpp and window.cpp are still a little above clang; they have not been
+profiled by themselves.  In network_command.cpp the core record is still
+1.4 M x 120 bytes; whether the entity table or something else is now the
+largest part has not been measured.  `substitute_specialization` makes its
+own binding scope (sharing it gained under 3 MB), and the specializations' own
+scopes (`record_instantiation`) are kept per specialization.

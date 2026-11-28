@@ -363,11 +363,12 @@ void semantic_analysis::overload_set(entity_index e,
                                      owned_array<entity_index> &out) const
 {
     size_t first = out.size();
-    for (entity_index link = e; link; link = entity_table[link].next_overload) {
+    for (entity_index link = e; link;
+         link = entity_table[link].details().next_overload) {
         /* a class's copy of a base's function stands for it */
         e = link;
-        if (entity_table[e].using_shadow_of)
-            e = entity_table[e].using_shadow_of;
+        if (entity_table[e].details().using_shadow_of)
+            e = entity_table[e].details().using_shadow_of;
         bool seen = false;
         for (entity_index other : out)
             if (other == e)
@@ -434,7 +435,7 @@ analysis_result semantic_analysis::best_viable_function(
             first = 1;
         size_t defaults = 0;
         if (c.function)
-            defaults = entity_table[c.function].default_arguments;
+            defaults = entity_table[c.function].details().default_arguments;
         /* default arguments that are not known: the candidate is taken to
            have them until an argument given rules it out */
         bool assumed = c.function &&
@@ -502,6 +503,7 @@ analysis_result semantic_analysis::best_viable_function(
                             type_kind::class_type &&
                         entity_table[type_table[list_target.unqualified()]
                                          .entity]
+                            .details()
                             .size &&
                         !is_aggregate(
                             type_table[list_target.unqualified()].entity)) {
@@ -769,8 +771,8 @@ analysis_result semantic_analysis::best_viable_function(
         if (x.function && y.function && !x.template_index &&
             !y.template_index &&
             entity_table[x.function].special == special_member::constructor &&
-            !entity_table[x.function].inherited_constructor &&
-            entity_table[y.function].inherited_constructor &&
+            !entity_table[x.function].details().inherited_constructor &&
+            entity_table[y.function].details().inherited_constructor &&
             entity_table[x.function].enclosing ==
                 entity_table[y.function].enclosing) {
             const qualified_type *p1 = type_table.parameters(

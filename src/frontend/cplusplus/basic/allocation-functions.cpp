@@ -93,7 +93,7 @@ void semantic_analysis::declare_implicit_allocation_function(
         cv_none);
     x.linkage_of_name = linkage::external;
     x.operator_function = true;
-    x.allocation = kind;
+    x.edit().allocation = kind;
     x.implicit = true;
     /* [except.spec]/12: a deallocation function with no explicit
        noexcept-specifier has a non-throwing exception specification; an
@@ -107,13 +107,14 @@ void semantic_analysis::declare_implicit_allocation_function(
         return;
     }
     entity_index last = first;
-    for (entity_index k = first; k; k = entity_table[k].next_overload) {
+    for (entity_index k = first; k;
+         k = entity_table[k].details().next_overload) {
         last = k;
         if (k != e && entity_table[k].type == x.type)
             /* the program declared it already: the same function */
             return;
     }
-    entity_table[last].next_overload = e;
+    entity_table[last].edit().next_overload = e;
 }
 
 /*
@@ -246,8 +247,8 @@ analysis_result
 semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
 {
     entity &x = entity_table[f];
-    bool allocation = x.allocation == allocation_function::new_ ||
-                      x.allocation == allocation_function::new_array;
+    bool allocation = x.details().allocation == allocation_function::new_ ||
+                      x.details().allocation == allocation_function::new_array;
     const char *subclause = "basic.stc.dynamic.deallocation";
     if (allocation)
         subclause = "basic.stc.dynamic.allocation";
@@ -304,7 +305,7 @@ semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
                               "the first parameter of an allocation function "
                               "shall have type std::size_t",
                               subclause);
-        if (x.default_arguments || x.unknown_defaults)
+        if (x.details().default_arguments || x.unknown_defaults)
             /* the first parameter's default argument is ill-formed, the
                others' are not analysed */
             return not_supported_because(
@@ -342,7 +343,7 @@ semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
                               "the first parameter of a destroying "
                               "operator delete shall be C*",
                               subclause);
-        if (function.parameter_count != 2 || x.default_arguments ||
+        if (function.parameter_count != 2 || x.details().default_arguments ||
             x.unknown_defaults || function.variadic)
             return not_supported_because(n, subclause,
                                          "a destroying operator delete with "
@@ -354,7 +355,7 @@ semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
         return not_supported_because(
             n, subclause,
             "a deallocation function whose first parameter is not void*");
-    if (x.default_arguments || x.unknown_defaults)
+    if (x.details().default_arguments || x.unknown_defaults)
         return not_supported_because(
             n, subclause, "a deallocation function with default arguments");
     allocation_declarations_analysed++;

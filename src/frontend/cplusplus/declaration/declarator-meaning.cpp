@@ -661,7 +661,7 @@ semantic_analysis::variable_length_declaration(SyntaxRef declaration,
         /* the elements would be constructed and destroyed in a loop at
            run time */
         if (!is_class_entity(record) || destroys(record) ||
-            (entity_table[record].first_constructor &&
+            (entity_table[record].details().first_constructor &&
              !trivial_defaulted_default_constructor(record)))
             return not_supported_because(
                 declaration, "dcl.init",
@@ -1171,7 +1171,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                 entity_table.make(entity_kind::none, name, current_scope);
             entity_table[e].held_by_template = by_template;
             note_held(e);
-            entity_table[e].hidden_type = found;
+            entity_table[e].edit().hidden_type = found;
             entity_table.bind(current_scope, name, e);
             continue;
         }
@@ -1243,7 +1243,7 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
     }
     require_complete(scope.entity);
     const entity &c = entity_table[scope.entity];
-    if (c.kind != entity_kind::class_type || !c.size)
+    if (c.kind != entity_kind::class_type || !c.details().size)
         return not_supported_because(
             nested, "basic.lookup.qual",
             "a declarator qualified by an incomplete or non-class type");

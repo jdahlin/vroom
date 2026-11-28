@@ -82,7 +82,8 @@ bool semantic_analysis::covariant_override(type_index base_function,
         return false;
     /* (a class template's specialization still to instantiate is not
        analysed: its errors would be this declaration's) */
-    if (!entity_table[dt.entity].size && !entity_table[dt.entity].defined)
+    if (!entity_table[dt.entity].details().size &&
+        !entity_table[dt.entity].defined)
         return false;
     owned_array<entity_index> steps;
     if (!single_nonvirtual_path(dt.entity, bt.entity) ||
@@ -91,7 +92,8 @@ bool semantic_analysis::covariant_override(type_index base_function,
     for (size_t i = 0; i < steps.size(); i++) {
         /* "unambiguous and accessible": a private or protected base is not
            analysed */
-        if (entity_table[steps[i]].offset || entity_table[steps[i]].access)
+        if (entity_table[steps[i]].details().offset ||
+            entity_table[steps[i]].access)
             return false;
     }
     return true;
@@ -119,10 +121,11 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
        overridden is checked below, in every base it is in */
     entity_index overridden = 0;
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index b = type_table[entity_table[class_bases[x.first_base + i]]
-                                        .type.unqualified()]
-                             .entity;
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index b =
+            type_table[entity_table[class_bases[x.details().first_base + i]]
+                           .type.unqualified()]
+                .entity;
         const dynamic_class *d = dynamic_of(b);
         if (!d)
             continue;
@@ -150,8 +153,9 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
     if (!overridden && !specified)
         return analysis_result::well_formed;
     if ((entity_table[e].operator_function &&
-         (entity_table[e].implemented == preprocessing_op_or_punc::EQUAL ||
-          entity_table[e].implemented ==
+         (entity_table[e].details().implemented ==
+              preprocessing_op_or_punc::EQUAL ||
+          entity_table[e].details().implemented ==
               preprocessing_op_or_punc::EQUAL_EQUAL)) ||
         entity_table[c].union_)
         /* a virtual assignment operator, which a derived class's implicit
@@ -259,8 +263,9 @@ entity_index semantic_analysis::virtual_base_overrider(entity_index c,
 {
     entity_index own = vtable_slots[bg.first_slot + k];
     entity_index found = own;
-    uint32_t first = entity_table[c].first_base;
-    for (uint32_t i = first; i < first + entity_table[c].base_count; i++) {
+    uint32_t first = entity_table[c].details().first_base;
+    for (uint32_t i = first; i < first + entity_table[c].details().base_count;
+         i++) {
         entity_index b = element_class(entity_table[class_bases[i]].type);
         const dynamic_class *bd = dynamic_of(b);
         if (b == v || !bd)
@@ -288,12 +293,14 @@ bool semantic_analysis::primary_base_choice(entity_index c,
                                             entity_index &primary) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count && !primary; i++) {
-        entity_index specifier = class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count && !primary; i++) {
+        entity_index specifier = class_bases[x.details().first_base + i];
         const entity &base = entity_table[specifier];
         if (base.virtual_base)
             continue;
-        if (entity_table[type_table[base.type.unqualified()].entity].dynamic)
+        if (entity_table[type_table[base.type.unqualified()].entity]
+                .details()
+                .dynamic)
             primary = specifier;
     }
     return true;
@@ -348,8 +355,8 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     bool primary_virtual = false;
     if (!primary)
         for (entity_index v : virtual_order)
-            if (!primary && entity_table[v].dynamic &&
-                entity_table[v].nv_size == pointer_size()) {
+            if (!primary && entity_table[v].details().dynamic &&
+                entity_table[v].details().nv_size == pointer_size()) {
                 /* its secondary tables are not followed */
                 if (dynamic_of(v)->group_count != 1)
                     return not_supported_because(
@@ -371,7 +378,7 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     /* [abi:definitions]: a dynamic class "requires a virtual table pointer
        (because it or its bases have one or more virtual member functions
        or virtual base classes)" */
-    bool any = primary != 0 || x.virtual_base_count;
+    bool any = primary != 0 || x.details().virtual_base_count;
     for (const declared_virtual &v : declared_virtuals)
         if (v.c == c)
             any = true;
@@ -381,20 +388,20 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
        destructor, its destructor (whether user- or implicitly-declared)
        is virtual": the implicit one declared here, before the virtual
        table that has it ([class.dtor]/4) */
-    if (!entity_table[c].destructor) {
+    if (!entity_table[c].details().destructor) {
         bool virtual_destructor = false;
-        for (uint32_t i = 0; i < x.base_count; i++) {
+        for (uint32_t i = 0; i < x.details().base_count; i++) {
             entity_index b =
-                type_table[entity_table[class_bases[x.first_base + i]]
+                type_table[entity_table[class_bases[x.details().first_base + i]]
                                .type.unqualified()]
                     .entity;
-            entity_index bd = entity_table[b].destructor;
+            entity_index bd = entity_table[b].details().destructor;
             if (bd && entity_table[bd].virtual_)
                 virtual_destructor = true;
         }
         if (virtual_destructor) {
             declare_implicit(c, special_member::destructor, false);
-            entity_index e = entity_table[c].destructor;
+            entity_index e = entity_table[c].details().destructor;
             entity_table[e].virtual_ = true;
             declared_virtual v;
             v.c = c;
@@ -409,11 +416,11 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes) {
-        entity_index kd = entity_table[k].destructor;
+        entity_index kd = entity_table[k].details().destructor;
         if (!(subobject_destructor_inaccessible(c, k) ||
               (kd && entity_table[kd].deleted)))
             continue;
-        entity_index own = entity_table[c].destructor;
+        entity_index own = entity_table[c].details().destructor;
         if (own && !entity_table[own].implicit)
             return not_supported_because(
                 n, "class.dtor",
@@ -426,18 +433,20 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                shall not override a function that does not have a deleted
                definition." */
             const entity &cx = entity_table[c];
-            for (uint32_t i = 0; i < cx.base_count + cx.virtual_base_count;
+            for (uint32_t i = 0;
+                 i < cx.details().base_count + cx.details().virtual_base_count;
                  i++) {
                 entity_index base;
-                if (i < cx.base_count)
-                    base = class_bases[cx.first_base + i];
+                if (i < cx.details().base_count)
+                    base = class_bases[cx.details().first_base + i];
                 else
-                    base = class_virtual_bases[cx.first_virtual_base + i -
-                                               cx.base_count];
+                    base = class_virtual_bases[cx.details().first_virtual_base +
+                                               i - cx.details().base_count];
                 entity_index bd =
                     entity_table
                         [type_table[entity_table[base].type.unqualified()]
                              .entity]
+                            .details()
                             .destructor;
                 if (bd && entity_table[bd].virtual_ &&
                     !entity_table[bd].deleted)
@@ -451,7 +460,7 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
         }
         break;
     }
-    entity_index destructor = entity_table[c].destructor;
+    entity_index destructor = entity_table[c].details().destructor;
     dynamic_class d;
     d.primary_base = primary;
     d.primary_is_virtual = primary_virtual;
@@ -487,12 +496,12 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
             vtable_adjustments[s] = 0;
             vtable_own[s] = true;
             if (!replaced)
-                entity_table[v.f].vtable_slot = k;
+                entity_table[v.f].edit().vtable_slot = k;
             replaced = true;
         }
         if (replaced)
             continue;
-        entity_table[v.f].vtable_slot = d.slot_count;
+        entity_table[v.f].edit().vtable_slot = d.slot_count;
         /* [abi:vtable-components]: "The entries for virtual destructors
            are actually pairs of entries.  The first destructor, called the
            complete object destructor, performs the destruction without
@@ -595,8 +604,8 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     };
     if (pd)
         secondary(primary, 0, pd, 1);
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index base = class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index base = class_bases[x.details().first_base + i];
         if (base == primary || entity_table[base].virtual_base)
             continue;
         const dynamic_class *bd = dynamic_of(
@@ -705,7 +714,8 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
         }
     }
     dynamic_classes.append(d);
-    entity_table[c].dynamic = static_cast<uint32_t>(dynamic_classes.size());
+    entity_table[c].edit().dynamic =
+        static_cast<uint32_t>(dynamic_classes.size());
     return analysis_result::well_formed;
 }
 
@@ -725,7 +735,8 @@ void semantic_analysis::dynamic_class_offsets(entity_index c)
         vtable_group &group = vtable_groups[g];
         const group_source &source = vtable_group_sources[g];
         if (source.base)
-            group.offset = entity_table[source.base].offset + source.offset;
+            group.offset =
+                entity_table[source.base].details().offset + source.offset;
         for (uint32_t k = 0; k < group.slot_count; k++)
             if (vtable_own[group.first_slot + k])
                 vtable_adjustments[group.first_slot + k] =
@@ -754,7 +765,7 @@ bool semantic_analysis::abstract_class(qualified_type t) const
  */
 uint32_t semantic_analysis::vtable_pointer_store(entity_index c, token_index at)
 {
-    if (!entity_table[c].dynamic)
+    if (!entity_table[c].details().dynamic)
         return 0;
     expression_meaning self;
     if (this_pointer(at, self) != analysis_result::well_formed)

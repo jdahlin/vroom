@@ -253,7 +253,7 @@ semantic_analysis::conversion_function_declared_by(entity_index c,
                                                    SyntaxRef definition)
 {
     for (entity_index f = own_conversion_functions(c); f;
-         f = entity_table[f].next_overload)
+         f = entity_table[f].details().next_overload)
         if (declared_by(f, definition))
             return f;
     return 0;
@@ -262,9 +262,9 @@ semantic_analysis::conversion_function_declared_by(entity_index c,
 bool semantic_analysis::base_has_conversion_functions(entity_index c) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++)
+    for (uint32_t i = 0; i < x.details().base_count; i++)
         if (has_conversion_functions(
-                type_table[entity_table[class_bases[x.first_base + i]]
+                type_table[entity_table[class_bases[x.details().first_base + i]]
                                .type.unqualified()]
                     .entity))
             return true;
@@ -282,7 +282,7 @@ bool semantic_analysis::conversion_may_yield_lvalue(entity_index c,
 {
     owned_array<entity_index> functions, templates, specializations;
     if (entity_table[c].kind != entity_kind::class_type ||
-        !entity_table[c].size ||
+        !entity_table[c].details().size ||
         !visible_conversion_functions(c, functions, &templates) ||
         !deduce_conversion_templates(
             templates,
@@ -340,7 +340,7 @@ bool semantic_analysis::visible_conversion_functions(
 {
     size_t first = out.size();
     for (entity_index f = own_conversion_functions(c); f;
-         f = entity_table[f].next_overload) {
+         f = entity_table[f].details().next_overload) {
         /* [temp.mem]/1: a conversion function template, held under the
            name, needs [temp.deduct.conv] */
         if (!entity_table[f].conversion_function) {
@@ -349,16 +349,18 @@ bool semantic_analysis::visible_conversion_functions(
             templates->append(f);
             continue;
         }
-        if (templates && entity_table[f].member_templates)
-            templates->append(entity_table[f].member_templates);
+        if (templates && entity_table[f].details().member_templates)
+            templates->append(entity_table[f].details().member_templates);
         out.append(f);
     }
     size_t own_end = out.size();
-    for (uint32_t i = 0; i < entity_table[c].base_count; i++) {
+    for (uint32_t i = 0; i < entity_table[c].details().base_count; i++) {
         entity_index b =
-            type_table[entity_table[class_bases[entity_table[c].first_base + i]]
-                           .type.unqualified()]
-                .entity;
+            type_table
+                [entity_table[class_bases[entity_table[c].details().first_base +
+                                          i]]
+                     .type.unqualified()]
+                    .entity;
         if (entity_table[b].kind != entity_kind::class_type)
             return false;
         owned_array<entity_index> inherited;
@@ -469,7 +471,7 @@ bool semantic_analysis::deduce_conversion_templates(
                 entity_index owner = entity_table[ft.entity].enclosing;
                 if (defaulted && instantiation_depth &&
                     entity_table[owner].kind == entity_kind::class_type &&
-                    !entity_table[owner].size)
+                    !entity_table[owner].details().size)
                     continue;
             }
             entity_index spec = 0;
@@ -648,7 +650,7 @@ bool semantic_analysis::result_destructible(qualified_type t) const
     const struct type &x = type_table[t.unqualified()];
     if (x.kind != type_kind::class_type)
         return true;
-    entity_index d = entity_table[x.entity].destructor;
+    entity_index d = entity_table[x.entity].details().destructor;
     return !d || (accessible(d, x.entity) && !entity_table[d].deleted);
 }
 
@@ -697,11 +699,11 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
     VTRY_SET(r, need_specialization_definition(at, f));
     /* (a captureless lambda's closure object has no members: its
        temporary is the call's object argument, as for its call operator) */
-    if (aggregate_prvalue(m) && !entity_table[c].lambda) {
+    if (aggregate_prvalue(m) && !entity_table[c].details().lambda) {
         const char *why = nullptr;
         if (!at_block_scope() && !constant_only)
             why = "an aggregate prvalue at namespace scope";
-        else if (entity_table[c].destructor)
+        else if (entity_table[c].details().destructor)
             why = "an aggregate prvalue with a destructor";
         else if (!result_destructible(to))
             why = "an aggregate prvalue, a result whose destructor is "

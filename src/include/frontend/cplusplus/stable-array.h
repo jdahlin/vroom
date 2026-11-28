@@ -34,7 +34,7 @@ inline vjob_region_pool stable_array_regions = VJOB_REGION_POOL_INIT(1);
 template <typename T, typename Index = size_t> class stable_array
 {
     /* the elements are never destroyed */
-    static_assert(__is_trivially_copyable(T) && __is_trivially_destructible(T),
+    static_assert(relocatable_record<T> && __is_trivially_destructible(T),
                   "stable_array<T>: T is not trivially copyable");
 
   public:

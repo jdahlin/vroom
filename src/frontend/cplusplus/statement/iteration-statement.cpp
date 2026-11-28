@@ -285,7 +285,8 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
             return not_supported_because(
                 n, "stmt.ranged",
                 "a begin or end member that is no plain function");
-        for (entity_index fn = e; fn; fn = entity_table[fn].next_overload)
+        for (entity_index fn = e; fn;
+             fn = entity_table[fn].details().next_overload)
             if (contains_placeholder(
                     type_table[entity_table[fn].type.unqualified()].operand))
                 deduce_member_body_now(fn);
@@ -513,7 +514,7 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
             entity_index c = record.entity;
             require_complete(c);
             if (entity_table[c].kind != entity_kind::class_type ||
-                !entity_table[c].size)
+                !entity_table[c].details().size)
                 return failed(not_supported_because(
                     n, "stmt.ranged",
                     "a range of an incomplete or unanalysed class"));

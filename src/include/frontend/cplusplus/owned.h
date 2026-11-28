@@ -47,13 +47,21 @@ inline void check_element(bool there)
 #endif
 }
 
+/*
+ * Whether a table may hold a T: its bytes may be moved (realloc).  A type
+ * with a copy constructor of its own, whose bytes may still be moved,
+ * specializes this.
+ */
+template <typename T>
+inline constexpr bool relocatable_record = __is_trivially_copyable(T);
+
 /* Index: the type operator[] takes.  In an ASan build every subscript is
    checked, and the room past the last element is poisoned, so a pointer
    from data() that runs past the end is reported too. */
 template <typename T, typename Index = size_t> class owned_array
 {
     /* the elements are moved with realloc and never destroyed */
-    static_assert(__is_trivially_copyable(T) && __is_trivially_destructible(T),
+    static_assert(relocatable_record<T> && __is_trivially_destructible(T),
                   "owned_array<T>: T is not trivially copyable");
 
   public:
