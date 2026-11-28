@@ -31,6 +31,16 @@ static bool driver_input_is_source(const char *a)
     return false;
 }
 
+#if defined(__x86_64__) && defined(__linux__)
+/* --target=ARCH-VENDOR-linux-gnu: glibc Linux, not gnux32 or an eabi */
+static bool is_linux_gnu_triple(const char *target)
+{
+    const char *os = strstr(target, "-linux-gnu");
+
+    return os && !os[strlen("-linux-gnu")];
+}
+#endif
+
 /* an option the C++ front end reads itself (frontend/cplusplus/lower/compile.cpp:
    compile_arguments); the driver may handle it too */
 static bool driver_cxx_argument(const char *a)
@@ -656,7 +666,15 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
                 job->status = 1;
                 return 1;
             }
+            /* the host's own triple, however its vendor is spelled, keeps
+               the host's system headers, as clang does.  x86-64 hosts only:
+               the arm64 harnesses name the host's triple and expect vcc's own
+               headers */
             job->hosted = 0;
+#if defined(__x86_64__) && defined(__linux__)
+            if (job->target_x64 && is_linux_gnu_triple(a))
+                job->hosted = 1;
+#endif
             if (m && m[6] >= '0' && m[6] <= '9')
                 job->macos_minimum_version = m + 6,
                 job->macos_minimum_source =

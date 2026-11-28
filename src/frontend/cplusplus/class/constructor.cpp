@@ -393,7 +393,7 @@ semantic_analysis::default_array_initialization(token_index at, entity_index m,
     }
     const struct type &er = type_table[et.unqualified()];
     if (er.kind != type_kind::class_type ||
-        !entity_table[er.entity].first_constructor ||
+        !entity_table[er.entity].details().first_constructor ||
         trivial_defaulted_default_constructor(er.entity))
         return analysis_result::well_formed;
     /* (the bound and element read before subobject and the pointer type
@@ -419,8 +419,9 @@ bool semantic_analysis::member_designated(
 {
     for (const designated_initialization &d : designated)
         for (entity_index target = d.member; target;
-             target =
-                 entity_table[entity_table[target].enclosing].anonymous_object)
+             target = entity_table[entity_table[target].enclosing]
+                          .details()
+                          .anonymous_object)
             if (target == m)
                 return true;
     return false;
@@ -450,7 +451,7 @@ analysis_result semantic_analysis::anonymous_member_initializers(
             type_table[entity_table[m].type.unqualified()];
         entity_index inner = 0;
         if (record.kind == type_kind::class_type &&
-            entity_table[record.entity].anonymous_object == m)
+            entity_table[record.entity].details().anonymous_object == m)
             inner = record.entity;
         uint32_t made = 0;
         for (const designated_initialization &d : designated)
@@ -463,8 +464,9 @@ analysis_result semantic_analysis::anonymous_member_initializers(
         bool partly_designated = member_designated(m, designated);
         if (variant_designated && !partly_designated)
             continue;
-        if (entity_table[m].default_initializer && !partly_designated) {
-            SyntaxRef init = entity_table[m].default_initializer;
+        if (entity_table[m].details().default_initializer &&
+            !partly_designated) {
+            SyntaxRef init = entity_table[m].details().default_initializer;
             if (!entity_table[anonymous].union_)
                 for (token_index t = init.first_token(); t < init.end_token();
                      t++)
@@ -481,7 +483,7 @@ analysis_result semantic_analysis::anonymous_member_initializers(
         } else if (inner) {
             VTRY(r, anonymous_member_initializers(at, inner, designated, made));
         } else if (record.kind == type_kind::class_type &&
-                   entity_table[record.entity].first_constructor &&
+                   entity_table[record.entity].details().first_constructor &&
                    !trivial_defaulted_default_constructor(record.entity) &&
                    !entity_table[anonymous].union_) {
             /* [class.base.init]/9.3: default-initialized, constructed in
@@ -519,10 +521,10 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     qualified_type type = entity_table[e].type;
     /* a copy: the initializer below can grow type_table */
     const struct type record = type_table[type.unqualified()];
-    SyntaxRef init = entity_table[e].default_initializer;
+    SyntaxRef init = entity_table[e].details().default_initializer;
     /* before the analysis, which may move the tables */
     bool constructed = record.kind == type_kind::class_type &&
-                       entity_table[record.entity].first_constructor;
+                       entity_table[record.entity].details().first_constructor;
     expression_meaning object;
     VTRY(r, subobject(at, e, object));
     initialized_value value;
@@ -594,8 +596,8 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     if (constructed && !aggregate_value_stored(record.entity, value.node) &&
         semantics[value.node].kind == semantic_kind::zero &&
         semantics[value.node].type.unqualified() == type.unqualified()) {
-        entity_table[e].initializer_throws =
-            initializer_exception::cannot_throw;
+        entity_table[e].set(&entity_details::initializer_throws,
+                            initializer_exception::cannot_throw);
         statement = subobject_store(object, type, at, value.node, true);
         return analysis_result::well_formed;
     }
@@ -626,11 +628,11 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     size_t unsupported_before = unsupported.size();
     if (potentially_throwing(init, value.node, throwing) ==
         analysis_result::well_formed) {
-        entity_table[e].initializer_throws =
-            initializer_exception::cannot_throw;
+        entity_table[e].set(&entity_details::initializer_throws,
+                            initializer_exception::cannot_throw);
         if (throwing)
-            entity_table[e].initializer_throws =
-                initializer_exception::may_throw;
+            entity_table[e].set(&entity_details::initializer_throws,
+                                initializer_exception::may_throw);
     }
     unsupported.resize(unsupported_before);
     if (constructed && !aggregate_value_stored(record.entity, value.node)) {
@@ -667,8 +669,8 @@ bool semantic_analysis::copy_or_move_constructor(entity_index c,
    ([class.copy.ctor]/3, without default arguments) */
 bool semantic_analysis::declares_move_constructor(entity_index c) const
 {
-    for (entity_index k = entity_table[c].first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    for (entity_index k = entity_table[c].details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
         if (!copy_or_move_constructor(c, k))
             continue;
         qualified_type p =
@@ -681,8 +683,8 @@ bool semantic_analysis::declares_move_constructor(entity_index c) const
 
 bool semantic_analysis::declares_copy_constructor(entity_index c) const
 {
-    for (entity_index k = entity_table[c].first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    for (entity_index k = entity_table[c].details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
         if (entity_table[k].implicit || !copy_or_move_constructor(c, k))
             continue;
         qualified_type p =
@@ -863,7 +865,7 @@ analysis_result semantic_analysis::special_member_declarator(
                                        "a prospective destructor shall take "
                                        "no arguments",
                                        "class.dtor");
-        if (entity_table[c].destructor)
+        if (entity_table[c].details().destructor)
             return ill_formed_at_token(m.id,
                                        "a member shall not be declared twice "
                                        "in the member-specification",
@@ -899,8 +901,8 @@ analysis_result semantic_analysis::special_member_declarator(
                                            "is of type cv X",
                                            "class.copy.ctor");
         }
-        for (entity_index k = entity_table[c].first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = entity_table[c].details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (entity_table[k].type == type)
                 /* [class.mem]/5, [over.load] */
                 return ill_formed_at_token(m.id,
@@ -914,13 +916,13 @@ analysis_result semantic_analysis::special_member_declarator(
        struct with virtual base class"); one only declared, defaulted
        (clang rejects it too, with another reason) or deleted ([ext.clang] clang
        accepts it) is not analysed */
-    if (constexpr_specified && entity_table[c].virtual_base_count &&
+    if (constexpr_specified && entity_table[c].details().virtual_base_count &&
         definition && !m.destructor)
         return ill_formed_at_token(m.id,
                                    "the class of a constexpr constructor "
                                    "shall not have any virtual base classes",
                                    "dcl.constexpr");
-    if (constexpr_specified && entity_table[c].virtual_base_count)
+    if (constexpr_specified && entity_table[c].details().virtual_base_count)
         return not_supported_because(declaration, "dcl.constexpr",
                                      "a constexpr constructor or destructor of "
                                      "a class with virtual bases");
@@ -949,14 +951,14 @@ analysis_result semantic_analysis::special_member_declarator(
         defer_default_arguments(e, declaration, listed);
     diagnose_if_declared(declaration, e);
     if (kind == special_member::destructor) {
-        entity_table[c].destructor = e;
-    } else if (!entity_table[c].first_constructor) {
-        entity_table[c].first_constructor = e;
+        entity_table[c].set(&entity_details::destructor, e);
+    } else if (!entity_table[c].details().first_constructor) {
+        entity_table[c].set(&entity_details::first_constructor, e);
     } else {
-        entity_index k = entity_table[c].first_constructor;
-        while (entity_table[k].next_constructor)
-            k = entity_table[k].next_constructor;
-        entity_table[k].next_constructor = e;
+        entity_index k = entity_table[c].details().first_constructor;
+        while (entity_table[k].details().next_constructor)
+            k = entity_table[k].details().next_constructor;
+        entity_table[k].set(&entity_details::next_constructor, e);
     }
     last_declared = e;
     if (kind == special_member::destructor) {
@@ -1037,13 +1039,13 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
        are ([class.default.ctor]/4, [class.copy.ctor]/13 with
        [dcl.constexpr]/4 as of C++20, which no longer asks for every member
        to be initialized); the other functions are not analysed */
-    if (constexpr_specified && x.virtual_base_count)
+    if (constexpr_specified && x.details().virtual_base_count)
         return not_supported_because(
             n, "dcl.fct.def.default",
             "a constexpr default in a class with virtual bases");
     if (m.destructor) {
         /* [class.dtor]/4: as the implicitly-declared destructor */
-        if (x.destructor || f.parameter_count || explicit_specified)
+        if (x.details().destructor || f.parameter_count || explicit_specified)
             return not_supported_because(n, "dcl.fct.def.default",
                                          "a defaulted destructor declared "
                                          "again, with parameters or explicit");
@@ -1052,7 +1054,7 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         /* virtual ~X() = default: the implicit destructor's definition,
            virtual ([class.virtual]/7) */
         declare_implicit(c, special_member::destructor, false);
-        entity_index e = entity_table[c].destructor;
+        entity_index e = entity_table[c].details().destructor;
         entity_table[e].access = access;
         if (constexpr_specified)
             entity_table[e].constexpr_ = true;
@@ -1068,9 +1070,11 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         x.explicit_default_constructor = explicit_specified;
         if (access) {
             declare_implicit(c, special_member::constructor, false);
-            entity_index constructor = entity_table[c].first_constructor;
-            while (entity_table[constructor].next_constructor)
-                constructor = entity_table[constructor].next_constructor;
+            entity_index constructor =
+                entity_table[c].details().first_constructor;
+            while (entity_table[constructor].details().next_constructor)
+                constructor =
+                    entity_table[constructor].details().next_constructor;
             entity_table[constructor].access = access;
         }
         return analysis_result::well_formed;
@@ -1087,8 +1091,8 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         first.operand.unqualified() == x.type.unqualified() &&
         first.operand.cv() == cv_const) {
         /* [class.copy.ctor]/7's X(const X&), as implicitly declared */
-        for (entity_index k = x.first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = x.details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (copy_or_move_constructor(c, k))
                 return not_supported_because(
                     n, "class.mem",
@@ -1139,7 +1143,7 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
             n, "dcl.fct.def.default",
             "a defaulted assignment that has no type or has a "
             "specifier such as static or virtual");
-    if (s.constexpr_ && entity_table[c].virtual_base_count)
+    if (s.constexpr_ && entity_table[c].details().virtual_base_count)
         return not_supported_because(
             n, "dcl.fct.def.default",
             "a constexpr defaulted assignment in a class with virtual bases");
@@ -1204,7 +1208,7 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
     if (found.entity && found.found_in == c) {
         for (entity_index f2 = found.entity;
              f2 && entity_table[f2].enclosing == c;
-             f2 = entity_table[f2].next_overload) {
+             f2 = entity_table[f2].details().next_overload) {
             if ((!move && copy_assignment_operator(f2, c)) ||
                 (move && move_assignment_operator(f2, c)))
                 declared_here = true;
@@ -1219,10 +1223,10 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
             "assignment, or with unknown lookup");
     if (move) {
         entity_table[c].defaulted_move_assignment = true;
-        entity_table[c].defaulted_move_access = access;
+        entity_table[c].set(&entity_details::defaulted_move_access, access);
     } else {
         entity_table[c].defaulted_copy_assignment = true;
-        entity_table[c].defaulted_copy_access = access;
+        entity_table[c].set(&entity_details::defaulted_copy_access, access);
     }
     return analysis_result::well_formed;
 }
@@ -1415,7 +1419,7 @@ analysis_result semantic_analysis::construct(
     }
     /* [temp.mem]/1: a constructor template only declared is a candidate
        too (member_template_declaration) */
-    if (x.constructor_template)
+    if (x.details().constructor_template)
         return not_supported_because(
             at, "temp.mem",
             "a construction of a class with a constructor template that is "
@@ -1423,8 +1427,8 @@ analysis_result semantic_analysis::construct(
     /* [over.match.ctor]/1: "the candidate functions are all the
        constructors of the class of the object being initialized" */
     owned_array<overload_candidate> candidates;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
         /* [over.match.ctor]/1: "For copy-initialization (including
            default initialization in the context of copy-initialization),
            the candidate functions are all the converting constructors
@@ -1441,7 +1445,7 @@ analysis_result semantic_analysis::construct(
     size_t templates = candidates.size();
     owned_array<uint32_t> first_arguments;
     owned_array<template_argument> deduced;
-    if (x.constructor_templates) {
+    if (x.details().constructor_templates) {
         VTRY(r, constructor_template_candidates(
                     at, c, arguments.data(),
                     static_cast<uint32_t>(arguments.size()), copy, candidates,
@@ -1454,8 +1458,8 @@ analysis_result semantic_analysis::construct(
        declares a move constructor has it deleted, and is not told apart */
     bool implicit_copy =
         !x.defaulted_move_constructor || x.defaulted_copy_constructor;
-    for (entity_index k = x.first_constructor; k && implicit_copy;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = x.details().first_constructor; k && implicit_copy;
+         k = entity_table[k].details().next_constructor)
         if (copy_or_move_constructor(c, k))
             implicit_copy = false;
     if (implicit_copy)
@@ -1622,15 +1626,17 @@ analysis_result semantic_analysis::construct(
         type_table[entity_table[chosen].type.unqualified()].parameter_count;
     for (size_t i = n; i < count; i++) {
         const entity &k = entity_table[chosen];
-        if (k.unknown_defaults || !k.first_default ||
-            !default_argument_nodes[k.first_default + i])
+        if (k.unknown_defaults || !k.details().first_default ||
+            !default_argument_nodes[k.details().first_default + i])
             return not_supported_because(
                 at, "dcl.fct.default",
                 "a constructor call that needs a default argument that is not "
                 "available");
-        default_argument_used(default_argument_nodes[k.first_default + i]);
-        nodes.append(bind_call_site(default_argument_nodes[k.first_default + i],
-                                    at.first_token()));
+        default_argument_used(
+            default_argument_nodes[k.details().first_default + i]);
+        nodes.append(bind_call_site(
+            default_argument_nodes[k.details().first_default + i],
+            at.first_token()));
     }
     expression_meaning made;
     made.type = qualified_type::make(type.unqualified(), cv_none);
@@ -1875,10 +1881,10 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     if (alias.kind == type_kind::class_type)
                         base = alias.entity;
                 }
-                for (uint32_t i = 0; base && i < entity_table[c].base_count;
-                     i++) {
+                for (uint32_t i = 0;
+                     base && i < entity_table[c].details().base_count; i++) {
                     entity_index b =
-                        class_bases[entity_table[c].first_base + i];
+                        class_bases[entity_table[c].details().first_base + i];
                     if (entity_table[b].type.unqualified() ==
                         entity_table[base].type.unqualified())
                         e = b;
@@ -1927,6 +1933,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
             entity_index target = e;
             while (entity_index anon =
                        entity_table[entity_table[target].enclosing]
+                           .details()
                            .anonymous_object)
                 target = anon;
             size_t slot = 0;
@@ -1973,7 +1980,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
             expression_meaning object;
             VTRY(r, subobject(id, e, object));
             if (record.kind == type_kind::class_type &&
-                entity_table[record.entity].first_constructor) {
+                entity_table[record.entity].details().first_constructor) {
                 /* [class.base.init]/7: direct-initialization: a constructor */
                 owned_array<expression_meaning> arguments;
                 owned_array<SyntaxElement> listed_arguments;
@@ -1986,9 +1993,11 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                            non-copy/move constructor initializes via its
                            implicit copy/move constructor from {a, b} */
                         use_list = true;
-                        for (entity_index cf =
-                                 entity_table[record.entity].first_constructor;
-                             cf; cf = entity_table[cf].next_overload) {
+                        for (entity_index cf = entity_table[record.entity]
+                                                   .details()
+                                                   .first_constructor;
+                             cf;
+                             cf = entity_table[cf].details().next_overload) {
                             if (entity_table[cf].implicit)
                                 continue;
                             uint32_t np =
@@ -2052,9 +2061,10 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                        and else member by member) */
                     if (base) {
                         require_complete(record.entity);
-                        stored = stored && is_aggregate(record.entity) &&
-                                 entity_table[record.entity].data_size ==
-                                     entity_table[record.entity].size;
+                        stored =
+                            stored && is_aggregate(record.entity) &&
+                            entity_table[record.entity].details().data_size ==
+                                entity_table[record.entity].details().size;
                     }
                     if (!stored && !aggregate_built_in_place(listed.node))
                         return not_supported_because(
@@ -2127,8 +2137,8 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                    no tail padding, whose data size is its size, is) */
                     require_complete(record.entity);
                     if (entity_table[e].base_subobject &&
-                        entity_table[record.entity].data_size !=
-                            entity_table[record.entity].size)
+                        entity_table[record.entity].details().data_size !=
+                            entity_table[record.entity].details().size)
                         return not_supported_because(
                             item, "class.copy.ctor",
                             "a copy of bytes into a base class with tail "
@@ -2264,7 +2274,8 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         const struct type &record =
             type_table[entity_table[subobjects[i]].type.unqualified()];
         if (!initialized[i] || record.kind != type_kind::class_type ||
-            entity_table[record.entity].anonymous_object != subobjects[i])
+            entity_table[record.entity].details().anonymous_object !=
+                subobjects[i])
             continue;
         VTRY(r, anonymous_member_initializers(at, record.entity, designated,
                                               initialized[i]));
@@ -2288,7 +2299,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
     size_t union_default = subobjects.size();
     if (entity_table[c].union_ && !union_member_designated)
         for (size_t i = subobjects.size(); i-- > 0;)
-            if (entity_table[subobjects[i]].default_initializer) {
+            if (entity_table[subobjects[i]].details().default_initializer) {
                 union_default = i;
                 union_member_designated = true;
             }
@@ -2315,7 +2326,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                                              initialized[i]));
             continue;
         }
-        if (entity_table[subobjects[i]].default_initializer) {
+        if (entity_table[subobjects[i]].details().default_initializer) {
             /* (9.1) "if the entity is a non-static data member that has a
                default member initializer ([class.mem]) and either ... the
                constructor's class is not a union ... the entity is
@@ -2350,7 +2361,8 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         if (record.kind == type_kind::class_type &&
             entity_table[record.entity].kind == entity_kind::class_type &&
             !(user_provided &&
-              entity_table[record.entity].anonymous_object == subobjects[i]) &&
+              entity_table[record.entity].details().anonymous_object ==
+                  subobjects[i]) &&
             default_constructor_deleted(record.entity))
             /* its implicit default constructor is deleted
                ([class.default.ctor]/2) */
@@ -2363,8 +2375,9 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         if (initialized[i])
             continue;
         if (record.kind == type_kind::class_type &&
-            entity_table[record.entity].anonymous_object == subobjects[i] &&
-            entity_table[record.entity].first_constructor) {
+            entity_table[record.entity].details().anonymous_object ==
+                subobjects[i] &&
+            entity_table[record.entity].details().first_constructor) {
             /* [class.union.anon]/1: an anonymous union's members belong to
                the class: its default member initializers run here.
                Before C++20 a constexpr constructor must initialize one
@@ -2387,7 +2400,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                         type_table[entity_table[subobjects[j]]
                                        .type.unqualified()];
                     if (other.kind == type_kind::class_type &&
-                        entity_table[other.entity].anonymous_object ==
+                        entity_table[other.entity].details().anonymous_object ==
                             subobjects[j] &&
                         !variant_initialized(subobjects[j]))
                         return not_supported_because(
@@ -2402,7 +2415,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         /* [class.default.ctor]/3: default-initialized through a trivial
            X() = default, it is left as it is */
         if (record.kind != type_kind::class_type ||
-            !entity_table[record.entity].first_constructor ||
+            !entity_table[record.entity].details().first_constructor ||
             trivial_defaulted_default_constructor(record.entity))
             continue;
         expression_meaning object;
@@ -2467,11 +2480,11 @@ void semantic_analysis::construction_order(
     const entity &x = entity_table[c];
     /* [class.base.init]/13.1: "First, and only for the constructor of the
        most derived class, virtual base classes are initialized" */
-    for (uint32_t i = 0; i < x.virtual_base_count; i++)
-        order.append(class_virtual_bases[x.first_virtual_base + i]);
-    for (uint32_t i = 0; i < x.base_count; i++)
-        if (!entity_table[class_bases[x.first_base + i]].virtual_base)
-            order.append(class_bases[x.first_base + i]);
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++)
+        order.append(class_virtual_bases[x.details().first_virtual_base + i]);
+    for (uint32_t i = 0; i < x.details().base_count; i++)
+        if (!entity_table[class_bases[x.details().first_base + i]].virtual_base)
+            order.append(class_bases[x.details().first_base + i]);
     for (uint32_t i = 0; i < x.member_count; i++)
         if (!entity_table[class_members[x.first_member + i]].base_subobject)
             order.append(class_members[x.first_member + i]);
@@ -2486,8 +2499,8 @@ uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
     const struct type &r = type_table[type.unqualified()];
     if (r.kind == type_kind::class_type &&
         entity_table[r.entity].member_count == 0 &&
-        entity_table[r.entity].base_count == 0 &&
-        !entity_table[r.entity].dynamic)
+        entity_table[r.entity].details().base_count == 0 &&
+        !entity_table[r.entity].details().dynamic)
         return statement_node(semantic_kind::expression_statement, at, value);
     expression_meaning stored = object;
     stored.type = qualified_type::make(type.unqualified(), cv_none);
@@ -2570,17 +2583,18 @@ void semantic_analysis::subobject_classes(entity_index c,
                                           owned_array<entity_index> &out) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.virtual_base_count; i++)
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++)
         out.append(
-            type_table
-                [entity_table[class_virtual_bases[x.first_virtual_base + i]]
-                     .type.unqualified()]
+            type_table[entity_table[class_virtual_bases
+                                        [x.details().first_virtual_base + i]]
+                           .type.unqualified()]
+                .entity);
+    for (uint32_t i = 0; i < x.details().base_count; i++)
+        if (!entity_table[class_bases[x.details().first_base + i]].virtual_base)
+            out.append(
+                type_table[entity_table[class_bases[x.details().first_base + i]]
+                               .type.unqualified()]
                     .entity);
-    for (uint32_t i = 0; i < x.base_count; i++)
-        if (!entity_table[class_bases[x.first_base + i]].virtual_base)
-            out.append(type_table[entity_table[class_bases[x.first_base + i]]
-                                      .type.unqualified()]
-                           .entity);
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
         if (m.base_subobject)
@@ -2598,7 +2612,7 @@ void semantic_analysis::subobject_classes(entity_index c,
 bool semantic_analysis::subobject_destructor_inaccessible(entity_index c,
                                                           entity_index k) const
 {
-    entity_index kd = entity_table[k].destructor;
+    entity_index kd = entity_table[k].details().destructor;
     if (!kd)
         return false;
     uint8_t access = entity_table[kd].access;
@@ -2666,7 +2680,8 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             continue;
         const struct type &r = type_table[t.unqualified()];
         if (r.kind == type_kind::class_type &&
-            (entity_table[r.entity].first_constructor || destroys(r.entity)))
+            (entity_table[r.entity].details().first_constructor ||
+             destroys(r.entity)))
             return not_supported_because(
                 n, "class.ctor",
                 "a multidimensional or zero or unknown bound array member of a "
@@ -2688,18 +2703,20 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     /* [class.default.ctor]/3: not trivial when "no non-static data member
        of its class has a default member initializer" fails */
     for (uint32_t i = 0; i < x.member_count; i++)
-        if (entity_table[class_members[x.first_member + i]].default_initializer)
+        if (entity_table[class_members[x.first_member + i]]
+                .details()
+                .default_initializer)
             construction = true;
     /* /3.1, [class.copy.ctor]/11.1: a class with virtual functions has
        neither a trivial default constructor nor a trivial copy one; each
        stores the virtual table pointer ([class.cdtor]) */
-    if (x.dynamic) {
+    if (x.details().dynamic) {
         construction = true;
         copy = true;
     }
     for (entity_index k : classes) {
         /* /3.4, /3.5: a subobject's trivial X() = default keeps it trivial */
-        if (entity_table[k].first_constructor &&
+        if (entity_table[k].details().first_constructor &&
             !trivial_defaulted_default_constructor(k))
             construction = true;
         if (destroys(k))
@@ -2712,8 +2729,8 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
        or destructor that does not exist or is not accessible is defined
        as deleted, an error only where it is used: not analysed */
     bool declares_copy = false, copy_deleted = false;
-    for (entity_index q = x.first_constructor; q;
-         q = entity_table[q].next_constructor)
+    for (entity_index q = x.details().first_constructor; q;
+         q = entity_table[q].details().next_constructor)
         if (copy_or_move_constructor(c, q))
             declares_copy = true;
     /* [class.copy.ctor]/8: "If the definition of a class X does not
@@ -2724,10 +2741,12 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
        subobject by its copy constructor */
     /* (a destructor declared implicitly, as a virtual one's override, is
        not user-declared) */
-    bool user_destructor = x.destructor && !entity_table[x.destructor].implicit;
-    bool move_implicitly_declared =
-        !declares_copy && !user_destructor && !x.user_copy_assignments &&
-        !x.defaulted_copy_assignment && !x.defaulted_move_assignment;
+    bool user_destructor = x.details().destructor &&
+                           !entity_table[x.details().destructor].implicit;
+    bool move_implicitly_declared = !declares_copy && !user_destructor &&
+                                    !x.details().user_copy_assignments &&
+                                    !x.defaulted_copy_assignment &&
+                                    !x.defaulted_move_assignment;
     /* [class.copy.ctor]/8: the implicit move constructor X(X&&), declared
        when some subobject has a move constructor (otherwise a move copies
        as the copy does); defined as deleted, and then ignored by overload
@@ -2741,13 +2760,13 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         const entity sub = entity_table[k];
         /* X() = default beside other constructors may be no entity
            (trivial_defaulted_default_constructor) */
-        bool default_ok = (!sub.first_constructor ||
+        bool default_ok = (!sub.details().first_constructor ||
                            trivial_defaulted_default_constructor(k)) &&
                           !sub.implicit_default_deleted,
              copy_ok = copies_bytes(k), copy_usable = false,
              move_usable = false, move_seen = false;
-        for (entity_index q = sub.first_constructor; q;
-             q = entity_table[q].next_constructor) {
+        for (entity_index q = sub.details().first_constructor; q;
+             q = entity_table[q].details().next_constructor) {
             /* [class.access]/1: c a friend of k may call it, where an
                aggregate initialization of c may not (not analysed for an
                aggregate c; any other class initializes k in its own
@@ -2755,9 +2774,9 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             /* [class.default.ctor]/1: "A default constructor for a class X
                is a constructor of class X for which each parameter that is
                not a function parameter pack has a default argument" */
-            bool is_default =
-                type_table[entity_table[q].type.unqualified()]
-                    .parameter_count == entity_table[q].default_arguments;
+            bool is_default = type_table[entity_table[q].type.unqualified()]
+                                  .parameter_count ==
+                              entity_table[q].details().default_arguments;
             if (entity_table[q].access && grants(k, c) && !is_default &&
                 is_aggregate(c))
                 return not_supported_because(
@@ -2775,7 +2794,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                     const entity &member =
                         entity_table[class_members[x.first_member + i]];
                     if (member.nonstatic_member && !member.base_subobject &&
-                        !member.default_initializer &&
+                        !member.details().default_initializer &&
                         element_class(member.type) == k)
                         has_member = true;
                 }
@@ -2809,7 +2828,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         /* [class.default.ctor]/2.1: a constructor template whose template
            arguments all have defaults and that takes no parameter (libc++'s
            unique_ptr()) is the subobject's default constructor */
-        if (!default_ok && sub.constructor_templates && !sub.union_) {
+        if (!default_ok && sub.details().constructor_templates && !sub.union_) {
             owned_array<overload_candidate> found;
             VTRY(probe, constructor_template_candidates(n, k, nullptr, 0, false,
                                                         found));
@@ -2854,10 +2873,12 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         if (x.union_)
             for (uint32_t j = 0; j < x.member_count; j++)
                 if (entity_table[class_members[x.first_member + j]]
+                        .details()
                         .default_initializer)
                     variant_initialized = true;
         if (variant_initialized && construction && !default_ok &&
-            (!x.first_constructor || x.defaulted_default_constructor) &&
+            (!x.details().first_constructor ||
+             x.defaulted_default_constructor) &&
             default_constructed(c, k))
             /* the constructor initializes that member alone: not analysed
                for a variant member that has no default constructor */
@@ -2866,8 +2887,9 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                 "a union initialized through a member initializer where "
                 "another member has no default constructor");
         if (construction && !default_ok &&
-            ((!x.first_constructor && !x.constructor_templates &&
-              !x.constructor_template) ||
+            ((!x.details().first_constructor &&
+              !x.details().constructor_templates &&
+              !x.details().constructor_template) ||
              x.defaulted_default_constructor) &&
             default_constructed(c, k)) {
             /* C++03 has no deleted functions: the implicit default
@@ -2899,8 +2921,9 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
            implicit constructor beside a subobject's inaccessible
            destructor is deleted */
         if (subobject_destructor_inaccessible(c, k) &&
-            (!x.destructor || !declares_copy || !x.first_constructor)) {
-            if (construction && !x.first_constructor)
+            (!x.details().destructor || !declares_copy ||
+             !x.details().first_constructor)) {
+            if (construction && !x.details().first_constructor)
                 entity_table[c].implicit_default_deleted = true;
             copy_deleted = true;
             move_deleted = true;
@@ -2909,8 +2932,9 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     /* [temp.mem]/1: a constructor template is user-declared, and the
        implicit copy constructor is declared beside it
        ([class.copy.ctor]/6) */
-    bool templates = x.constructor_template || x.constructor_templates;
-    bool user_constructors = x.first_constructor != 0 || templates;
+    bool templates =
+        x.details().constructor_template || x.details().constructor_templates;
+    bool user_constructors = x.details().first_constructor != 0 || templates;
     if (templates) {
         construction = true;
         copy = true;
@@ -2919,8 +2943,8 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
        default constructor, trivial or not, that a default-initialization
        chooses */
     bool has_default = false;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor)
         if (!type_table[entity_table[k].type.unqualified()].parameter_count)
             has_default = true;
     if (x.defaulted_default_constructor && user_constructors && construction &&
@@ -2928,8 +2952,8 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         declare_implicit(c, special_member::constructor, false);
     bool user_copy = false;
     /* entity_table[c], not x: declare_implicit may have moved it */
-    for (entity_index k = entity_table[c].first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = entity_table[c].details().first_constructor; k;
+         k = entity_table[k].details().next_constructor)
         if (copy_or_move_constructor(c, k)) {
             /* X(const X&) = default beside a user-declared X(X&): the
                defaulted one is an overload candidate too
@@ -2962,7 +2986,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     bool written_move =
         y.defaulted_move_constructor || declares_move_constructor(c);
     if (y.defaulted_move_constructor || y.defaulted_move_assignment) {
-        bool trivial_move = !y.dynamic;
+        bool trivial_move = !y.details().dynamic;
         for (entity_index k : classes)
             if (!copies_bytes(k))
                 trivial_move = false;
@@ -3045,7 +3069,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         declare_implicit(c, special_member::constructor, false, true);
     }
     if (!user_constructors && !entity_table[c].implicit_default_deleted &&
-        (construction || entity_table[c].first_constructor)) {
+        (construction || entity_table[c].details().first_constructor)) {
         /* [class.default.ctor]/2: "A defaulted default constructor for
            class X is defined as deleted if ... any non-variant non-static
            data member with no default member initializer is of reference
@@ -3061,13 +3085,13 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     if (entity_table[c].defaulted_default_constructor &&
         default_constructor_deleted(c)) {
         entity_table[c].implicit_default_deleted = true;
-        for (entity_index k = entity_table[c].first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = entity_table[c].details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (entity_table[k].implicit &&
                 !type_table[entity_table[k].type.unqualified()].parameter_count)
                 entity_table[k].deleted = true;
     }
-    if (destruction && !entity_table[c].destructor)
+    if (destruction && !entity_table[c].details().destructor)
         declare_implicit(c, special_member::destructor, false);
     VTRY(assignments, implicit_assignments(c));
     /* [class.copy.ctor]/8, /11: without a move constructor of its own the
@@ -3077,7 +3101,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     if (move_implicitly_declared && !written_move && moved_by_bytes &&
         !move_declared && !move_deleted &&
         tokens.files.behavior.has(language_feature::rvalue_references)) {
-        if (!not_by_bytes && !entity_table[c].dynamic &&
+        if (!not_by_bytes && !entity_table[c].details().dynamic &&
             !entity_table[c].union_)
             entity_table[c].defaulted_move_constructor = true;
         else if (!entity_table[c].union_)
@@ -3101,15 +3125,15 @@ analysis_result semantic_analysis::inheriting_using(UsingDeclarator n,
 {
     entity_index c = defining_class;
     entity_index b = 0;
-    for (uint32_t i = 0; i < entity_table[c].base_count; i++) {
-        entity_index k = class_bases[entity_table[c].first_base + i];
+    for (uint32_t i = 0; i < entity_table[c].details().base_count; i++) {
+        entity_index k = class_bases[entity_table[c].details().first_base + i];
         if (entity_table[k].type.unqualified() ==
             entity_table[base].type.unqualified())
             b = k;
     }
     if (!b || entity_table[b].virtual_base ||
-        entity_table[c].virtual_base_count ||
-        entity_table[base].virtual_base_count)
+        entity_table[c].details().virtual_base_count ||
+        entity_table[base].details().virtual_base_count)
         return not_supported_because(
             n, "class.inhctor.init",
             "inherited constructors with a virtual base or a base not found "
@@ -3152,7 +3176,7 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
         entity_index base_class =
             type_table[entity_table[inheriting[d].base].type.unqualified()]
                 .entity;
-        if (entity_table[base_class].constructor_template)
+        if (entity_table[base_class].details().constructor_template)
             return not_supported_because(n, "temp.mem",
                                          "inherited constructors from a base "
                                          "with a constructor template");
@@ -3161,18 +3185,19 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
            X(); else the base's is c's too (clang: "a default constructor
            is inherited") */
         bool user_declared = entity_table[c].defaulted_default_constructor ||
-                             entity_table[c].constructor_template ||
-                             entity_table[c].constructor_templates;
-        for (entity_index k = entity_table[c].first_constructor; k;
-             k = entity_table[k].next_constructor)
+                             entity_table[c].details().constructor_template ||
+                             entity_table[c].details().constructor_templates;
+        for (entity_index k = entity_table[c].details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (!entity_table[k].implicit)
                 user_declared = true;
-        if (entity_table[base_class].constructor_templates) {
-            entity_index from = entity_table[base_class].constructor_templates;
-            entity_index to = entity_table[c].constructor_templates;
+        if (entity_table[base_class].details().constructor_templates) {
+            entity_index from =
+                entity_table[base_class].details().constructor_templates;
+            entity_index to = entity_table[c].details().constructor_templates;
             if (!to) {
                 to = make_held_name(entity_table[c].name, c);
-                entity_table[c].constructor_templates = to;
+                entity_table[c].set(&entity_details::constructor_templates, to);
             }
             for (size_t i = 0, m = function_templates.size(); i < m; i++)
                 if (function_templates[i].name == from &&
@@ -3187,8 +3212,8 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
            a trivial one is no entity until a constructor beside it makes
            the default-initialization ask for one */
         bool has_default = false;
-        for (entity_index k = entity_table[c].first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = entity_table[c].details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (entity_table[k].implicit &&
                 !type_table[entity_table[k].type.unqualified()].parameter_count)
                 has_default = true;
@@ -3202,12 +3227,13 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             !entity_table[c].implicit_default_deleted)
             declare_implicit(c, special_member::constructor, false);
         bool base_default = false;
-        for (entity_index k = entity_table[base_class].first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k =
+                 entity_table[base_class].details().first_constructor;
+             k; k = entity_table[k].details().next_constructor)
             if (!type_table[entity_table[k].type.unqualified()].parameter_count)
                 base_default = true;
         if (user_declared && !base_default &&
-            (!entity_table[base_class].first_constructor ||
+            (!entity_table[base_class].details().first_constructor ||
              trivial_defaulted_default_constructor(base_class)) &&
             !default_constructor_deleted(base_class))
             /* the base's trivial default constructor has no entity to
@@ -3216,8 +3242,9 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
                 n, "class.inhctor.init",
                 "inherited constructors where the base's trivial default "
                 "constructor must be forwarded to");
-        for (entity_index k = entity_table[base_class].first_constructor; k;
-             k = entity_table[k].next_constructor) {
+        for (entity_index k =
+                 entity_table[base_class].details().first_constructor;
+             k; k = entity_table[k].details().next_constructor) {
             const struct type base_type =
                 type_table[entity_table[k].type.unqualified()];
             if (copy_or_move_constructor(base_class, k) ||
@@ -3235,8 +3262,8 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             }
             /* hidden by a constructor of c with the signature */
             bool hidden = false;
-            for (entity_index q = entity_table[c].first_constructor; q;
-                 q = entity_table[q].next_constructor) {
+            for (entity_index q = entity_table[c].details().first_constructor;
+                 q; q = entity_table[q].details().next_constructor) {
                 const struct type &own =
                     type_table[entity_table[q].type.unqualified()];
                 if (own.parameter_count != base_type.parameter_count)
@@ -3248,7 +3275,7 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
                             .unqualified() != parameters[i].unqualified())
                         same = false;
                 if (same) {
-                    if (entity_table[q].inherited_constructor)
+                    if (entity_table[q].details().inherited_constructor)
                         return not_supported_because(
                             n, "namespace.udecl",
                             "an inherited constructor with the signature of "
@@ -3274,21 +3301,23 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             f.inline_ = true;
             f.defined = true;
             f.implicit = true;
-            f.inherited_constructor = k;
+            f.set(&entity_details::inherited_constructor, k);
             f.linkage_of_name = entity_table[c].linkage_of_name;
             f.explicit_ = entity_table[k].explicit_;
             f.deleted = entity_table[k].deleted;
             f.access = entity_table[k].access;
-            f.first_default = entity_table[k].first_default;
-            f.default_arguments = entity_table[k].default_arguments;
-            entity_index last = entity_table[c].first_constructor;
+            f.set(&entity_details::first_default,
+                  entity_table[k].details().first_default);
+            f.set(&entity_details::default_arguments,
+                  entity_table[k].details().default_arguments);
+            entity_index last = entity_table[c].details().first_constructor;
             if (!last) {
-                entity_table[c].first_constructor = e;
+                entity_table[c].set(&entity_details::first_constructor, e);
                 continue;
             }
-            while (entity_table[last].next_constructor)
-                last = entity_table[last].next_constructor;
-            entity_table[last].next_constructor = e;
+            while (entity_table[last].details().next_constructor)
+                last = entity_table[last].details().next_constructor;
+            entity_table[last].set(&entity_details::next_constructor, e);
         }
     }
     return analysis_result::well_formed;
@@ -3317,7 +3346,7 @@ analysis_result semantic_analysis::inherit_specialization(SyntaxRef at,
             through = b;
             break;
         }
-        if (entity_table[b].constructor_templates)
+        if (entity_table[b].details().constructor_templates)
             through = b;
     }
     if (!through)
@@ -3344,15 +3373,15 @@ analysis_result semantic_analysis::inherit_specialization(SyntaxRef at,
     f.defined = true;
     f.implicit = true;
     f.constexpr_ = from.constexpr_;
-    f.inherited_constructor = inner;
+    f.set(&entity_details::inherited_constructor, inner);
     /* ([abi:mangling]: its name has the specialization's arguments) */
     f.instantiation = from.instantiation;
     f.linkage_of_name = entity_table[c].linkage_of_name;
     f.explicit_ = from.explicit_;
     f.deleted = from.deleted;
     f.access = from.access;
-    f.first_default = from.first_default;
-    f.default_arguments = from.default_arguments;
+    f.set(&entity_details::first_default, from.details().first_default);
+    f.set(&entity_details::default_arguments, from.details().default_arguments);
     inherited_specializations.append({c, inner, e});
     chosen = e;
     if (from.deleted)
@@ -3443,8 +3472,8 @@ bool semantic_analysis::has_const_copy_constructor(entity_index c) const
     if (x.defaulted_copy_constructor)
         return true;
     bool any = false;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
         if (!copy_or_move_constructor(c, k))
             continue;
         const struct type &p =
@@ -3521,17 +3550,17 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
     f.explicit_ = kind == special_member::constructor && !copy && !move &&
                   entity_table[c].explicit_default_constructor;
     if (kind == special_member::destructor) {
-        entity_table[c].destructor = e;
+        entity_table[c].set(&entity_details::destructor, e);
         return;
     }
-    if (!entity_table[c].first_constructor) {
-        entity_table[c].first_constructor = e;
+    if (!entity_table[c].details().first_constructor) {
+        entity_table[c].set(&entity_details::first_constructor, e);
         return;
     }
-    entity_index k = entity_table[c].first_constructor;
-    while (entity_table[k].next_constructor)
-        k = entity_table[k].next_constructor;
-    entity_table[k].next_constructor = e;
+    entity_index k = entity_table[c].details().first_constructor;
+    while (entity_table[k].details().next_constructor)
+        k = entity_table[k].details().next_constructor;
+    entity_table[k].set(&entity_details::next_constructor, e);
 }
 
 /*
@@ -3553,7 +3582,7 @@ analysis_result semantic_analysis::define_defaulted_special_member(
     current_declaration = n;
     /* [class.base.init]/13: an abstract class's constructor does not
        construct its virtual bases: not analysed */
-    if (after_declaration && entity_table[c].virtual_base_count &&
+    if (after_declaration && entity_table[c].details().virtual_base_count &&
         abstract_class(entity_table[c].type))
         after_declaration = false;
     if (after_declaration &&
@@ -3606,7 +3635,7 @@ analysis_result semantic_analysis::define_defaulted_special_member(
     const struct type &ft = type_table[entity_table[f].type.unqualified()];
     entity_index source = 0;
     owned_array<entity_index> forwarded;
-    if (entity_table[f].inherited_constructor) {
+    if (entity_table[f].details().inherited_constructor) {
         for (uint32_t i = 0; i < ft.parameter_count; i++)
             forwarded.append(synthesized_variable(
                 sf,
@@ -3623,15 +3652,16 @@ analysis_result semantic_analysis::define_defaulted_special_member(
         /* [class.cdtor]/4: the destructor's virtual table pointer */
         members = vtable_pointer_store(c, at);
         destructions = subobject_destructions(c, at);
-    } else if (entity_table[f].inherited_constructor) {
+    } else if (entity_table[f].details().inherited_constructor) {
         inherited_call call;
-        call.constructor = entity_table[f].inherited_constructor;
+        call.constructor = entity_table[f].details().inherited_constructor;
         call.parameters = &forwarded;
         for (const inheriting_declaration &d : inheriting)
             if (d.c == c &&
                 type_table[entity_table[d.base].type.unqualified()].entity ==
-                    entity_table[entity_table[f].inherited_constructor]
-                        .enclosing)
+                    entity_table
+                        [entity_table[f].details().inherited_constructor]
+                            .enclosing)
                 call.base = d.base;
         r = ctor_initializer(SyntaxElement(), members, &call);
     } else if (source) {
@@ -3657,7 +3687,7 @@ analysis_result semantic_analysis::define_defaulted_special_member(
         if (entity_table[f].special == special_member::destructor)
             return not_supported_because(n, "class.default.ctor",
                                          "a destructor that would be deleted");
-        if (entity_table[f].inherited_constructor)
+        if (entity_table[f].details().inherited_constructor)
             return not_supported_because(
                 n, "class.default.ctor",
                 "an inheriting constructor that would be deleted");
@@ -3681,13 +3711,13 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
                                                         SyntaxRef n)
 {
     owned_array<entity_index> implicit;
-    for (entity_index k = entity_table[c].first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = entity_table[c].details().first_constructor; k;
+         k = entity_table[k].details().next_constructor)
         if (entity_table[k].implicit && !entity_table[k].deleted)
             implicit.append(k);
-    if (entity_table[c].destructor &&
-        entity_table[entity_table[c].destructor].implicit)
-        implicit.append(entity_table[c].destructor);
+    if (entity_table[c].details().destructor &&
+        entity_table[entity_table[c].details().destructor].implicit)
+        implicit.append(entity_table[c].details().destructor);
     for (entity_index f : implicit) {
         entity_index saved_deferred = needs_deferred_by;
         if (!entity_table[f].member_definition_needed)
@@ -3877,9 +3907,13 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
         }
         if (r.kind == type_kind::array && r.bound_known && bound > 0 &&
             type_table[et.unqualified()].kind == type_kind::class_type &&
-            entity_table[type_table[et.unqualified()].entity].destructor) {
+            entity_table[type_table[et.unqualified()].entity]
+                .details()
+                .destructor) {
             entity_index destructor =
-                entity_table[type_table[et.unqualified()].entity].destructor;
+                entity_table[type_table[et.unqualified()].entity]
+                    .details()
+                    .destructor;
             expression_meaning arr;
             if (subobject(at, order[i], arr) != analysis_result::well_formed)
                 return 0;
@@ -3902,16 +3936,16 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
             continue;
         }
         if (r.kind != type_kind::class_type ||
-            !entity_table[r.entity].destructor)
+            !entity_table[r.entity].details().destructor)
             continue;
         /* (an anonymous union's members are variant members of c, which
            are not destroyed: no destructor of the unnamed union is
            called) */
-        if (entity_table[r.entity].anonymous_object == order[i] &&
+        if (entity_table[r.entity].details().anonymous_object == order[i] &&
             entity_table[r.entity].union_)
             continue;
         /* read before subobject adds types, which may move r */
-        entity_index destructor = entity_table[r.entity].destructor;
+        entity_index destructor = entity_table[r.entity].details().destructor;
         expression_meaning object;
         if (subobject(at, order[i], object) != analysis_result::well_formed)
             return 0;
@@ -3977,7 +4011,7 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
         owned_array<entity_index> subobjects;
         subobject_classes(f.enclosing, subobjects);
         for (entity_index sub : subobjects) {
-            entity_index dtor = entity_table[sub].destructor;
+            entity_index dtor = entity_table[sub].details().destructor;
             if (!dtor || entity_table[dtor].constexpr_)
                 continue;
             /* [dcl.constexpr]/6: a member of an instantiated class
@@ -4027,12 +4061,13 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
             entity_index sub = pending[i];
             if (entity_table[sub].kind != entity_kind::class_type)
                 continue;
-            if (entity_table[sub].anonymous_object)
+            if (entity_table[sub].details().anonymous_object)
                 subobject_classes(sub, pending);
-            entity_index dtor = entity_table[sub].destructor;
+            entity_index dtor = entity_table[sub].details().destructor;
             if (!dtor || instantiation_depth)
                 continue;
-            entity_table[dtor].member_needed_by = definition;
+            entity_table[dtor].set(&entity_details::member_needed_by,
+                                   definition);
             mark_needed(dtor);
         }
     }
@@ -4135,10 +4170,10 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
             n, "class.dtor",
             "a destructor name that differs from its class name");
     } else if (m.destructor) {
-        e = entity_table[c].destructor;
+        e = entity_table[c].details().destructor;
     } else {
-        for (entity_index k = entity_table[c].first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = entity_table[c].details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (entity_table[k].type == type)
                 e = k;
     }
@@ -4190,7 +4225,7 @@ analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
 {
     qualified_type type = entity_table[c].type;
     require_complete(c);
-    if (!entity_table[c].size)
+    if (!entity_table[c].details().size)
         return not_supported_because(
             n, "expr.type.conv", "a type conversion to a class with no size");
     owned_array<expression_meaning> arguments;
@@ -4204,7 +4239,7 @@ analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
         if (written.list) {
             owned_array<SyntaxElement> *keep = nullptr;
             require_complete(c);
-            if (entity_table[c].first_constructor || is_aggregate(c))
+            if (entity_table[c].details().first_constructor || is_aggregate(c))
                 keep = &as_written;
             VTRY_SET(r,
                      expression_list_meanings(written.list, arguments, keep));
@@ -4235,7 +4270,7 @@ analysis_result semantic_analysis::class_direct_initialization(
 {
     qualified_type type = entity_table[c].type;
     require_complete(c);
-    if (!entity_table[c].size)
+    if (!entity_table[c].details().size)
         return not_supported_because(
             n, "expr.type.conv",
             "a direct initialization of a class with no size");
@@ -4273,7 +4308,8 @@ analysis_result semantic_analysis::class_direct_initialization(
                    parameter, so the glvalue it yields is what is copied;
                    [dcl.init]/17.6.2.2: a viable constructor leaves no
                    parenthesized aggregate initialization */
-                if (is_aggregate(c) || !entity_table[c].first_constructor)
+                if (is_aggregate(c) ||
+                    !entity_table[c].details().first_constructor)
                     arguments[0] = conv;
             }
         }
@@ -4302,8 +4338,8 @@ analysis_result semantic_analysis::class_direct_initialization(
         return r;
     }
     /* (inherited constructor templates are constructors too) */
-    bool constructors = entity_table[c].first_constructor ||
-                        entity_table[c].constructor_templates;
+    bool constructors = entity_table[c].details().first_constructor ||
+                        entity_table[c].details().constructor_templates;
     if (!constructors && arguments.empty()) {
         /* [dcl.init]/8.2: value-initialization of a class without a
            user-provided default constructor zero-initializes it (the
@@ -4364,9 +4400,10 @@ analysis_result semantic_analysis::class_direct_initialization(
            constructor alone gives the value; otherwise the construct node
            is marked (op 1) to zero the object first */
         const entity &x = entity_table[c];
-        bool overwritten = !x.base_count;
+        bool overwritten = !x.details().base_count;
         for (uint32_t i = 0; i < x.member_count; i++)
             if (!entity_table[class_members[x.first_member + i]]
+                     .details()
                      .default_initializer)
                 overwritten = false;
         r = construct(n, type, arguments, 0, value, false, written_arguments);

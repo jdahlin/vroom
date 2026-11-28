@@ -137,7 +137,7 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
         c = object.entity;
         require_complete(c);
         if (entity_table[c].kind != entity_kind::class_type ||
-            !entity_table[c].size) {
+            !entity_table[c].details().size) {
             /* /5: "If the object being deleted has incomplete class type at
                the point of deletion and the complete class has a
                non-trivial destructor or a deallocation function, the
@@ -162,8 +162,8 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     qualified_type align_type;
     if (!incomplete && alignment_of_type(object_type) > 16 &&
         (!over_aligned || !align_val_type(align_type) ||
-         (c && entity_table[c].destructor &&
-          entity_table[entity_table[c].destructor].virtual_)))
+         (c && entity_table[c].details().destructor &&
+          entity_table[entity_table[c].details().destructor].virtual_)))
         return not_supported_because(n, "expr.delete",
                                      "an over-aligned delete without aligned "
                                      "deallocation or with virtual dtor");
@@ -209,8 +209,8 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
             return not_supported_because(
                 n, "expr.delete",
                 "a destroying operator delete inherited from a base class");
-        if (destroying && entity_table[c].destructor &&
-            entity_table[entity_table[c].destructor].virtual_)
+        if (destroying && entity_table[c].details().destructor &&
+            entity_table[entity_table[c].details().destructor].virtual_)
             /* the deleting destructor would call it */
             return not_supported_because(
                 n, "expr.delete",
@@ -240,7 +240,7 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
         return analysis_result::well_formed;
     }
     if (c && destroys(c)) {
-        entity_index destructor = entity_table[c].destructor;
+        entity_index destructor = entity_table[c].details().destructor;
         if (!destructor)
             return not_supported_because(
                 n, "expr.delete",
@@ -329,8 +329,8 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
        function ... is looked up in the dynamic type's virtual
        destructor": [abi:vtable-components] the deleting destructor in the
        slot after the complete object one destroys and deallocates */
-    if (!array && c && entity_table[c].destructor &&
-        entity_table[entity_table[c].destructor].virtual_)
+    if (!array && c && entity_table[c].details().destructor &&
+        entity_table[entity_table[c].details().destructor].virtual_)
         semantics[m.node].value = 1;
     semantics[m.node].d = static_cast<uint32_t>(cookie);
     return analysis_result::well_formed;

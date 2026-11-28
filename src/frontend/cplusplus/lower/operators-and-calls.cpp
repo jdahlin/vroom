@@ -250,7 +250,7 @@ uint32_t c_lowering::data_size_assignment(const semantic_node &n, uint32_t a,
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     ast_qualified_type view = ast_builder_type_record(c, "", 0, false);
     ast_qualified_type data =
-        ast_builder_type_array(c, byte, x.data_size, true);
+        ast_builder_type_array(c, byte, x.details().data_size, true);
     const char *field_name = "d";
     size_t field_length = 1;
     uint32_t no_alignment = 0;
@@ -294,7 +294,7 @@ uint32_t c_lowering::assignment(const semantic_node &n)
     bool destroyed =
         !n.c && !is_glvalue(right) &&
         record(right.type).kind == type_kind::class_type &&
-        analysis.entity_table[record(right.type).entity].destructor &&
+        analysis.entity_table[record(right.type).entity].details().destructor &&
         (right.kind == semantic_kind::initializer_list ||
          right.kind == semantic_kind::zero ||
          right.kind == semantic_kind::conditional);
@@ -327,8 +327,8 @@ uint32_t c_lowering::assignment(const semantic_node &n)
                 t);
         }
         if (r.kind == type_kind::class_type &&
-            analysis.entity_table[r.entity].data_size <
-                analysis.entity_table[r.entity].size)
+            analysis.entity_table[r.entity].details().data_size <
+                analysis.entity_table[r.entity].details().size)
             return data_size_assignment(n, a, b);
         if (passed_indirectly(n.type) && ast_builder_node_is_call(c, b) &&
             side_effect_free(a)) {
@@ -384,8 +384,10 @@ uint32_t c_lowering::stdc_bits(const semantic_node &n, ast_qualified_type t,
     uint32_t callee = n.a;
     if (node(callee).kind == semantic_kind::conversion)
         callee = node(callee).a;
-    const gnu_builtin &row = gnu_builtin_at(
-        analysis.entity_table[node(callee).entity_a()].gnu_builtin_row);
+    const gnu_builtin &row =
+        gnu_builtin_at(analysis.entity_table[node(callee).entity_a()]
+                           .details()
+                           .gnu_builtin_row);
     ast_qualified_type x_type =
         AST_QUALIFIED_TYPE_UNQUALIFIED(type_of(argument));
     uint64_t bytes = ast_builder_type_size(c, x_type);
@@ -689,26 +691,29 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
             if (rt.kind == type_kind::class_type) {
                 entity_index ce = rt.entity;
                 const entity &cx = analysis.entity_table[ce];
-                for (uint32_t i = 0; i < cx.base_count; i++) {
+                for (uint32_t i = 0; i < cx.details().base_count; i++) {
                     const entity &b =
                         analysis.entity_table
-                            [analysis.class_bases[cx.first_base + i]];
+                            [analysis.class_bases[cx.details().first_base + i]];
                     if (!b.virtual_base)
-                        self(self, b.type, base_off + b.offset);
+                        self(self, b.type, base_off + b.details().offset);
                 }
                 for (uint32_t i = 0; i < cx.member_count; i++) {
                     entity_index me =
                         analysis.class_members[cx.first_member + i];
                     const entity &mx = analysis.entity_table[me];
                     if (mx.bit_field) {
-                        uint64_t start_byte = (base_off * 8 + mx.offset) / 8;
+                        uint64_t start_byte =
+                            (base_off * 8 + mx.details().offset) / 8;
                         uint64_t end_byte =
-                            (base_off * 8 + mx.offset + mx.bit_width + 7) / 8;
+                            (base_off * 8 + mx.details().offset +
+                             mx.details().bit_width + 7) /
+                            8;
                         for (uint64_t b = start_byte; b < end_byte && b < total;
                              b++)
                             covered[static_cast<size_t>(b)] = 1;
                     } else {
-                        self(self, mx.type, base_off + mx.offset);
+                        self(self, mx.type, base_off + mx.details().offset);
                     }
                 }
                 return;
@@ -765,8 +770,10 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
         uint32_t callee = n.a;
         if (node(callee).kind == semantic_kind::conversion)
             callee = node(callee).a;
-        const gnu_builtin &row = gnu_builtin_at(
-            analysis.entity_table[node(callee).entity_a()].gnu_builtin_row);
+        const gnu_builtin &row =
+            gnu_builtin_at(analysis.entity_table[node(callee).entity_a()]
+                               .details()
+                               .gnu_builtin_row);
         checked_span<const uint32_t> items = analysis.semantics.items(n.first);
         bool pointer = record(node(items[0]).type).kind == type_kind::pointer;
         uint32_t alignment = items[1];
@@ -842,8 +849,9 @@ bool c_lowering::unevaluated_temporaries(const semantic_node &n)
         callee = node(callee).a;
     if (n.count != 1 || node(callee).kind != semantic_kind::entity)
         return false;
-    uint16_t row =
-        analysis.entity_table[entity_index_in(node(callee).a)].gnu_builtin_row;
+    uint16_t row = analysis.entity_table[entity_index_in(node(callee).a)]
+                       .details()
+                       .gnu_builtin_row;
     if (!row || gnu_builtin_at(row).fold != builtin_fold::constant_p)
         return false;
     /* (lowered to see what it would make, then forgotten) */
@@ -1078,8 +1086,9 @@ uint32_t c_lowering::call(const semantic_node &n)
                builtin node, made below */
         {
             builtin = analysis.entity_table[node(named).entity_a()].name;
-            uint16_t row =
-                analysis.entity_table[node(named).entity_a()].gnu_builtin_row;
+            uint16_t row = analysis.entity_table[node(named).entity_a()]
+                               .details()
+                               .gnu_builtin_row;
             untyped_builtin = row && gnu_builtin_untyped(row);
             if (row)
                 lowering = gnu_builtin_at(row).lower;

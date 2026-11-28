@@ -181,7 +181,7 @@ uint32_t c_lowering::zero_in_place(const semantic_node &x,
                                         size_type};
     uint64_t size = 0;
     if (record(object_type).kind == type_kind::class_type)
-        size = analysis.entity_table[record(object_type).entity].size;
+        size = analysis.entity_table[record(object_type).entity].details().size;
     else
         size = ast_builder_type_size(c, type(object_type, x.at));
     uint32_t arguments[3] = {
@@ -338,7 +338,7 @@ uint32_t c_lowering::temporary_object(uint32_t n)
     ast_qualified_type t = type(x.type, x.at);
     uint32_t held = full_expression_temporary(t);
     entity_index destructor =
-        analysis.entity_table[record(x.type).entity].destructor;
+        analysis.entity_table[record(x.type).entity].details().destructor;
     uint32_t flag = 0;
     if (destructor)
         flag = constructed_flag();
@@ -720,7 +720,7 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
         return static_temporary(n, pointer);
     entity_index cls = record(bound.type).entity;
     if (record(bound.type).kind == type_kind::class_type &&
-        (analysis.entity_table[cls].destructor ||
+        (analysis.entity_table[cls].details().destructor ||
          (built_in_place(bound.type) && bound.kind == semantic_kind::call))) {
         /* [class.temporary]/4 and /6: a temporary with a destructor,
            destroyed by the full-expression or as the reference dies: the
@@ -782,7 +782,9 @@ uint32_t c_lowering::static_temporary(const semantic_node &n,
     uint32_t address = address_of(c_variable(c, s, t), pointer);
     if (record(bound.type).kind == type_kind::class_type) {
         entity_index destructor =
-            analysis.entity_table[record(bound.type).entity].destructor;
+            analysis.entity_table[record(bound.type).entity]
+                .details()
+                .destructor;
         if (destructor) {
             uint32_t registered = destructor_registration(
                 special_callee(destructor, n.at), entity_type(destructor, n.at),
@@ -871,7 +873,9 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
                 /* its value is an initializer of the struct the field
                    has, which only a list can be retyped to */
                 data_of = record(m.type).entity;
-                if (analysis.entity_table[data_of].virtual_base_count ||
+                if (analysis.entity_table[data_of]
+                        .details()
+                        .virtual_base_count ||
                     node(items[item]).kind != semantic_kind::initializer_list)
                     return fail("an initializer of a base whose tail padding "
                                 "is reused",
@@ -879,7 +883,7 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
             }
             if (m.base_subobject) {
                 vptr_class = complete;
-                vptr_offset = at + m.offset;
+                vptr_offset = at + m.details().offset;
             }
             data_initialized = data_of;
             uint32_t e = expression(items[item++]);
@@ -896,7 +900,7 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
            object's table, of the group at this subobject */
         const dynamic_class *dynamic = analysis.dynamic_of(ce);
         if (dynamic && !dynamic->primary_base) {
-            if (analysis.entity_table[complete].virtual_base_count)
+            if (analysis.entity_table[complete].details().virtual_base_count)
                 return fail("a constant object with virtual bases", n.at);
             const dynamic_class *whole = analysis.dynamic_of(complete);
             uint32_t group = 0;

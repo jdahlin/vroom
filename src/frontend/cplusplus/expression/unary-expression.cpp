@@ -286,10 +286,10 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         return record.bound * size_of_type(record.operand);
     case type_kind::class_type:
         /* [class.mem]/6: 0 until the class is complete */
-        return entity_table[record.entity].size;
+        return entity_table[record.entity].details().size;
     case type_kind::enumeration: {
         /* [dcl.enum]/8 and [abi:layout]: the underlying type's */
-        fundamental_type u = entity_table[record.entity].underlying;
+        fundamental_type u = entity_table[record.entity].details().underlying;
         if (u == fundamental_type::none)
             return 0;
         /* (bool's width is its one value bit, its size one byte) */
@@ -386,7 +386,7 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
     case type_kind::array:
         return alignment_of_type(record.operand);
     case type_kind::class_type:
-        return entity_table[record.entity].alignment;
+        return entity_table[record.entity].details().alignment;
     case type_kind::pointer_to_member:
         /* (ptrdiff_t's, and the pair's: its members') */
         return tokens.files.behavior.long_width / 8;
@@ -459,8 +459,8 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
             bool packed = (f.gnu_flags & gnu_packed) != 0;
             if (packed)
                 typedef_alignment = 1;
-            if (f.alignment)
-                typedef_alignment = f.alignment;
+            if (f.details().alignment)
+                typedef_alignment = f.details().alignment;
             packed_member = packed;
         }
         /* [ext:gnu_attributes] __alignof__ of a variable named: its own
@@ -469,8 +469,9 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
             semantics[e.node].kind == semantic_kind::entity) {
             entity_index v = semantics[e.node].entity_a();
             if (v && entity_table[v].kind == entity_kind::variable &&
-                !entity_table[v].nonstatic_member && entity_table[v].alignment)
-                typedef_alignment = entity_table[v].alignment;
+                !entity_table[v].nonstatic_member &&
+                entity_table[v].details().alignment)
+                typedef_alignment = entity_table[v].details().alignment;
         }
     } else if (!alignment && n.size() == 5 &&
                n[1].is(preprocessing_op_or_punc::ELLIPSIS) && n[3].is_token() &&
@@ -516,7 +517,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
             t = type_table[t.unqualified()].operand;
         const struct type record = type_table[t.unqualified()];
         if (record.kind == type_kind::class_type)
-            size = entity_table[record.entity].data_size;
+            size = entity_table[record.entity].details().data_size;
     }
     if (alignment) {
         size = alignment_of_type(operand);
@@ -633,14 +634,15 @@ analysis_result semantic_analysis::sized_operand(SyntaxRef n, bool alignment,
                                          "whose entity is not a class");
         /* [class.mem]/6: a class is incomplete until its closing brace
            (the size is 0 until then; an empty class's is 1) */
-        if (!c.size)
+        if (!c.details().size)
             return ill_formed(n, incomplete, subclause);
         return analysis_result::well_formed;
     }
     case type_kind::enumeration:
         /* [dcl.enum]/6: an enumeration is incomplete until its underlying
            type is fixed or its enumerators are defined */
-        if (entity_table[record.entity].underlying == fundamental_type::none)
+        if (entity_table[record.entity].details().underlying ==
+            fundamental_type::none)
             return ill_formed(n, incomplete, subclause);
         return analysis_result::well_formed;
     case type_kind::template_parameter:
@@ -1066,7 +1068,7 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
             current_declaration, "expr.unary.op",
             "a pointer to a member that is neither a variable nor a function");
     if (!c || entity_table[c].kind != entity_kind::class_type ||
-        (!entity_table[c].name && !entity_table[c].lambda))
+        (!entity_table[c].name && !entity_table[c].details().lambda))
         /* a variant member of an anonymous union: its offset is the
            union's plus its own */
         return not_supported_because(

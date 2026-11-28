@@ -308,7 +308,7 @@ fundamental_type semantic_analysis::evaluated_type(qualified_type t) const
         entity_index e = enumeration_of(t);
         if (!e)
             return fundamental_type::none;
-        f = entity_table[e].underlying;
+        f = entity_table[e].details().underlying;
     }
     if (f == fundamental_type::float_ || f == fundamental_type::double_ ||
         f == fundamental_type::long_double || f == fundamental_type::float16 ||
@@ -884,7 +884,7 @@ bool semantic_analysis::has_default_member_initializer(entity_index c) const
     const entity &k = entity_table[c];
     for (uint32_t i = 0; i < k.member_count; i++) {
         const entity &m = entity_table[class_members[k.first_member + i]];
-        if (m.default_initializer)
+        if (m.details().default_initializer)
             return true;
         const struct type *t = &type_table[m.type.unqualified()];
         while (t->kind == type_kind::array)
@@ -912,7 +912,9 @@ entity_index semantic_analysis::element_destructor(qualified_type type,
         object = type_table[object.unqualified()].operand;
     if (type_table[object.unqualified()].kind != type_kind::class_type)
         return 0;
-    return entity_table[type_table[object.unqualified()].entity].destructor;
+    return entity_table[type_table[object.unqualified()].entity]
+        .details()
+        .destructor;
 }
 
 /* [stmt.dcl]/2, [expr.call]/8: the object just made (the last of the
@@ -1169,7 +1171,7 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
            class with a constructor ([dcl.init]/8) runs that constructor,
            which is not this */
         if (zero && init != zero_fill &&
-            ((c.first_constructor &&
+            ((c.details().first_constructor &&
               !trivial_defaulted_default_constructor(c_entity)) ||
              has_default_member_initializer(c_entity)))
             return CONST_UNKNOWN;
@@ -1394,7 +1396,7 @@ entity_index semantic_analysis::evaluated_class(qualified_type t) const
     if (record.kind != type_kind::class_type)
         return 0;
     const entity &x = entity_table[record.entity];
-    if (!x.defined || x.virtual_base_count)
+    if (!x.defined || x.details().virtual_base_count)
         return 0;
     return record.entity;
 }
@@ -1716,6 +1718,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
              (tk == type_kind::class_type &&
               ((state.member_call_object &&
                 !entity_table[type_table[e.type.unqualified()].entity]
+                     .details()
                      .lambda) ||
                !empty_class(type_table[e.type.unqualified()].entity))))) {
             /* (an empty class's copy reads no value, [class.copy.ctor]/14:
@@ -2379,7 +2382,7 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
         entity_index c = type_table[x.type.unqualified()].entity;
         if (e.kind == entity_kind::variable && e.automatic && !e.constexpr_ &&
             empty_class(c) && copy_reads_nothing(c) &&
-            !entity_table[c].lambda) {
+            !entity_table[c].details().lambda) {
             v = constant_value();
             v.kind = constant_value_kind::class_object;
             return constness::constant;
@@ -2745,18 +2748,18 @@ semantic_analysis::bit_field_member_stored(entity_index member,
                                            constant_value v) const
 {
     const entity &m = entity_table[member];
-    if (!m.bit_field || !m.bit_width || m.bit_width >= 64 ||
+    if (!m.bit_field || !m.details().bit_width || m.details().bit_width >= 64 ||
         v.kind != constant_value_kind::integer)
         return v;
     fundamental_type t = evaluated_type(m.type);
     if (t == fundamental_type::none || fundamental_type_is_floating(t))
         return v;
     unsigned __int128 mask =
-        (static_cast<unsigned __int128>(1) << m.bit_width) - 1;
+        (static_cast<unsigned __int128>(1) << m.details().bit_width) - 1;
     unsigned __int128 kept = v.integer & mask;
     if (t != fundamental_type::bool_ &&
         fundamental_type_is_signed(tokens.files.behavior, t) &&
-        (kept >> (m.bit_width - 1)) & 1)
+        (kept >> (m.details().bit_width - 1)) & 1)
         kept |= ~mask;
     v.integer = kept;
     return v;
@@ -3895,7 +3898,8 @@ bool semantic_analysis::constant_p_call(uint32_t node) const
         callee = semantics[callee].a;
     if (semantics[callee].kind != semantic_kind::entity)
         return false;
-    uint16_t row = entity_table[semantics[callee].entity_a()].gnu_builtin_row;
+    uint16_t row =
+        entity_table[semantics[callee].entity_a()].details().gnu_builtin_row;
     return row && gnu_builtin_at(row).fold == builtin_fold::constant_p;
 }
 
@@ -4041,7 +4045,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         return constness::constant;
     }
     /* [ext:gnu_library_builtins] clang evaluates the bit counts */
-    if (uint16_t row = entity_table[called].gnu_builtin_row) {
+    if (uint16_t row = entity_table[called].details().gnu_builtin_row) {
         const gnu_builtin &b = gnu_builtin_at(row);
         /* the fold table says whether it is evaluated at all */
         if (b.fold != builtin_fold::none && !gnu_builtin_folds(b))
@@ -4272,8 +4276,9 @@ constness semantic_analysis::evaluate_invocation(
        function": evaluated, and not a constant expression where its body
        is not one */
     bool call_operator = false;
-    if (e.enclosing && entity_table[e.enclosing].lambda) {
-        entity_index declared = entity_table[e.enclosing].call_operator;
+    if (e.enclosing && entity_table[e.enclosing].details().lambda) {
+        entity_index declared =
+            entity_table[e.enclosing].details().call_operator;
         /* (before C++17 no lambda's is constexpr, which a non-generic
            one's evaluation does not tell apart yet) */
         call_operator =
@@ -4299,7 +4304,7 @@ constness semantic_analysis::evaluate_invocation(
         /* [expr.prim.lambda.closure]/4: a closure's function call operator
            is constexpr if it satisfies those rules, not decided yet; its
            conversion function and the function it returns (/11) too */
-        if (e.enclosing && entity_table[e.enclosing].lambda)
+        if (e.enclosing && entity_table[e.enclosing].details().lambda)
             return CONST_UNKNOWN;
         /* [expr.const]/5.2: a call of a function that is not constexpr */
         return CONST_NOT_CONSTANT_NOTE(rule_note::call_non_constexpr_function);
@@ -4350,8 +4355,8 @@ constness semantic_analysis::evaluate_invocation(
         semantics[body].evaluation == constness::not_constant ||
         semantics[body].count != bound + with_this ||
         (state.defined_before && semantics[body].at > state.defined_before)) {
-        if (entity_table[f].held_because)
-            evaluation_cause = entity_table[f].held_because;
+        if (entity_table[f].details().held_because)
+            evaluation_cause = entity_table[f].details().held_because;
         /* [temp.inst]/1, [expr.const]/5.3: a specialization whose
            definition is ill-formed for its arguments (diagnosed where it
            was instantiated) is invalid: its invocation is not a constant
@@ -4366,7 +4371,8 @@ constness semantic_analysis::evaluate_invocation(
            template's specialization, not one whose body failed analysis) */
         if (!body && !state.potential && !entity_table[f].defined &&
             !entity_table[f].definition && !entity_table[f].implicit &&
-            !entity_table[f].instantiation && !entity_table[f].held_because &&
+            !entity_table[f].instantiation &&
+            !entity_table[f].details().held_because &&
             !entity_table[f].immediate && !entity_table[f].gnu_flags)
             return CONST_NOT_CONSTANT;
         return CONST_UNKNOWN;
@@ -4491,19 +4497,21 @@ bool semantic_analysis::bases_construct_nothing(entity_index c) const
     subobject_classes(c, classes);
     for (entity_index k : classes) {
         const entity &x = entity_table[k];
-        if (x.constructor_template || x.constructor_templates)
+        if (x.details().constructor_template ||
+            x.details().constructor_templates)
             return false;
         for (uint32_t i = 0; i < x.member_count; i++)
             if (entity_table[class_members[x.first_member + i]]
+                    .details()
                     .default_initializer)
                 return false;
         bool provided = false;
-        for (entity_index f = x.first_constructor; f;
-             f = entity_table[f].next_constructor) {
+        for (entity_index f = x.details().first_constructor; f;
+             f = entity_table[f].details().next_constructor) {
             const entity &constructor = entity_table[f];
             const struct type &t = type_table[constructor.type.unqualified()];
             if (constructor.implicit ||
-                t.parameter_count != constructor.default_arguments)
+                t.parameter_count != constructor.details().default_arguments)
                 continue;
             if (!constructor.constexpr_ || !empty_class(k))
                 return false;
@@ -4529,7 +4537,7 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
     const entity &k = entity_table[x.entity_b()];
     entity_index c_entity = evaluated_class(entity_table[k.enclosing].type);
     /* (an inheriting constructor has its own definition, invoked as any) */
-    if (k.implicit && !k.inherited_constructor) {
+    if (k.implicit && !k.details().inherited_constructor) {
         /* [class.default.ctor]/4: the implicit default constructor of a
            class with no members does nothing where its bases' do; one with a
            synthesized definition (default member initializers) is evaluated

@@ -455,7 +455,7 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
             e = declare_builtin(name, symbol, types_of[0], types_of.data() + 1,
                                 types_of.size() - 1, variadic,
                                 gnu_library_function, true);
-            entity_table[e].gnu_builtin_row = row;
+            entity_table[e].set(&entity_details::gnu_builtin_row, row);
             return e;
         }
         if (known && types_of.size()) {
@@ -468,7 +468,7 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
     }
     if (form == builtin_form::unsupported)
         row = gnu_builtin_unsupported_row;
-    entity_table[e].gnu_builtin_row = row;
+    entity_table[e].set(&entity_details::gnu_builtin_row, row);
     return e;
 }
 
@@ -519,7 +519,8 @@ entity_index semantic_analysis::library_function_builtin(uint32_t name,
         entity_index e =
             declare_builtin(name, name, builtin_scalar(fundamental_type::void_),
                             nullptr, 0, true, gnu_compiler_builtin);
-        entity_table[e].gnu_builtin_row = gnu_builtin_unsupported_row;
+        entity_table[e].set(&entity_details::gnu_builtin_row,
+                            gnu_builtin_unsupported_row);
         return e;
     }
     uint32_t library = 0;
@@ -542,7 +543,7 @@ entity_index semantic_analysis::library_function_builtin(uint32_t name,
     /* (a row of the registry says how a constant expression folds it) */
     uint16_t row = 0;
     if (gnu_builtin_find(spelling, length, &row))
-        entity_table[e].gnu_builtin_row = row;
+        entity_table[e].set(&entity_details::gnu_builtin_row, row);
     return e;
 }
 
@@ -787,7 +788,7 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
     const char *spelling =
         tokens.pp.identifier_spelling(entity_table[called].name - 1, &length);
     const gnu_builtin &row =
-        gnu_builtin_at(entity_table[called].gnu_builtin_row);
+        gnu_builtin_at(entity_table[called].details().gnu_builtin_row);
     switch (row.form) {
     case builtin_form::query:
         return query_builtin_result(n, called, row.which, nodes, result);
@@ -891,7 +892,7 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
                                   "be a pointer to integer, pointer or "
                                   "supported floating point type",
                                   "ext.clang");
-            f = entity_table[enumeration].underlying;
+            f = entity_table[enumeration].details().underlying;
         }
         /* the generic forms take an object of any trivially copyable class
            type that is as large as an atomic one ([intro.object]) */
@@ -909,7 +910,7 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
                     "on an object of a class that is not known to be "
                     "trivially copyable");
             require_complete(c);
-            uint64_t bytes = entity_table[c].size;
+            uint64_t bytes = entity_table[c].details().size;
             if (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 &&
                 bytes != 16)
                 return not_supported_builtin(
@@ -1152,7 +1153,7 @@ semantic_analysis::align_result(SyntaxRef n, entity_index called,
                                 qualified_type &result)
 {
     const gnu_builtin &row =
-        gnu_builtin_at(entity_table[called].gnu_builtin_row);
+        gnu_builtin_at(entity_table[called].details().gnu_builtin_row);
     if (nodes.size() != 2)
         return ill_formed(n, "the builtin takes two arguments", "ext.clang");
     qualified_type t = semantics[nodes[0]].type;
@@ -1263,7 +1264,7 @@ semantic_analysis::stdc_bits_result(SyntaxRef n, entity_index called,
                                     qualified_type &result)
 {
     const gnu_builtin &row =
-        gnu_builtin_at(entity_table[called].gnu_builtin_row);
+        gnu_builtin_at(entity_table[called].details().gnu_builtin_row);
     builtin_stdc_op op = static_cast<builtin_stdc_op>(row.which);
     bool rotation = op == builtin_stdc_op::rotate_left ||
                     op == builtin_stdc_op::rotate_right;
@@ -1423,9 +1424,10 @@ constness semantic_analysis::evaluate_align(constant_evaluation &state,
 
 int semantic_analysis::query_builtin(entity_index e) const
 {
-    if (!entity_table[e].gnu_builtin_row)
+    if (!entity_table[e].details().gnu_builtin_row)
         return 0;
-    const gnu_builtin &row = gnu_builtin_at(entity_table[e].gnu_builtin_row);
+    const gnu_builtin &row =
+        gnu_builtin_at(entity_table[e].details().gnu_builtin_row);
     if (row.form != builtin_form::query)
         return 0;
     return row.which;
@@ -1624,9 +1626,10 @@ constness semantic_analysis::evaluate_query_builtin(constant_evaluation &state,
 
 int semantic_analysis::bit_count_builtin(entity_index e) const
 {
-    if (!entity_table[e].gnu_builtin_row)
+    if (!entity_table[e].details().gnu_builtin_row)
         return 0;
-    const gnu_builtin &row = gnu_builtin_at(entity_table[e].gnu_builtin_row);
+    const gnu_builtin &row =
+        gnu_builtin_at(entity_table[e].details().gnu_builtin_row);
     if (row.form != builtin_form::bit_count)
         return 0;
     return row.which;

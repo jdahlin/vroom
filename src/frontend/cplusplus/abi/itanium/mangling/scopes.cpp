@@ -32,7 +32,7 @@ entity_index next_enclosing_function(const entities &table, entity_index f)
 
 bool visible_local_class(const entities &table, entity_index c)
 {
-    if (table[c].closure_variable)
+    if (table[c].details().closure_variable)
         return true;
     /* (a class nested in a local class: as a member of it) */
     entity_index f = next_enclosing_function(table, c);
@@ -84,16 +84,16 @@ uint64_t itanium_mangler::local_class_ordinal(entity_index c,
     const entities &table = analysis.entity_table;
     uint32_t name = table[c].name;
     if (!name)
-        name = table[c].linkage_name;
+        name = table[c].details().linkage_name;
     uint64_t ordinal = 0;
     for (entity_index other{1}; other < c; other++) {
         const entity &x = table[other];
         uint32_t other_name = x.name;
         if (!other_name)
-            other_name = x.linkage_name;
+            other_name = x.details().linkage_name;
         if ((x.kind == entity_kind::class_type ||
              x.kind == entity_kind::enumeration) &&
-            !x.lambda && other_name == name &&
+            !x.details().lambda && other_name == name &&
             enclosing_function(table, other) == function)
             ordinal++;
     }
@@ -104,7 +104,7 @@ void itanium_mangler::local_class_discriminator(entity_index c,
                                                 entity_index function)
 {
     const entity &x = analysis.entity_table[c];
-    if (x.lambda || (!x.name && !x.linkage_name))
+    if (x.details().lambda || (!x.name && !x.details().linkage_name))
         return;
     if (uint64_t ordinal = local_class_ordinal(c, function))
         enc.discriminator(ordinal - 1);
@@ -179,7 +179,7 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
 bool itanium_mangler::closure_numbered(entity_index c) const
 {
     const entities &table = analysis.entity_table;
-    if (table[c].closure_variable)
+    if (table[c].details().closure_variable)
         return true;
     /* (a member function of a local class: its enclosing function's
        too) */
@@ -211,10 +211,10 @@ bool itanium_mangler::translation_unit_number(entity_index c)
            a number of the translation unit's too, and an unnamed class or
            enumeration of namespace scope counts every one before it) */
         if (enclosing_function(table, k) == context ||
-            (!context &&
-             (!table[c].lambda ||
-              (table[k].lambda && table[table[k].call_operator].kind ==
-                                      entity_kind::template_entity))))
+            (!context && (!table[c].details().lambda ||
+                          (table[k].details().lambda &&
+                           table[table[k].details().call_operator].kind ==
+                               entity_kind::template_entity))))
             n++;
     }
     if (!seen)
@@ -241,7 +241,7 @@ bool itanium_mangler::translation_unit_number(entity_index c)
 bool itanium_mangler::closure_type_name(entity_index c)
 {
     const entities &table = analysis.entity_table;
-    entity_index call = table[c].call_operator;
+    entity_index call = table[c].details().call_operator;
     if (!call)
         return false;
     if (!closure_numbered(c))
@@ -249,7 +249,7 @@ bool itanium_mangler::closure_type_name(entity_index c)
     /* [impl.clang] the context of a closure type in an inline variable's
        initializer (the ABI's later data-member-prefix): the variable's
        <source-name> and M */
-    entity_index variable = table[c].closure_variable;
+    entity_index variable = table[c].details().closure_variable;
     if (variable) {
         if (!source_name(table[variable].name))
             return false;
@@ -267,7 +267,7 @@ bool itanium_mangler::closure_type_name(entity_index c)
         /* ([impl.clang] the invented ones of an auto parameter have none) */
         uint32_t explicit_count =
             analysis.template_parameter_count(call) -
-            analysis.invented_parameter_count(table[c].lambda);
+            analysis.invented_parameter_count(table[c].details().lambda);
         /* the template-param-decls: Ty or Tk and the concept, Tn and the
            type, Tp before a pack's */
         for (uint32_t i = 0; i < explicit_count; i++) {
@@ -297,7 +297,7 @@ bool itanium_mangler::closure_type_name(entity_index c)
            expression */
         bool trailing = false;
         SyntaxElement constraint =
-            analysis.lambda_constraint(table[c].lambda, &trailing);
+            analysis.lambda_constraint(table[c].details().lambda, &trailing);
         if (constraint && !trailing) {
             enc.write(terminal::Q_requires_clause);
             if (!expression_of_constraint(call, constraint))
@@ -314,20 +314,23 @@ bool itanium_mangler::closure_type_name(entity_index c)
         if (other >= c)
             break;
         const entity &k = table[other];
-        if (k.kind != entity_kind::class_type || !k.lambda ||
-            !k.call_operator || enclosing_function(table, other) != context ||
-            k.closure_variable != variable ||
-            k.default_argument_parameter != table[c].default_argument_parameter)
+        if (k.kind != entity_kind::class_type || !k.details().lambda ||
+            !k.details().call_operator ||
+            enclosing_function(table, other) != context ||
+            k.details().closure_variable != variable ||
+            k.details().default_argument_parameter !=
+                table[c].details().default_argument_parameter)
             continue;
         /* (a default member initializer analysed in each constructor: the
            one closure type of its lambda-expression) */
-        if (variable && !table[variable].inline_ && k.lambda == table[c].lambda)
+        if (variable && !table[variable].inline_ &&
+            k.details().lambda == table[c].details().lambda)
             continue;
-        const struct type &a = record(table[k.call_operator].type);
+        const struct type &a = record(table[k.details().call_operator].type);
         const struct type &b = record(signature);
         if (a.variadic == b.variadic &&
             same_parameters(analysis.type_table,
-                            table[k.call_operator].type.unqualified(),
+                            table[k.details().call_operator].type.unqualified(),
                             signature.unqualified()))
             earlier++;
     }

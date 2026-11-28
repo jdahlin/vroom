@@ -348,7 +348,8 @@ struct tree_checker {
         case semantic_kind::vtable_pointer_store:
             child(n, node.a, tree_sort::expression, false, "object address");
             prvalue(n, node.a, "object address");
-            if (!node.b || !analysis.entity_table[node.entity_b()].dynamic)
+            if (!node.b ||
+                !analysis.entity_table[node.entity_b()].details().dynamic)
                 problem(n, "no dynamic class");
             break;
         case semantic_kind::destroy:
@@ -531,7 +532,7 @@ size_t check_tree(const semantic_analysis &analysis, const syntax_tree &tree,
             continue;
         /* a system header's inline function whose body is not supported
            is left undefined (defer_unsupported_body): its tree is partial */
-        if (analysis.entity_table[d.entity].unsupported_body)
+        if (analysis.entity_table[d.entity].details().unsupported_body)
             continue;
         uint32_t root = analysis.entity_table[d.entity].definition;
         if (!root) {
