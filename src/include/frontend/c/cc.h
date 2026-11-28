@@ -196,6 +196,10 @@ typedef struct tag {
     /* -g, C++: string indices of the name with its template arguments, and of
        the namespaces around it (ast_builder_symbol_debug_scope); 0: none */
     uint32_t debug_name, debug_scope;
+    /* -g, C++: the direct virtual bases, debug_virtual_base_count pairs of
+       lists (the base's struct, how far below the virtual table's address
+       point its offset is) */
+    uint32_t debug_virtual_bases, debug_virtual_base_count;
 } tag;
 
 /* ---------------- symbols ---------------- */

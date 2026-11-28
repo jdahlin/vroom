@@ -135,21 +135,37 @@ void c_lowering::debug_type_name(qualified_type t, vbuffer *out)
     }
 }
 
+/* -g: every enumeration's enumerators, chained in declaration order, found
+   in one pass over the entities when the first is asked for */
+void c_lowering::gather_enumerators()
+{
+    if (enumerators_gathered)
+        return;
+    enumerators_gathered = true;
+    /* (backwards, so that each chain is in order) */
+    for (uint32_t i = static_cast<uint32_t>(analysis.entity_table.size());
+         i-- > 1;) {
+        const entity &y = analysis.entity_table[entity_index(i)];
+        if (y.kind != entity_kind::enumerator ||
+            record(y.type).kind != type_kind::enumeration)
+            continue;
+        entity_index of = record(y.type).entity;
+        next_enumerator[entity_index(i)] = first_enumerator[of];
+        first_enumerator[of] = entity_index(i);
+    }
+}
+
 /* the enumeration e as -g describes it (made once) */
 ast_qualified_type c_lowering::debug_enum_type(entity_index e, token_index at)
 {
-    for (size_t i = 0; i < debug_enums.size(); i++)
-        if (debug_enums[i] == e)
-            return debug_enum_types[i];
+    if (debug_enums[e])
+        return debug_enums[e];
     const entity x = analysis.entity_table[e];
     ast_qualified_type underlying = fundamental(x.details().underlying, at);
+    gather_enumerators();
     owned_array<uint32_t> enumerators;
-    for (uint32_t i = 1; i < analysis.entity_table.size(); i++) {
-        const entity &y = analysis.entity_table[entity_index(i)];
-        if (y.kind != entity_kind::enumerator ||
-            record(y.type).kind != type_kind::enumeration ||
-            record(y.type).entity != e)
-            continue;
+    for (entity_index i = first_enumerator[e]; i; i = next_enumerator[i]) {
+        const entity &y = analysis.entity_table[i];
         size_t length = 0;
         const char *text = analysis.identifier_text(y.name, &length);
         enumerators.append(ast_builder_debug_enumerator(
@@ -162,8 +178,7 @@ ast_qualified_type c_lowering::debug_enum_type(entity_index e, token_index at)
         c, name.data(), name.size(), scope.data(), scope.size(), underlying,
         enumerators.data(), static_cast<uint32_t>(enumerators.size()),
         x.scoped);
-    debug_enums.append(e);
-    debug_enum_types.append(made);
+    debug_enums[e] = made;
     return made;
 }
 
@@ -200,6 +215,38 @@ ast_qualified_type c_lowering::debug_type(qualified_type t, token_index at)
     if (made && static_cast<int>(t.cv()) != 0)
         made = ast_builder_type_qualified(c, made, static_cast<int>(t.cv()));
     return made;
+}
+
+/* -g: where the direct virtual bases of the class e are: through its
+   virtual table ([abi:vtable-components]: the offset of the i-th virtual
+   base is 3 + i entries below the address point, virtual_base_address) */
+void c_lowering::debug_virtual_bases(entity_index e, ast_qualified_type made,
+                                     token_index at)
+{
+    if (!ast_builder_debugging(c))
+        return;
+    const entity x = analysis.entity_table[e];
+    owned_array<uint32_t> pairs;
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        const entity b =
+            analysis
+                .entity_table[analysis.class_bases[x.details().first_base + i]];
+        if (!b.virtual_base)
+            continue;
+        const dynamic_class *d = analysis.dynamic_of(e);
+        entity_index base = record(b.type).entity;
+        uint32_t index = 0;
+        while (d && index < d->vbase_entry_count &&
+               analysis.vbase_entries[d->first_vbase_entry + index] != base)
+            index++;
+        if (!d || index == d->vbase_entry_count)
+            continue;
+        pairs.append(type(b.type, at));
+        pairs.append((3 + index) * 8);
+    }
+    if (pairs.size())
+        ast_builder_type_record_debug_virtual_bases(
+            c, made, pairs.data(), static_cast<uint32_t>(pairs.size() / 2));
 }
 
 } // namespace cplusplus::lowering

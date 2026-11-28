@@ -101,6 +101,12 @@ uint32_t ast_builder_debug_enumerator(cc *c, const char *name, size_t length,
    "?" */
 void ast_builder_symbol_debug_scope(cc *c, uint32_t s, const char *scope,
                                     size_t length);
+/* a class's direct virtual bases: count pairs of (the base's struct, the
+   bytes below the virtual table's address point where its offset is) */
+void ast_builder_type_record_debug_virtual_bases(cc *c,
+                                                 ast_qualified_type record,
+                                                 const uint32_t *pairs,
+                                                 uint32_t count);
 /* a class's name with its template arguments, and its namespaces */
 void ast_builder_type_record_debug_name(cc *c, ast_qualified_type record,
                                         const char *name, size_t length,
