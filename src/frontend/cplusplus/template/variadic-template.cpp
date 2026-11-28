@@ -142,8 +142,8 @@ bool semantic_analysis::template_head_list(
 bool semantic_analysis::template_template_parameter(entity_index e) const
 {
     const entity &x = entity_table[e];
-    return x.kind == entity_kind::template_entity && x.instantiation &&
-           function_templates[x.instantiation - 1].is_parameter;
+    return x.kind == entity_kind::template_entity && x.template_record &&
+           function_templates[x.template_record - 1].is_parameter;
 }
 
 /* [temp.param]/18: "If a template-parameter is a type-parameter with an
@@ -160,9 +160,9 @@ semantic_analysis::template_parameter_kind(entity_index t, uint32_t i,
                                            bool &pack,
                                            qualified_type &value_type) const
 {
-    uint32_t index =
-        function_templates[entity_table[t].instantiation - 1].first_parameter +
-        i;
+    uint32_t index = function_templates[entity_table[t].template_record - 1]
+                         .first_parameter +
+                     i;
     pack = template_parameter_is_pack(index);
     entity_index e = template_parameter_entities[index];
     value_type = qualified_type();
@@ -180,12 +180,13 @@ bool semantic_analysis::template_argument_declaration(
 {
     declared = 0;
     entity_index parameter = template_parameter_entities
-        [function_templates[entity_table[t].instantiation - 1].first_parameter +
+        [function_templates[entity_table[t].template_record - 1]
+             .first_parameter +
          i];
     const entity &p = entity_table[parameter];
     const entity &a = entity_table[named];
-    if (p.kind != entity_kind::template_entity || !p.instantiation ||
-        a.kind != entity_kind::template_entity || !a.instantiation)
+    if (p.kind != entity_kind::template_entity || !p.template_record ||
+        a.kind != entity_kind::template_entity || !a.template_record)
         return false;
     uint32_t count = template_parameter_count(parameter);
     bool same = count == template_parameter_count(named);

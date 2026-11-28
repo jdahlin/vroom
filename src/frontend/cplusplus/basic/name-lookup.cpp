@@ -1158,7 +1158,7 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             e != defining_class && !entity_table[e].defined) {
             uint32_t k = entity_table[e].instantiation - 1;
             entity_index t_ent = instantiations[k].template_entity;
-            uint32_t ct = entity_table[t_ent].instantiation;
+            uint32_t ct = entity_table[t_ent].template_record;
             if (ct && !instantiations[k].defining) {
                 entity_index done = e;
                 /* (a copy: instantiate_class may grow template_arguments) */

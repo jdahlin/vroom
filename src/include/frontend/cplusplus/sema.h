@@ -998,11 +998,13 @@ struct entity {
     /* ... and, its underlying type not fixed, the type it promotes to
        ([conv.prom]/4) */
     fundamental_type promoted = fundamental_type::none;
-    /* a function template's specialization ([temp.spec]): its
-       instantiation record (semantic_analysis::instantiations) plus one;
-       a function template (template_entity) or one of its type
-       parameters: its function_template record plus one */
+    /* a specialization ([temp.spec]): its instantiation record
+       (semantic_analysis::instantiations) plus one */
     uint32_t instantiation = 0;
+    /* a template (template_entity) or a template parameter: its
+       function_template record (semantic_analysis::function_templates)
+       plus one */
+    uint32_t template_record = 0;
     /* a function template's specialization, a member function of a class
        template's specialization or such a class: the subject of an
        explicit instantiation ([temp.explicit]/2) declaration (extern) or
@@ -7035,7 +7037,7 @@ class semantic_analysis
     uint32_t template_parameter_name(entity_index t, uint32_t i) const
     {
         const function_template &f =
-            function_templates[entity_table[t].instantiation - 1];
+            function_templates[entity_table[t].template_record - 1];
         return entity_table[template_parameter_entities[f.first_parameter + i]]
             .name;
     }
@@ -7080,7 +7082,7 @@ class semantic_analysis
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
     {
-        return function_templates[entity_table[t].instantiation - 1]
+        return function_templates[entity_table[t].template_record - 1]
             .parameter_count;
     }
     /* the form of template-parameter i of template entity t: a type

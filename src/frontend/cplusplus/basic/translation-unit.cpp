@@ -198,11 +198,7 @@ bool semantic_analysis::unit_local(entity_index e) const
             if (entity_table[declared].linkage_of_name == linkage::internal)
                 return true;
         }
-        /* (a template's, and a template parameter's, instantiation is its
-           function_template record, not an instantiation's; a non-type
-           parameter is of no kind) */
-        if (!x.instantiation || x.kind == entity_kind::template_entity ||
-            x.kind == entity_kind::typedef_name || x.kind == entity_kind::none)
+        if (!x.instantiation)
             continue;
         const instantiation_record &made = instantiations[x.instantiation - 1];
         for (uint32_t i = 0; i < made.argument_count; i++)
@@ -738,7 +734,7 @@ analysis_result semantic_analysis::declare(
                    implicitly instantiated when an object of it is defined */
                 uint32_t k = entity_table[record.entity].instantiation - 1;
                 entity_index t = instantiations[k].template_entity;
-                uint32_t ct = entity_table[t].instantiation;
+                uint32_t ct = entity_table[t].template_record;
                 if (ct && !instantiations[k].defining) {
                     entity_index done = record.entity;
                     /* (a copy: instantiate_class may grow template_arguments) */

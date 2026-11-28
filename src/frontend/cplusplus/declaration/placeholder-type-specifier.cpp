@@ -707,7 +707,7 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
             instantiation_record &rec = instantiations[idx];
             const entity tmpl = entity_table[rec.template_entity];
             const function_template ft =
-                function_templates[tmpl.instantiation - 1];
+                function_templates[tmpl.template_record - 1];
             if (!rec.defined && !rec.defining && ft.definition) {
                 rec.quiet = quiet_member_bodies != 0;
                 if (!instantiation_depth && !rec.wanted_by && !unevaluated &&
