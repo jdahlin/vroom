@@ -504,7 +504,7 @@ semantic_analysis::class_sequence(const expression_meaning &a,
     owned_array<entity_index> constructors;
     /* each one's constructor template (a function_templates index + 1),
        or 0 */
-    owned_array<uint32_t> template_of;
+    owned_array<template_ref> template_of;
     for (entity_index k = entity_table[c1].first_constructor; k;
          k = entity_table[k].next_constructor) {
         constructors.append(k);

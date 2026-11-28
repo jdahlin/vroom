@@ -760,7 +760,7 @@ bool semantic_analysis::class_parameter_of_guide(qualified_type t) const
     const function_template &guide = function_templates[e.template_record];
     if (!guide.implicit_guide)
         return false;
-    return e.value < function_templates[guide.guide_of - 1].parameter_count;
+    return e.value < function_templates[guide.guide_of].parameter_count;
 }
 
 /* [temp.deduct.call]/2-3: the P and A deduce_type compares, for a
@@ -913,14 +913,13 @@ int semantic_analysis::deduce_from_braced_list(
 }
 
 analysis_result semantic_analysis::deduce_from_call(
-    SyntaxRef at, uint32_t function_template,
+    SyntaxRef at, template_ref function_template,
     const expression_meaning *arguments, uint32_t count,
     owned_array<template_argument> &deduced, bool *failed)
 {
     if (failed)
         *failed = false;
-    const struct function_template &ft =
-        function_templates[function_template - 1];
+    const struct function_template &ft = function_templates[function_template];
     qualified_type type = entity_table[ft.entity].type;
     const struct type f = type_table[type.unqualified()];
     const qualified_type *parameters =
@@ -1212,13 +1211,12 @@ analysis_result semantic_analysis::deduce_from_call(
  * failed (when given) is set when deduction fails, as for a call's.
  */
 analysis_result semantic_analysis::deduce_from_function_type(
-    SyntaxRef at, uint32_t function_template, qualified_type target,
+    SyntaxRef at, template_ref function_template, qualified_type target,
     owned_array<template_argument> &deduced, bool &failed,
     const owned_array<template_argument> *explicit_arguments)
 {
     failed = false;
-    const struct function_template &ft =
-        function_templates[function_template - 1];
+    const struct function_template &ft = function_templates[function_template];
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {

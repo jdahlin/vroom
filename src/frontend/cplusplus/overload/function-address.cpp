@@ -296,7 +296,8 @@ analysis_result semantic_analysis::select_for_target(
                                     wanted.function_cv, wanted.function_ref),
                 target.cv());
         }
-        VTRY(r, deduce_from_function_type(at, t, target, arguments, failed));
+        VTRY(r, deduce_from_function_type(at, template_ref::from_number(t),
+                                          target, arguments, failed));
         if (failed)
             continue;
         if (template_index) {
@@ -347,7 +348,7 @@ analysis_result semantic_analysis::template_id_for_target(SyntaxElement e,
     if (depends_on_template_parameter(ft))
         return analysis_result::well_formed;
     token_index at = 0;
-    uint32_t found = 0;
+    template_ref found = 0;
     bool qualified = false;
     owned_array<template_argument> specified;
     size_t uses_before = name_uses.size();
@@ -364,20 +365,20 @@ analysis_result semantic_analysis::template_id_for_target(SyntaxElement e,
     overloaded_written_expansion.clear();
     overloaded_written_at = 0;
     if (!found ||
-        entity_table[function_templates[found - 1].entity].nonstatic_member)
+        entity_table[function_templates[found].entity].nonstatic_member)
         return analysis_result::well_formed;
     /* [namespace.memdef]/3: a friend declaration is not found by an
        unqualified lookup, and an address names no argument for ADL */
-    if (!qualified && function_templates[found - 1].friend_declaration)
+    if (!qualified && function_templates[found].friend_declaration)
         return not_supported_because(id.index(), "namespace.memdef",
                                      "the address of a friend function "
                                      "template by unqualified template-id");
     handled = true;
     owned_array<uint32_t> group;
     if (written_at)
-        function_template_overloads(function_templates[found - 1].name, group);
+        function_template_overloads(function_templates[found].name, group);
     else
-        group.append(found);
+        group.append(found.number());
     for (uint32_t g : group)
         if (entity_table[function_templates[g - 1].entity].nonstatic_member)
             return not_supported_because(
@@ -407,11 +408,11 @@ analysis_result semantic_analysis::template_id_for_target(SyntaxElement e,
         return not_supported_because(
             id.index(), "temp.func.order",
             "a template-id address matching several function templates");
-    uint32_t g = candidates[0].template_index;
+    template_ref g = candidates[0].template_index;
     uint32_t begin = first[0];
     uint32_t count = static_cast<uint32_t>(all.size()) - begin;
     entity_index chosen = 0;
-    VTRY_SET(parts, instantiate(id.index(), function_templates[g - 1].entity,
+    VTRY_SET(parts, instantiate(id.index(), function_templates[g].entity,
                                 all.data() + begin, count, chosen));
     overload_target_token = at;
     overload_target_choice = chosen;
@@ -424,9 +425,8 @@ analysis_result semantic_analysis::template_id_for_target(SyntaxElement e,
     /* (no claim: alone, without the target, a template-id of several
        templates or with arguments left to deduce may name another
        specialization or none) */
-    bool alone =
-        !written_at &&
-        specified.size() == function_templates[found - 1].parameter_count;
+    bool alone = !written_at &&
+                 specified.size() == function_templates[found].parameter_count;
     for (size_t i = expressions_before; !alone && i < expressions.size(); i++)
         expressions[i].placeable = false;
     return parts;

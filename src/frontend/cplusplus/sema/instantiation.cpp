@@ -642,8 +642,8 @@ void semantic_analysis::lambda_error_in_enclosing(SyntaxRef lambda)
  * specialization), which would recurse without the depth growing.
  */
 analysis_result semantic_analysis::specialization_matching_in_progress(
-    SyntaxRef at, uint32_t class_template, const template_argument *arguments,
-    uint32_t count)
+    SyntaxRef at, template_ref class_template,
+    const template_argument *arguments, uint32_t count)
 {
     for (const class_matching &m : class_matchings) {
         if (m.class_template != class_template || m.count != count)
@@ -673,12 +673,14 @@ analysis_result semantic_analysis::specialization_matching_in_progress(
  * functions defined in it are analysed with it (/4 would instantiate a
  * member's definition only when used).
  */
-analysis_result semantic_analysis::instantiate_class(
-    SyntaxRef at, uint32_t class_template, const template_argument *arguments,
-    uint32_t count, entity_index &c, bool named_only)
+analysis_result
+semantic_analysis::instantiate_class(SyntaxRef at, template_ref class_template,
+                                     const template_argument *arguments,
+                                     uint32_t count, entity_index &c,
+                                     bool named_only)
 {
     c = 0;
-    const function_template ft = function_templates[class_template - 1];
+    const function_template ft = function_templates[class_template];
     /* [temp.inst]/2: naming a specialization in a declaration can
        leave it incomplete. For example, a function may return
        optional<ForwardDeclared> before ForwardDeclared is defined. */
@@ -892,10 +894,9 @@ void semantic_analysis::complete_instantiation(entity_index c)
             again.append(a);
         }
         entity_index done = 0;
-        instantiate_class(
-            current_declaration,
-            entity_table[record.template_entity].template_record.number(),
-            again.data(), record.argument_count, done);
+        instantiate_class(current_declaration,
+                          entity_table[record.template_entity].template_record,
+                          again.data(), record.argument_count, done);
         return;
     }
     instantiations[index].lazy = false;
@@ -1663,7 +1664,8 @@ bool semantic_analysis::specialization_dependent_value(entity_index e,
 bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
                                                  qualified_type &type) const
 {
-    for (uint32_t k = template_record(t); k; k = templates_by_entity.after(k)) {
+    for (uint32_t k = template_record(t).number(); k;
+         k = templates_by_entity.after(k)) {
         const function_template &ft = function_templates[k - 1];
         if (i >= ft.parameter_count)
             continue;
@@ -1686,7 +1688,8 @@ bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
 SyntaxRef semantic_analysis::parameter_type_constraint(entity_index t,
                                                        uint32_t i) const
 {
-    for (uint32_t k = template_record(t); k; k = templates_by_entity.after(k)) {
+    for (uint32_t k = template_record(t).number(); k;
+         k = templates_by_entity.after(k)) {
         const function_template &ft = function_templates[k - 1];
         if (i >= ft.parameter_count)
             continue;

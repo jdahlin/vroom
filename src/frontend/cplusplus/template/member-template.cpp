@@ -541,7 +541,7 @@ analysis_result semantic_analysis::member_template_call(
         /* [temp.inst]/4: the specialization chosen is referenced: its
            definition is instantiated (a candidate's declaration only was) */
         const struct function_template ft =
-            function_templates[k.template_index - 1];
+            function_templates[k.template_index];
         VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
                                 ft.parameter_count, f));
     }

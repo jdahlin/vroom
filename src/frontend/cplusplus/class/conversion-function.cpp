@@ -492,8 +492,8 @@ bool semantic_analysis::deduce_conversion_templates(
                 continue;
             }
             defaulting_conversions.append(key);
-            analysis_result dr =
-                default_template_arguments(current_declaration, g, values, set);
+            analysis_result dr = default_template_arguments(
+                current_declaration, template_ref::from_number(g), values, set);
             defaulting_conversions.resize(defaulting_conversions.size() - 1);
             if (dr != analysis_result::well_formed) {
                 unevaluated--;

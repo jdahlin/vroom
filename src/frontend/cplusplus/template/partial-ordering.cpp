@@ -197,13 +197,13 @@ bool semantic_analysis::orderable(qualified_type t, bool packs,
  * F's transformed types (/2), together, so that one parameter of G has one
  * value.
  */
-bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
+bool semantic_analysis::at_least_as_specialized(template_ref f, template_ref g,
                                                 size_t arguments, bool &unknown,
                                                 bool f_reversed,
                                                 bool g_reversed)
 {
-    const function_template ff = function_templates[f - 1];
-    const function_template gg = function_templates[g - 1];
+    const function_template ff = function_templates[f];
+    const function_template gg = function_templates[g];
     qualified_type ftype = entity_table[ff.entity].type;
     qualified_type gtype = entity_table[gg.entity].type;
     const struct type fr = type_table[ftype.unqualified()];
@@ -441,9 +441,10 @@ int semantic_analysis::conversion_template_order(entity_index t1,
 
 /* whether function template t's parameter i is a template parameter, by
    value or by reference */
-bool semantic_analysis::template_parameter_alone(uint32_t t, uint32_t i) const
+bool semantic_analysis::template_parameter_alone(template_ref t,
+                                                 uint32_t i) const
 {
-    qualified_type type = entity_table[function_templates[t - 1].entity].type;
+    qualified_type type = entity_table[function_templates[t].entity].type;
     const struct type &r = type_table[type.unqualified()];
     if (r.kind != type_kind::function || i >= r.parameter_count)
         return false;
@@ -453,7 +454,7 @@ bool semantic_analysis::template_parameter_alone(uint32_t t, uint32_t i) const
     return type_table[p.unqualified()].kind == type_kind::template_parameter;
 }
 
-int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
+int semantic_analysis::function_template_order(template_ref f, template_ref g,
                                                size_t arguments, bool &unknown,
                                                bool f_reversed, bool g_reversed)
 {
@@ -463,9 +464,9 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
     bool packs_taken = false;
     /* the kinds of non-type parameter in the types: plain auto 1, other 2 */
     unsigned value_kinds = 0;
-    const uint32_t both[2] = {f, g};
-    for (uint32_t x : both) {
-        const function_template t = function_templates[x - 1];
+    const template_ref both[2] = {f, g};
+    for (template_ref x : both) {
+        const function_template t = function_templates[x];
         /* [temp.deduct.partial]/12: a parameter no function parameter's
            type uses takes no part; where none of the types depends on a
            parameter (a constructor of a class specialization, templated by
@@ -510,7 +511,7 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
                    the other's parameter is a template parameter alone, it
                    is deduced from anything, and nothing of this one is
                    deduced from that parameter's unique type) */
-                uint32_t other = f;
+                template_ref other = f;
                 if (x == f)
                     other = g;
                 if (f_reversed || g_reversed ||
@@ -545,9 +546,8 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
        F does not have a corresponding parameter, and if F does not have a
        trailing function parameter pack, then F is more specialized than
        G." */
-    auto trailing_pack = [&](uint32_t x, uint32_t &position) {
-        qualified_type type =
-            entity_table[function_templates[x - 1].entity].type;
+    auto trailing_pack = [&](template_ref x, uint32_t &position) {
+        qualified_type type = entity_table[function_templates[x].entity].type;
         const struct type r = type_table[type.unqualified()];
         const qualified_type *list = type_table.parameters(type.unqualified());
         position = r.parameter_count;
@@ -571,11 +571,11 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
        constraints ([temp.constr.order]/1.2's subsumption of two sets of
        constraints is not analysed) */
     if (fcount != gcount || fpack != gpack ||
-        function_templates[f - 1].parameter_count !=
-            function_templates[g - 1].parameter_count)
+        function_templates[f].parameter_count !=
+            function_templates[g].parameter_count)
         return 0;
-    bool fc = template_head_constrained(function_templates[f - 1].declaration);
-    bool gc = template_head_constrained(function_templates[g - 1].declaration);
+    bool fc = template_head_constrained(function_templates[f].declaration);
+    bool gc = template_head_constrained(function_templates[g].declaration);
     if (fc && gc)
         return constraint_subsumption_order(f, g);
     return static_cast<int>(fc) - static_cast<int>(gc);
@@ -588,15 +588,15 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
  * type-constraint or a requires-clause) or an opaque atom.  Template a
  * subsumes template b when every atom of b appears in a.
  */
-int semantic_analysis::constraint_subsumption_order(uint32_t f,
-                                                    uint32_t g) const
+int semantic_analysis::constraint_subsumption_order(template_ref f,
+                                                    template_ref g) const
 {
     struct atom {
         entity_index concept_entity = 0;
         uint32_t param_index = UINT32_MAX;
     };
-    auto collect_atoms = [&](uint32_t tmpl, owned_array<atom> &out) {
-        const function_template &ft = function_templates[tmpl - 1];
+    auto collect_atoms = [&](template_ref tmpl, owned_array<atom> &out) {
+        const function_template &ft = function_templates[tmpl];
         entity_index scope = entity_table[ft.entity].enclosing;
         for (uint32_t i = 0; i < ft.parameter_count; i++) {
             template_parameter_parts parts;

@@ -138,11 +138,11 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     /* the definition of a class template declared before
        (class_template_declaration): its record, defined now */
     entity_index prior = entity_table.find(outer, name);
-    uint32_t declared = class_template_of(prior);
-    if (prior && declared && function_templates[declared - 1].name == prior &&
-        !function_templates[declared - 1].definition &&
-        !function_templates[declared - 1].primary) {
-        const function_template d = function_templates[declared - 1];
+    template_ref declared = class_template_of(prior);
+    if (prior && declared && function_templates[declared].name == prior &&
+        !function_templates[declared].definition &&
+        !function_templates[declared].primary) {
+        const function_template d = function_templates[declared];
         /* [temp.over.link]/6: the same template-head, its requires-clause
            equivalent (/7) */
         if (entity_table[d.entity].enclosing != outer ||
@@ -172,8 +172,8 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
             if (entity_table[template_parameter_entities[first + i]].kind !=
                 entity_kind::template_entity)
                 entity_table[template_parameter_entities[first + i]]
-                    .template_record = template_ref::from_number(declared);
-        function_template &record = function_templates[declared - 1];
+                    .template_record = declared;
+        function_template &record = function_templates[declared];
         record.declaration = n;
         record.definition = specifier;
         record.first_parameter = first;
@@ -250,9 +250,9 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         if (name_at > elaborated[0].token() + 1)
             if (entity_index held =
                     entity_table.find(outer, tokens.identifier(name_at)))
-                if (uint32_t ct = class_template_of(held))
+                if (template_ref ct = class_template_of(held))
                     preferred_names_valid = note_preferred_names(
-                        function_templates[ct - 1].entity,
+                        function_templates[ct].entity,
                         elaborated[0].token() + 1, name_at);
     }
     if (elaborated.size() == 2 && elaborated[0].is_token() &&
@@ -346,13 +346,13 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         /* a redeclaration of the template, with no default
            template-argument (/12 forbids one given twice; merging is
            not analysed) */
-        uint32_t ct = class_template_of(held);
-        if (!ct || function_templates[ct - 1].name != held ||
-            function_templates[ct - 1].primary)
+        template_ref ct = class_template_of(held);
+        if (!ct || function_templates[ct].name != held ||
+            function_templates[ct].primary)
             return not_supported_because(n, "temp.class",
                                          "a class template declaration of a "
                                          "name declared as something else");
-        const function_template d = function_templates[ct - 1];
+        const function_template d = function_templates[ct];
         if (entity_table[d.entity].enclosing != outer ||
             d.parameter_count != parameters.size() ||
             !same_template_parameters(first, d.first_parameter,
@@ -367,7 +367,7 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
                                              "a default template argument in a "
                                              "class template redeclaration");
         if (alignment_declared)
-            function_templates[ct - 1].alignas_declared = true;
+            function_templates[ct].alignas_declared = true;
         entity_table.add_declaration(d.entity, n);
         return analysis_result::well_formed;
     }

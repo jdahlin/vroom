@@ -568,11 +568,11 @@ semantic_analysis::function_template_definition(SyntaxRef n,
  * are [over.over]'s.
  */
 analysis_result
-semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
+semantic_analysis::function_template_id_value(SyntaxRef n, template_ref ft,
                                               expression_meaning &m)
 {
     token_index name = 0;
-    uint32_t found = 0;
+    template_ref found = 0;
     bool qualified = false;
     owned_array<template_argument> specified;
     VTRY(parts, template_callee_parts(n, name, found, specified, qualified));
@@ -596,7 +596,7 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
             n, "over.over",
             "a function template-id naming no single specialization here");
     }
-    if (specified.size() != function_templates[ft - 1].parameter_count)
+    if (specified.size() != function_templates[ft].parameter_count)
         return not_supported_because(
             n, "over.over",
             "a template-id with not all template arguments in a value use");
@@ -607,7 +607,7 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
                 n, "temp.dep",
                 "a function template-id with dependent or pack arguments");
     entity_index e = 0;
-    VTRY(r, instantiate(n, function_templates[ft - 1].entity, specified.data(),
+    VTRY(r, instantiate(n, function_templates[ft].entity, specified.data(),
                         static_cast<uint32_t>(specified.size()), e));
     size_t uses_before = name_uses.size();
     analysis_result named = named_entity(name, e, m);

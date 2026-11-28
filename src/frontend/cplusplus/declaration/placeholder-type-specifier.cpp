@@ -484,7 +484,7 @@ semantic_analysis::deduce_initializer_list(SyntaxElement braced, entity_index e,
             return analysis_result::well_formed;
         element = decayed;
     }
-    uint32_t list_template = 0;
+    template_ref list_template = 0;
     VTRY(found, std_class_template(current_declaration, "initializer_list",
                                    list_template));
     if (!list_template)

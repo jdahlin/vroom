@@ -673,10 +673,8 @@ analysis_result semantic_analysis::best_viable_function(
            deduct]) and F2 is not": a deduction-guide a program declares is
            better than an implicit one of a constructor */
         if (x.template_index && y.template_index) {
-            const function_template &fx =
-                function_templates[x.template_index - 1];
-            const function_template &fy =
-                function_templates[y.template_index - 1];
+            const function_template &fx = function_templates[x.template_index];
+            const function_template &fy = function_templates[y.template_index];
             if (fx.guide_of && !fx.implicit_guide && fy.guide_of &&
                 fy.implicit_guide)
                 return true;
@@ -824,9 +822,9 @@ analysis_result semantic_analysis::best_viable_function(
             entity_table[x.function].enclosing !=
                 entity_table[y.function].enclosing)
             return false;
-        const uint32_t both[2] = {x.template_index, y.template_index};
-        for (uint32_t t : both) {
-            SyntaxRef d = function_templates[t - 1].declaration;
+        const template_ref both[2] = {x.template_index, y.template_index};
+        for (template_ref t : both) {
+            SyntaxRef d = function_templates[t].declaration;
             if (template_head_constrained(d) || trailing_constraint(d) ||
                 uses_decltype(d))
                 return false;

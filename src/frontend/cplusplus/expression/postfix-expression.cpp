@@ -456,7 +456,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
     /* [dcl.type.simple]/1: nested-name-specifier(opt) type-name */
     entity_index class_named = 0;
     uint32_t named_cv = 0;
-    uint32_t deduced_ct = 0;
+    template_ref deduced_ct = 0;
     if ((parenthesized || braced) &&
         n[0].is(syntax_kind::simple_type_specifier) && n[0].size() == 2 &&
         n[0][0].is(syntax_kind::nested_name_specifier) && n[0][1].is_token() &&
@@ -633,7 +633,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         /* [dcl.type.class.deduct]/1: a template-name of a class template
            alone is a placeholder for a deduced class type, which
            [expr.type.conv]/1 allows as the simple-type-specifier */
-        uint32_t ct = deduced_ct;
+        template_ref ct = deduced_ct;
         if (!ct) {
             lookup_result x = lookup_unqualified(
                 tokens.identifier(n[0].token()), lookup_filter::any);
@@ -982,14 +982,13 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
  * itself is not told, but for a constructor template whose own parameter
  * stands for the class's first, which has no default.
  */
-bool semantic_analysis::copy_candidate_wins(uint32_t ct)
+bool semantic_analysis::copy_candidate_wins(template_ref ct)
 {
-    entity_index primary = function_templates[ct - 1].entity;
+    entity_index primary = function_templates[ct].entity;
     template_parameter_parts form;
-    if (!function_templates[ct - 1].parameter_count ||
+    if (!function_templates[ct].parameter_count ||
         !template_parameter_form(
-            template_parameter_nodes[function_templates[ct - 1]
-                                         .first_parameter],
+            template_parameter_nodes[function_templates[ct].first_parameter],
             form) ||
         form.has_default)
         return false;
@@ -1018,7 +1017,7 @@ bool semantic_analysis::copy_candidate_wins(uint32_t ct)
                    parameter than the class's first leaves that one
                    undeduced ([temp.deduct.type]): not viable */
                 const instantiation_record &spec = instantiations[i - 1];
-                uint32_t own = function_templates[ct - 1].parameter_count;
+                uint32_t own = function_templates[ct].parameter_count;
                 bool undeduced = false;
                 for (uint32_t j = own;
                      spec.argument_count && j < g.parameter_count; j++)
@@ -1058,7 +1057,7 @@ bool semantic_analysis::copy_candidate_wins(uint32_t ct)
  * arguments are the initializer's expression-list or braced elements
  * (no braced-init-list element, no pack expansion).
  */
-analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
+analysis_result semantic_analysis::deduced_class(SyntaxRef n, template_ref ct,
                                                  entity_index &c)
 {
     c = 0;
@@ -1207,7 +1206,7 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             if (parts.form == InitializerParts::syntax_form::equals &&
                 candidates[chosen].template_index) {
                 const function_template &guide =
-                    function_templates[candidates[chosen].template_index - 1];
+                    function_templates[candidates[chosen].template_index];
                 if (guide.explicit_guide)
                     return not_supported_because(
                         n, "over.match.class.deduct",
@@ -1236,7 +1235,7 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
     }
     /* [over.match.class.deduct]/1.1: implicit deduction guides synthesized
        from the primary class template's non-template constructors */
-    const function_template ct_rec = function_templates[ct - 1];
+    const function_template ct_rec = function_templates[ct];
     if (ct_rec.definition &&
         ct_rec.definition.is(syntax_kind::class_specifier)) {
         entity_index outer_scope = entity_table[ct_rec.entity].enclosing;
@@ -1509,7 +1508,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
            are generated using template argument deduction"; the name is a
            function template's alone */
         token_index name = 0;
-        uint32_t ft = 0;
+        template_ref ft = 0;
         bool qualified = false;
         owned_array<template_argument> specified;
         /* [class.mfct.non-static]/2: a member function template's name
@@ -1740,7 +1739,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             if (!held.empty()) {
                 /* (the other templates and non-template functions ADL found
                    join the first's, the candidates of template_call) */
-                uint32_t found_template = function_template_of(held[0]);
+                template_ref found_template = function_template_of(held[0]);
                 if (!found_template)
                     return not_supported_because(
                         n, "basic.lookup.argdep",
@@ -1998,7 +1997,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
  * against the specialization: not analysed.
  */
 analysis_result semantic_analysis::template_callee(
-    SyntaxElement callee, token_index &name, uint32_t &function_template,
+    SyntaxElement callee, token_index &name, template_ref &function_template,
     owned_array<template_argument> &specified, bool &qualified)
 {
     name = 0;
@@ -2161,7 +2160,7 @@ semantic_analysis::written_arguments_of(SyntaxElement id,
 }
 
 analysis_result semantic_analysis::template_callee_parts(
-    SyntaxElement callee, token_index &name, uint32_t &function_template,
+    SyntaxElement callee, token_index &name, template_ref &function_template,
     owned_array<template_argument> &specified, bool &qualified)
 {
     SyntaxElement id = callee;
@@ -2212,14 +2211,14 @@ analysis_result semantic_analysis::template_callee_parts(
     if (!qualified && !function_template && x.unknown_entity) {
         entity_index of = entity_table[x.unknown_entity].enclosing;
         if (of && entity_table[of].kind == entity_kind::class_type) {
-            uint32_t found = function_template_of(x.unknown_entity, true);
-            if (found && !entity_table[function_templates[found - 1].entity]
+            template_ref found = function_template_of(x.unknown_entity, true);
+            if (found && !entity_table[function_templates[found].entity]
                               .nonstatic_member)
                 function_template = found;
         }
     }
     if (member && function_template &&
-        entity_table[function_templates[function_template - 1].entity]
+        entity_table[function_templates[function_template].entity]
             .nonstatic_member)
         /* [class.mfct.non-static]/3: C::f(args) names a non-static member
            function, called on (*this) (or an error outside one) */
@@ -2241,8 +2240,8 @@ analysis_result semantic_analysis::template_callee_parts(
            ([temp.over]/1's "checking of any explicit template
            arguments"): not analysed */
         owned_array<uint32_t> group;
-        function_template_overloads(
-            function_templates[function_template - 1].name, group);
+        function_template_overloads(function_templates[function_template].name,
+                                    group);
         if (group.size() > 1) {
             overloaded_written.clear();
             overloaded_written_expansion.clear();
@@ -2332,10 +2331,10 @@ bool semantic_analysis::undo_substitution(const substitution_mark &m)
 /* [temp.arg.explicit]/9: the template parameter explicit template
    argument i of function template ft is for, those from a trailing
    pack's position on that pack's; UINT32_MAX for one too many (/6) */
-uint32_t semantic_analysis::explicit_argument_position(uint32_t ft,
+uint32_t semantic_analysis::explicit_argument_position(template_ref ft,
                                                        uint32_t i) const
 {
-    const function_template &f = function_templates[ft - 1];
+    const function_template &f = function_templates[ft];
     /* the first template parameter pack, wherever it is: explicit arguments from
        its position on are its elements */
     for (uint32_t k = 0; k < f.parameter_count; k++)
@@ -2370,7 +2369,8 @@ analysis_result semantic_analysis::template_candidates(
     const owned_array<bool> *written_expansion,
     const qualified_type *target_function)
 {
-    for (uint32_t g : group) {
+    for (uint32_t number : group) {
+        const template_ref g = template_ref::from_number(number);
         /* the explicit template arguments ([temp.arg.explicit]), if given */
         owned_array<template_argument> d;
         if (specified)
@@ -2417,7 +2417,7 @@ analysis_result semantic_analysis::template_candidates(
                         break;
                     }
                     entity_index p = template_parameter_entities
-                        [function_templates[g - 1].first_parameter + position];
+                        [function_templates[g].first_parameter + position];
                     bool type_parameter =
                         entity_table[p].kind == entity_kind::typedef_name;
                     if (entity_table[p].kind != entity_kind::template_entity &&
@@ -2452,7 +2452,7 @@ analysis_result semantic_analysis::template_candidates(
             }
         }
         entity_index e = 0;
-        const struct function_template ft = function_templates[g - 1];
+        const struct function_template ft = function_templates[g];
         if (r == analysis_result::well_formed && !failed) {
             scoped_value<bool> collecting(collecting_candidates,
                                           !target_function);
@@ -2530,7 +2530,7 @@ semantic_analysis::braced_deduction_elements(SyntaxElement list,
 }
 
 analysis_result semantic_analysis::template_call(
-    SyntaxRef n, token_index name, uint32_t function_template,
+    SyntaxRef n, token_index name, template_ref function_template,
     owned_array<template_argument> &specified, bool qualified,
     const owned_array<SyntaxElement> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &f)
@@ -2604,9 +2604,9 @@ analysis_result semantic_analysis::template_call(
     owned_array<entity_index> others;
     owned_array<entity_index> adl_templates;
     if (!qualified &&
-        (!argument_dependent_lookup(
-            tokens.identifier(name), types, others,
-            function_templates[function_template - 1].name, &adl_templates)))
+        (!argument_dependent_lookup(tokens.identifier(name), types, others,
+                                    function_templates[function_template].name,
+                                    &adl_templates)))
         return not_supported_because(
             n, "basic.lookup.argdep",
             "argument-dependent lookup for a template call that failed");
@@ -2615,7 +2615,7 @@ analysis_result semantic_analysis::template_call(
     if (!early.empty())
         meanings = &early[0];
     owned_array<uint32_t> group;
-    function_template_overloads(function_templates[function_template - 1].name,
+    function_template_overloads(function_templates[function_template].name,
                                 group);
     for (entity_index held : adl_templates) {
         owned_array<uint32_t> extra;
@@ -2680,7 +2680,7 @@ analysis_result semantic_analysis::template_call(
         }
     }
     if (!template_id)
-        inline_set_functions(function_templates[function_template - 1].name,
+        inline_set_functions(function_templates[function_template].name,
                              functions);
     /* [basic.lookup.argdep]/4: the lookup in an associated namespace takes
        "(possibly overloaded) functions and function templates": the
@@ -2714,7 +2714,7 @@ analysis_result semantic_analysis::template_call(
         return ill_formed_at_token(name, "use of an undeclared identifier",
                                    "basic.lookup.unqual");
     if (!group.empty())
-        function_template = group[0];
+        function_template = template_ref::from_number(group[0]);
     if (group.size() > 1 || !functions.empty()) {
         /* [temp.over]/1: template_candidates */
         owned_array<overload_candidate> candidates;
@@ -2760,16 +2760,16 @@ analysis_result semantic_analysis::template_call(
             return r;
         }
         const struct function_template ft =
-            function_templates[candidates[chosen].template_index - 1];
+            function_templates[candidates[chosen].template_index];
         VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
                                 ft.parameter_count, specialization));
     } else {
         VTRY(r, deduce_from_call(n, function_template, meanings,
                                  static_cast<uint32_t>(early.size()), deduced));
-        VTRY_SET(
-            r, instantiate(n, function_templates[function_template - 1].entity,
-                           &deduced[0], static_cast<uint32_t>(deduced.size()),
-                           specialization));
+        VTRY_SET(r,
+                 instantiate(n, function_templates[function_template].entity,
+                             &deduced[0], static_cast<uint32_t>(deduced.size()),
+                             specialization));
     }
     analysis_result r = analysis_result::well_formed;
     /* no claim is made about the name, whose declaration clang finds is

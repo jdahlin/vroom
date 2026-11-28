@@ -162,7 +162,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             entity_index named = 0;
             template_id_name(id, x, named);
             const function_template &primary =
-                function_templates[variable_template_of(named) - 1];
+                function_templates[variable_template_of(named)];
             bool internal = false;
             if (primary.declarator &&
                 primary.declarator[0].is(syntax_kind::decl_specifier_seq))
@@ -771,7 +771,7 @@ semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
     } else {
         template_id_name(id, x, named);
     }
-    uint32_t vt = variable_template_of(named);
+    template_ref vt = variable_template_of(named);
     owned_array<template_argument> arguments;
     declaring_specializations++;
     analysis_result r;
@@ -788,7 +788,7 @@ semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
             return not_supported_because(
                 n, "temp.expl.spec",
                 "a variable specialization with pack or dependent arguments");
-    const function_template ft = function_templates[vt - 1];
+    const function_template ft = function_templates[vt];
     uint32_t count = static_cast<uint32_t>(arguments.size());
     if (count != ft.parameter_count ||
         find_instantiation(ft.entity, arguments.data(), count))
@@ -827,7 +827,7 @@ analysis_result semantic_analysis::variable_explicit_instantiation(
     lookup_result x;
     entity_index named = 0;
     template_id_name(id, x, named);
-    uint32_t vt = variable_template_of(named);
+    template_ref vt = variable_template_of(named);
     owned_array<template_argument> arguments;
     VTRY(r, template_id_arguments(id, vt, arguments));
     if (dependent_arguments(arguments))
@@ -852,7 +852,7 @@ analysis_result semantic_analysis::variable_explicit_instantiation(
     /* (the type repeated; not a second explicit instantiation, a template
        with internal linkage or one outside the enclosing namespaces, which
        clang reports: not yet) [impl.clang] */
-    const function_template &primary = function_templates[vt - 1];
+    const function_template &primary = function_templates[vt];
     bool internal = false;
     if (primary.declarator &&
         primary.declarator[0].is(syntax_kind::decl_specifier_seq))
@@ -1040,7 +1040,7 @@ analysis_result semantic_analysis::named_specialization(
             n, rule, "an explicit instantiation with inline or constexpr");
     /* the template and the arguments given */
     token_index name = 0;
-    uint32_t ft = 0;
+    template_ref ft = 0;
     owned_array<template_argument> values;
     bool qualified = false;
     entity_index owner_scope = current_scope;
@@ -1098,7 +1098,7 @@ analysis_result semantic_analysis::named_specialization(
         /* [temp.func.order]/1.4: which of the name's templates the
            declaration refers to is partial ordering's: not analysed */
         owned_array<uint32_t> group;
-        function_template_overloads(function_templates[ft - 1].name, group);
+        function_template_overloads(function_templates[ft].name, group);
         if (group.size() > 1) {
             /* [temp.deduct.decl]/1: without template arguments given, the
                templates whose deduction from the declared type succeeds;
@@ -1152,8 +1152,8 @@ analysis_result semantic_analysis::named_specialization(
                     if (!completable)
                         continue;
                     size_t uses = name_uses.size();
-                    analysis_result w =
-                        template_id_arguments(m.template_id, g, trial);
+                    analysis_result w = template_id_arguments(
+                        m.template_id, template_ref::from_number(g), trial);
                     name_uses.resize(uses);
                     if (w != analysis_result::well_formed ||
                         trial.size() > c.parameter_count)
@@ -1179,14 +1179,14 @@ analysis_result semantic_analysis::named_specialization(
                 return not_supported_because(
                     n, rule,
                     "overloaded function templates (partial ordering)");
-            ft = chosen;
+            ft = template_ref::from_number(chosen);
             if (m.template_id && m.template_id.size() > 3) {
                 values.clear();
                 VTRY(ar, template_id_arguments(m.template_id, ft, values));
             }
         }
     }
-    const function_template f = function_templates[ft - 1];
+    const function_template f = function_templates[ft];
     const entity t = entity_table[f.entity];
     /* [temp.arg]/1: the arguments written from a trailing template
        parameter pack's position on are its elements (f<int, float> of
@@ -1361,7 +1361,7 @@ analysis_result semantic_analysis::class_explicit_instantiation(
         return not_supported_because(
             n, "temp.explicit",
             "a class instantiation whose template-id is not resolved");
-    uint32_t ct = class_template_of(named);
+    template_ref ct = class_template_of(named);
     if (!ct) {
         analysis_result refused = not_supported(n, "temp.explicit");
         if (SyntaxElement template_name =
@@ -1371,11 +1371,11 @@ analysis_result semantic_analysis::class_explicit_instantiation(
     }
     /* (a qualified name found the template in the nominated scope) */
     if (!qualifier &&
-        !declared_in_scope_of(function_templates[ct - 1].entity, current_scope))
+        !declared_in_scope_of(function_templates[ct].entity, current_scope))
         return not_supported_because(
             n, "temp.explicit",
             "a class template instantiation from another scope");
-    entity_index t = function_templates[ct - 1].entity;
+    entity_index t = function_templates[ct].entity;
     /* whether the specialization was named before (/11: a declaration
        after an implicit instantiation is left to clang) */
     size_t uses_before = name_uses.size();

@@ -29,12 +29,12 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
         /* a redeclaration of the same tokens (libc++'s __swap_result_t in
            two headers), [ext.clang] as clang accepts it; [temp.alias] has no
            rule for one that differs */
-        uint32_t same = alias_template_of(prior);
-        if (!same || !same_tokens(function_templates[same - 1].declaration, n))
+        template_ref same = alias_template_of(prior);
+        if (!same || !same_tokens(function_templates[same].declaration, n))
             return not_supported_because(
                 n, "temp.alias",
                 "a redeclaration of a name as a different alias template");
-        entity_table.add_declaration(function_templates[same - 1].entity, n);
+        entity_table.add_declaration(function_templates[same].entity, n);
         return analysis_result::well_formed;
     }
     uint32_t index = 0, first = 0;
@@ -91,7 +91,7 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
  * sees through).
  */
 analysis_result semantic_analysis::alias_template_type(SyntaxRef id,
-                                                       uint32_t at,
+                                                       template_ref at,
                                                        type_index &type,
                                                        uint32_t *cv)
 {
@@ -100,13 +100,14 @@ analysis_result semantic_analysis::alias_template_type(SyntaxRef id,
     return alias_template_specialization(id, at, arguments, type, cv);
 }
 
-/* the type alias template function_templates[at - 1] denotes with
+/* the type alias template function_templates[at] denotes with
    arguments (one per parameter, a pack's as one) */
 analysis_result semantic_analysis::alias_template_specialization(
-    SyntaxRef id, uint32_t at, const owned_array<template_argument> &arguments,
-    type_index &type, uint32_t *cv)
+    SyntaxRef id, template_ref at,
+    const owned_array<template_argument> &arguments, type_index &type,
+    uint32_t *cv)
 {
-    const function_template ft = function_templates[at - 1];
+    const function_template ft = function_templates[at];
     analysis_result r = analysis_result::well_formed;
     /* an enclosing template's own pack expanded into the alias's pack
        (Numbers... unbound): its elements are not known.  Forwarded whole

@@ -733,7 +733,7 @@ analysis_result semantic_analysis::declare(
                    implicitly instantiated when an object of it is defined */
                 uint32_t k = entity_table[record.entity].instantiation.index();
                 entity_index t = instantiations[k].template_entity;
-                uint32_t ct = entity_table[t].template_record.number();
+                template_ref ct = entity_table[t].template_record;
                 if (ct && !instantiations[k].defining) {
                     entity_index done = record.entity;
                     /* (a copy: instantiate_class may grow template_arguments) */

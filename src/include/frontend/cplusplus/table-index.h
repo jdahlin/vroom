@@ -148,6 +148,12 @@ template <typename Tag> class record_ref
     uint32_t value = 0;
 };
 
+/* a chain's key (record_chains) */
+template <typename Tag> constexpr size_t table_slot(record_ref<Tag> r)
+{
+    return r.number();
+}
+
 using template_ref = record_ref<struct function_template_tag>;
 using instantiation_ref = record_ref<struct instantiation_tag>;
 

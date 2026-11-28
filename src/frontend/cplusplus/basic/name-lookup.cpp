@@ -1158,7 +1158,7 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             e != defining_class && !entity_table[e].defined) {
             uint32_t k = entity_table[e].instantiation.index();
             entity_index t_ent = instantiations[k].template_entity;
-            uint32_t ct = entity_table[t_ent].template_record.number();
+            template_ref ct = entity_table[t_ent].template_record;
             if (ct && !instantiations[k].defining) {
                 entity_index done = e;
                 /* (a copy: instantiate_class may grow template_arguments) */
@@ -1240,10 +1240,10 @@ bool semantic_analysis::undefined_specialization(entity_index c) const
     const instantiation_record &record = instantiations[x.instantiation];
     if (record.defining || record.lazy || record.has_failure || record.pattern)
         return false;
-    uint32_t t = class_template_of(c);
+    template_ref t = class_template_of(c);
     if (!t)
         return false;
-    return !function_templates[t - 1].definition;
+    return !function_templates[t].definition;
 }
 
 } // namespace cplusplus

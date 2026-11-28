@@ -2526,15 +2526,17 @@ class semantic_analysis
     analysis_result deduction_guide_type(SyntaxRef guide, qualified_type &type);
     /* [over.match.class.deduct]/1.1: the implicit guides of the class
        template ct made from its constructors (once) */
-    void implicit_deduction_guides(uint32_t ct);
-    bool copy_candidate_wins(uint32_t ct);
-    analysis_result implicit_guide_member(uint32_t ct, SyntaxElement member);
+    void implicit_deduction_guides(template_ref ct);
+    bool copy_candidate_wins(template_ref ct);
+    analysis_result implicit_guide_member(template_ref ct,
+                                          SyntaxElement member);
     /* [over.match.class.deduct]/1, [dcl.type.class.deduct]/2: the class
        template specialization the placeholder for a deduced class type
        (the class template whose function_templates' index plus one is
        ct) names when initialized from the arguments of n, a postfix
        expression C(arguments) or C{arguments} */
-    analysis_result deduced_class(SyntaxRef n, uint32_t ct, entity_index &c);
+    analysis_result deduced_class(SyntaxRef n, template_ref ct,
+                                  entity_index &c);
     analysis_result simple_declaration(SyntaxRef n);
     analysis_result function_definition(FunctionDefinition definition);
     /* [dcl.link]: extern "C" or extern "C++", and the declarations in it */
@@ -3192,7 +3194,7 @@ class semantic_analysis
        template-parameters (bound in c) */
     bool dependent_base_specifier(entity_index c, SyntaxElement name) const;
     uint32_t own_pack_parameter(uint32_t name) const;
-    uint32_t explicit_argument_position(uint32_t ft, uint32_t i) const;
+    uint32_t explicit_argument_position(template_ref ft, uint32_t i) const;
     analysis_result base_class_name(SyntaxElement name, SyntaxRef n,
                                     entity_index &base, token_index &id);
     bool in_dependent_base_only(entity_index c, uint32_t name,
@@ -5169,7 +5171,7 @@ class semantic_analysis
     /* whether this names an object here: the function's own, or the
        enclosing function's of a lambda */
     bool has_this_object();
-    uint32_t member_function_template_of(entity_index held) const
+    template_ref member_function_template_of(entity_index held) const
     {
         return function_template_of(held, true);
     }
@@ -5850,13 +5852,14 @@ class semantic_analysis
            arguments its template-id gives
            (template_arguments[first_pattern .. + pattern_count), in terms
            of its own parameters) */
-        uint32_t primary = 0, first_pattern = 0, pattern_count = 0;
+        template_ref primary;
+        uint32_t first_pattern = 0, pattern_count = 0;
         /* a deduction guide ([temp.deduct.guide]/1) of a template-head: the
            class template it names (function_templates' index plus one);
            its declarator is the deduction-guide, its function type the
            guide's parameters returning the class template's
            specialization it names */
-        uint32_t guide_of = 0;
+        template_ref guide_of;
         /* an implicit deduction guide ([over.match.class.deduct]/1.1) made
            from a constructor of the class template: its declarator is the
            constructor's parameters-and-qualifiers; explicit_guide: the
@@ -6097,15 +6100,16 @@ class semantic_analysis
     token_index lookup_horizon = 0;
     /* the function template (member: member function template) whose name
        the held entity is, plus one */
-    uint32_t function_template_of(entity_index held, bool member = false) const;
+    template_ref function_template_of(entity_index held,
+                                      bool member = false) const;
     /* the class template the entity names (its held name, or one of its
        specializations as its injected-class-name), plus one */
-    uint32_t class_template_of(entity_index e) const;
+    template_ref class_template_of(entity_index e) const;
     bool undefined_specialization(entity_index c) const;
     /* the alias template the held name e is, plus one */
-    uint32_t alias_template_of(entity_index e) const;
-    uint32_t template_of_form(entity_index e,
-                              bool function_template::*form) const;
+    template_ref alias_template_of(entity_index e) const;
+    template_ref template_of_form(entity_index e,
+                                  bool function_template::*form) const;
     bool template_id_name(SyntaxRef id, lookup_result &x, entity_index &named,
                           entity_index qualifier = 0) const;
     /* [temp.alias]/1: an alias template defined at namespace scope */
@@ -6151,10 +6155,10 @@ class semantic_analysis
     dependent_specialization(entity_index t,
                              const owned_array<template_argument> &arguments);
     analysis_result alias_template_specialization(
-        SyntaxRef id, uint32_t at,
+        SyntaxRef id, template_ref at,
         const owned_array<template_argument> &arguments, type_index &type,
         uint32_t *cv = nullptr);
-    analysis_result alias_template_type(SyntaxRef id, uint32_t at,
+    analysis_result alias_template_type(SyntaxRef id, template_ref at,
                                         type_index &type,
                                         uint32_t *cv = nullptr);
     SyntaxRef variable_specialization_id(SyntaxRef d) const;
@@ -6174,19 +6178,20 @@ class semantic_analysis
        is, plus one; [temp.names]/8: a concept-id's value */
     analysis_result concept_definition(SyntaxRef n,
                                        ConceptDefinition definition);
-    uint32_t concept_of(entity_index e) const;
+    template_ref concept_of(entity_index e) const;
     analysis_result requires_expression(RequiresExpression n,
                                         expression_meaning &m);
     analysis_result requirement_satisfied(SyntaxElement r, bool &satisfied);
     analysis_result type_constraint_satisfied(SyntaxElement q, qualified_type u,
                                               bool &satisfied);
-    analysis_result concept_id(SyntaxRef n, uint32_t ct, expression_meaning &m);
+    analysis_result concept_id(SyntaxRef n, template_ref ct,
+                               expression_meaning &m);
     /* [temp.constr.constr]: whether constraint-expression e is satisfied,
        the template parameters bound in scope */
     analysis_result constraint_satisfied(SyntaxElement e, entity_index scope,
                                          token_index horizon, bool &satisfied);
     /* the variable template the held name e is, plus one */
-    uint32_t variable_template_of(entity_index e) const;
+    template_ref variable_template_of(entity_index e) const;
     /* [temp.pre]/1: a variable template defined at namespace scope */
     analysis_result variable_template_definition(SyntaxRef n,
                                                  SyntaxRef declaration);
@@ -6197,12 +6202,12 @@ class semantic_analysis
     analysis_result variable_explicit_instantiation(SyntaxRef n, SyntaxRef d,
                                                     uint32_t lead, SyntaxRef id,
                                                     bool extern_);
-    analysis_result variable_template_id_of(SyntaxRef n, uint32_t vt,
+    analysis_result variable_template_id_of(SyntaxRef n, template_ref vt,
                                             expression_meaning &m);
-    analysis_result function_template_id_value(SyntaxRef n, uint32_t ft,
+    analysis_result function_template_id_value(SyntaxRef n, template_ref ft,
                                                expression_meaning &m);
     /* ... the specialization, instantiated (or found) */
-    analysis_result instantiate_variable(SyntaxRef at, uint32_t vt,
+    analysis_result instantiate_variable(SyntaxRef at, template_ref vt,
                                          const template_argument *arguments,
                                          uint32_t count, entity_index &e);
     /* the instantiation whose variable the declaration analysed now
@@ -6262,14 +6267,15 @@ class semantic_analysis
        no diagnostic required; clang keeps the first, as here).  Its
        arguments are satisfaction_arguments[first .. + count) */
     struct satisfaction {
-        uint32_t concept_template = 0, first = 0, count = 0;
+        template_ref concept_template;
+        uint32_t first = 0, count = 0;
         bool satisfied = false;
     };
     owned_array<satisfaction> satisfactions;
     owned_array<template_argument> satisfaction_arguments;
-    uint32_t template_record(entity_index t) const;
+    template_ref template_record(entity_index t) const;
     analysis_result
-    concept_satisfied(SyntaxRef at, uint32_t ct,
+    concept_satisfied(SyntaxRef at, template_ref ct,
                       const owned_array<template_argument> &arguments,
                       bool &satisfied);
     bool same_constraints(SyntaxRef a, SyntaxRef b);
@@ -6288,7 +6294,7 @@ class semantic_analysis
     /* [temp.deduct]/5: whether the function template's constraints are
        satisfied by the arguments deduced */
     analysis_result
-    template_constraints_satisfied(uint32_t function_template,
+    template_constraints_satisfied(template_ref function_template,
                                    const owned_array<template_argument> &values,
                                    bool &satisfied);
     /* a template-parameter's identifier (after the ellipsis of a pack's) */
@@ -6338,11 +6344,12 @@ class semantic_analysis
     bool
     default_missing_after_one(const owned_array<SyntaxRef> &parameters) const;
     analysis_result
-    template_id_arguments_in(SyntaxRef id, uint32_t ct, entity_index scope,
+    template_id_arguments_in(SyntaxRef id, template_ref ct, entity_index scope,
                              owned_array<template_argument> &arguments);
     /* [temp.arg]: the written argument for the template's parameter at
        position, given the arguments before it */
-    analysis_result template_argument_for(SyntaxRef at, uint32_t template_index,
+    analysis_result template_argument_for(SyntaxRef at,
+                                          template_ref template_index,
                                           uint32_t position,
                                           SyntaxElement written,
                                           const template_argument *before,
@@ -6393,7 +6400,7 @@ class semantic_analysis
     dependent_value_range dependent_values_like(uint64_t value, uint32_t name);
     bool written_type_arguments(SyntaxElement id,
                                 owned_array<qualified_type> &out);
-    analysis_result substituted_parameter_type(uint32_t template_index,
+    analysis_result substituted_parameter_type(template_ref template_index,
                                                uint32_t position,
                                                const template_argument *before,
                                                qualified_type &type);
@@ -6425,7 +6432,7 @@ class semantic_analysis
     /* [temp.arg]/4, [temp.param]/12: the arguments not given (set[i]
        false) from the parameters' default template-arguments */
     analysis_result
-    default_template_arguments(SyntaxRef at, uint32_t template_index,
+    default_template_arguments(SyntaxRef at, template_ref template_index,
                                owned_array<template_argument> &arguments,
                                const owned_array<bool> &set);
     /* a template-parameter's name in scope, as the argument: a
@@ -6469,7 +6476,7 @@ class semantic_analysis
        pattern the arguments match (0: the primary), with its parameters'
        arguments */
     analysis_result
-    matching_specialization(SyntaxRef at, uint32_t class_template,
+    matching_specialization(SyntaxRef at, template_ref class_template,
                             const template_argument *arguments, uint32_t count,
                             uint32_t &pattern,
                             owned_array<template_argument> &deduced);
@@ -6477,9 +6484,9 @@ class semantic_analysis
     analysis_result class_template_definition(SyntaxRef n, SyntaxRef specifier);
     /* [temp.names]/1: a simple-template-id's arguments for the class
        template function_templates[ct - 1], defaults included */
-    uint32_t bound_template_template_of(SyntaxRef id) const;
+    template_ref bound_template_template_of(SyntaxRef id) const;
     analysis_result
-    template_id_arguments(SyntaxRef id, uint32_t ct,
+    template_id_arguments(SyntaxRef id, template_ref ct,
                           owned_array<template_argument> &arguments);
     /* [temp.class]: a class template declared without a definition
        (template<class T> struct S;) */
@@ -6590,12 +6597,11 @@ class semantic_analysis
     analysis_result template_type(SyntaxRef id, entity_index scope,
                                   bool qualified, type_index &type,
                                   uint32_t *cv = nullptr);
-    analysis_result
-    specialization_matching_in_progress(SyntaxRef at, uint32_t class_template,
-                                        const template_argument *arguments,
-                                        uint32_t count);
+    analysis_result specialization_matching_in_progress(
+        SyntaxRef at, template_ref class_template,
+        const template_argument *arguments, uint32_t count);
     /* [temp.inst]/2: the class template specialization, instantiated */
-    analysis_result instantiate_class(SyntaxRef at, uint32_t class_template,
+    analysis_result instantiate_class(SyntaxRef at, template_ref class_template,
                                       const template_argument *arguments,
                                       uint32_t count, entity_index &c,
                                       bool named_only = false);
@@ -6604,7 +6610,7 @@ class semantic_analysis
     uint32_t class_instantiating = 0;
     /* a call whose name is a function template's (postfix-expression.cpp) */
     analysis_result template_call(SyntaxRef n, token_index name,
-                                  uint32_t function_template,
+                                  template_ref function_template,
                                   owned_array<template_argument> &specified,
                                   bool qualified,
                                   const owned_array<SyntaxElement> &arguments,
@@ -6614,12 +6620,14 @@ class semantic_analysis
        N::f<A...>; its name, the template (plus one, 0 if the callee is no
        template's name) and the template-arguments given */
     analysis_result template_callee(SyntaxElement callee, token_index &name,
-                                    uint32_t &function_template,
+                                    template_ref &function_template,
                                     owned_array<template_argument> &specified,
                                     bool &qualified);
-    analysis_result template_callee_parts(
-        SyntaxElement callee, token_index &name, uint32_t &function_template,
-        owned_array<template_argument> &specified, bool &qualified);
+    analysis_result
+    template_callee_parts(SyntaxElement callee, token_index &name,
+                          template_ref &function_template,
+                          owned_array<template_argument> &specified,
+                          bool &qualified);
     /* declare()'s part for a specialization an instantiation makes */
     analysis_result declare_specialization(SyntaxRef declaration,
                                            token_index id, qualified_type type,
@@ -6666,11 +6674,12 @@ class semantic_analysis
        -1 when g is more than f, 0 when neither; unknown set when analysis
        cannot tell */
     int conversion_template_order(entity_index t1, entity_index t2);
-    int function_template_order(uint32_t f, uint32_t g, size_t arguments,
-                                bool &unknown, bool f_reversed = false,
+    int function_template_order(template_ref f, template_ref g,
+                                size_t arguments, bool &unknown,
+                                bool f_reversed = false,
                                 bool g_reversed = false);
-    int constraint_subsumption_order(uint32_t f, uint32_t g) const;
-    bool template_parameter_alone(uint32_t t, uint32_t i) const;
+    int constraint_subsumption_order(template_ref f, template_ref g) const;
+    bool template_parameter_alone(template_ref t, uint32_t i) const;
     bool non_deduced(qualified_type t) const;
     bool member_of_unknown_specialization(qualified_type t) const;
     /* a type partial ordering compares with deduce_type's rules alone;
@@ -6678,8 +6687,9 @@ class semantic_analysis
        arguments */
     bool orderable(qualified_type t, bool packs, bool *pack_argument = nullptr,
                    unsigned *value_kinds = nullptr) const;
-    bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
-                                 bool &unknown, bool f_reversed = false,
+    bool at_least_as_specialized(template_ref f, template_ref g,
+                                 size_t arguments, bool &unknown,
+                                 bool f_reversed = false,
                                  bool g_reversed = false);
     /* [temp.class.order]: whether partial specialization s (index plus
        one) is at least as specialized as t */
@@ -6822,7 +6832,8 @@ class semantic_analysis
                                 owned_array<template_argument> &deduced,
                                 owned_array<bool> &set,
                                 uint32_t first_deducible, bool &unknown);
-    analysis_result deduce_from_call(SyntaxRef at, uint32_t function_template,
+    analysis_result deduce_from_call(SyntaxRef at,
+                                     template_ref function_template,
                                      const expression_meaning *arguments,
                                      uint32_t count,
                                      owned_array<template_argument> &deduced,
@@ -6970,14 +6981,14 @@ class semantic_analysis
     analysis_result binding_get_call(SyntaxRef n, token_index at, uint32_t i,
                                      entity_index e, qualified_type type,
                                      expression_meaning &m);
-    analysis_result index_argument(SyntaxRef n, uint32_t template_index,
+    analysis_result index_argument(SyntaxRef n, template_ref template_index,
                                    uint32_t i, template_argument &out);
     analysis_result binding_members_class(SyntaxRef n, entity_index c,
                                           entity_index &holder);
     uint32_t binding_member_count(entity_index c) const;
     /* the class template std::NAME, plus one (0: none declared) */
     analysis_result std_class_template(SyntaxRef n, const char *name,
-                                       uint32_t &template_index);
+                                       template_ref &template_index);
     /* the variables binding_variable makes: linkage::none automatic,
        else of static storage duration with this linkage (at namespace
        scope) */
@@ -7388,7 +7399,7 @@ class semantic_analysis
         /* a function template specialization: its template
            (function_templates' index plus one), for [over.match.best]/2.4
            and 2.5 */
-        uint32_t template_index = 0;
+        template_ref template_index;
     };
 
   private:
@@ -7474,7 +7485,7 @@ class semantic_analysis
     owned_array<deferred_class_instantiation> deferred_class_instantiations;
     /* instantiate_class choosing the definition of a specialization */
     struct class_matching {
-        uint32_t class_template = 0;
+        template_ref class_template;
         const template_argument *arguments = nullptr;
         uint32_t count = 0;
     };
@@ -7484,7 +7495,7 @@ class semantic_analysis
     owned_array<class_matching> concepts_in_progress;
     struct class_matching_scope {
         owned_array<class_matching> &list;
-        class_matching_scope(owned_array<class_matching> &l, uint32_t t,
+        class_matching_scope(owned_array<class_matching> &l, template_ref t,
                              const template_argument *a, uint32_t n)
             : list(l)
         {
@@ -7771,7 +7782,7 @@ class semantic_analysis
                              owned_array<template_argument> &values,
                              owned_array<bool> &set, bool *failed);
     analysis_result deduce_from_function_type(
-        SyntaxRef at, uint32_t function_template, qualified_type target,
+        SyntaxRef at, template_ref function_template, qualified_type target,
         owned_array<template_argument> &deduced, bool &failed,
         const owned_array<template_argument> *explicit_arguments = nullptr);
     /* ... the token of that name and the function chosen, which

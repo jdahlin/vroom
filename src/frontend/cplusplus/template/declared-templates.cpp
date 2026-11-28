@@ -675,8 +675,8 @@ analysis_result semantic_analysis::declare_template_parameters(
 
 /* the usable function template (member: member function template) whose
    name the held entity is, plus one */
-uint32_t semantic_analysis::function_template_of(entity_index held,
-                                                 bool member) const
+template_ref semantic_analysis::function_template_of(entity_index held,
+                                                     bool member) const
 {
     if (!held)
         return 0;
@@ -685,7 +685,7 @@ uint32_t semantic_analysis::function_template_of(entity_index held,
         const function_template &f = function_templates[i - 1];
         if (!f.unusable && !f.is_class && !f.is_alias && !f.is_variable &&
             is_namespace(entity_table[f.entity].enclosing) != member)
-            return i;
+            return template_ref::from_number(i);
     }
     return 0;
 }
@@ -822,7 +822,7 @@ void semantic_analysis::inline_set_functions(
     }
 }
 
-uint32_t semantic_analysis::class_template_of(entity_index e) const
+template_ref semantic_analysis::class_template_of(entity_index e) const
 {
     if (!e)
         return 0;
@@ -832,18 +832,18 @@ uint32_t semantic_analysis::class_template_of(entity_index e) const
        specialization" */
     if (entity_table[e].kind == entity_kind::class_type &&
         entity_table[e].instantiation)
-        return entity_table[specialized_template(e)].template_record.number();
+        return entity_table[specialized_template(e)].template_record;
     return template_of_form(e, &function_template::is_class);
 }
 
-uint32_t semantic_analysis::alias_template_of(entity_index e) const
+template_ref semantic_analysis::alias_template_of(entity_index e) const
 {
     return template_of_form(e, &function_template::is_alias);
 }
 
 /* the usable template of the form (is_class, is_alias, is_variable) whose
    name the held entity e is, plus one */
-uint32_t
+template_ref
 semantic_analysis::template_of_form(entity_index e,
                                     bool function_template::*form) const
 {
@@ -853,7 +853,7 @@ semantic_analysis::template_of_form(entity_index e,
     for (uint32_t i = chains.first(e); i; i = chains.after(i))
         if (function_templates[i - 1].*form &&
             !function_templates[i - 1].unusable)
-            return i;
+            return template_ref::from_number(i);
     return 0;
 }
 
@@ -1042,7 +1042,7 @@ bool semantic_analysis::default_missing_after_one(
 /* template_id_arguments with the template-parameters of scope in scope;
    what they record for claims is dropped */
 analysis_result semantic_analysis::template_id_arguments_in(
-    SyntaxRef id, uint32_t ct, entity_index scope,
+    SyntaxRef id, template_ref ct, entity_index scope,
     owned_array<template_argument> &arguments)
 {
     size_t expressions_before = expressions.size();
@@ -1193,9 +1193,9 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
         return builtin_type_pack_element(id, type);
     if (!named && !qualified && is_builtin_make_integer_seq(name))
         return builtin_make_integer_seq(id, type);
-    uint32_t ct = class_template_of(named);
+    template_ref ct = class_template_of(named);
     if (!ct) {
-        uint32_t at = alias_template_of(named);
+        template_ref at = alias_template_of(named);
         if (at)
             return alias_template_type(id, at, type, cv);
         analysis_result refused = not_supported(id, "temp.names");
@@ -1205,23 +1205,23 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
     owned_array<template_argument> arguments;
     VTRY(filled, template_id_arguments(id, ct, arguments));
     /* [temp.dep.type]/9: "the template name is a template parameter" */
-    bool dependent = function_templates[ct - 1].is_parameter ||
-                     dependent_arguments(arguments);
+    bool dependent =
+        function_templates[ct].is_parameter || dependent_arguments(arguments);
     if (dependent) {
         /* [temp.dep.type]/9: "A type is dependent if it is ... a
            simple-template-id in which either the template name is a
            template parameter or any of the template arguments is a
            dependent type": a template's own declarator names it (not
            instantiated); one per template and arguments */
-        type = dependent_specialization(function_templates[ct - 1].entity,
-                                        arguments);
+        type =
+            dependent_specialization(function_templates[ct].entity, arguments);
         return analysis_result::well_formed;
     }
     /* [temp.names]/8: "When the template-name of a simple-template-id
        names a constrained non-function template ... the constraints of
        that template shall be satisfied" ([temp.constr.decl]/3: its
        requires-clause) */
-    if (head_constraint(function_templates[ct - 1].declaration)) {
+    if (head_constraint(function_templates[ct].declaration)) {
         bool satisfied = true;
         VTRY(s, template_constraints_satisfied(ct, arguments, satisfied));
         if (!satisfied && substituting)
@@ -1243,7 +1243,7 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
    argument the unqualified template-name of the simple-template-id id
    names now, when it has default template-arguments of its own
    ([temp.param]/17); else 0 */
-uint32_t semantic_analysis::bound_template_template_of(SyntaxRef id) const
+template_ref semantic_analysis::bound_template_template_of(SyntaxRef id) const
 {
     SyntaxElement first = id[0];
     while (!first.is_token() && first.size() == 1)
@@ -1290,24 +1290,24 @@ uint32_t semantic_analysis::bound_template_template_of(SyntaxRef id) const
                 found = record;
         }
     }
-    return found;
+    return template_ref::from_number(found);
 }
 
 /*
  * [temp.names]/1: a simple-template-id's template-arguments for the class
- * template function_templates[ct - 1], in order, then [temp.arg]/4's
+ * template function_templates[ct], in order, then [temp.arg]/4's
  * defaults for those not given.
  */
 analysis_result semantic_analysis::template_id_arguments(
-    SyntaxRef id, uint32_t ct, owned_array<template_argument> &arguments)
+    SyntaxRef id, template_ref ct, owned_array<template_argument> &arguments)
 {
     /* [temp.param]/17: a template-id naming the argument of a template
        template-parameter that has defaults takes them */
-    uint32_t formal = bound_template_template_of(id);
-    if (formal && function_templates[formal - 1].parameter_count ==
-                      function_templates[ct - 1].parameter_count)
+    template_ref formal = bound_template_template_of(id);
+    if (formal && function_templates[formal].parameter_count ==
+                      function_templates[ct].parameter_count)
         ct = formal;
-    const function_template ft = function_templates[ct - 1];
+    const function_template ft = function_templates[ct];
     uint32_t count = ft.parameter_count;
     /* [temp.inst]/2: a specialization named in a template-argument-list
        (And<B, E<U...>>::value in a nested-name-specifier, or

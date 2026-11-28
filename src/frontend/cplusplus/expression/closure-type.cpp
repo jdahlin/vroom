@@ -292,12 +292,12 @@ analysis_result semantic_analysis::generic_closure_conversion(
             at, "expr.prim.lambda.closure",
             "a generic lambda converted to no non-variadic function pointer");
     entity_index call_tpl = entity_table[c].call_operator;
-    uint32_t ft = entity_table[call_tpl].template_record.number();
+    template_ref ft = entity_table[call_tpl].template_record;
     if (!ft)
         return not_supported_because(
             at, "expr.prim.lambda.closure",
             "a generic lambda whose call operator is not a template");
-    const function_template f = function_templates[ft - 1];
+    const function_template f = function_templates[ft];
     const struct type pat_fn =
         type_table[entity_table[f.entity].type.unqualified()];
     if (pat_fn.kind != type_kind::function || pat_fn.variadic ||

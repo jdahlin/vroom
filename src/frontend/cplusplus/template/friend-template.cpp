@@ -198,7 +198,7 @@ analysis_result semantic_analysis::qualified_friend_class_template(
             found = q.unknown_entity;
         if (found && class_template_of(found)) {
             befriend_template(
-                c, function_templates[class_template_of(found) - 1].entity);
+                c, function_templates[class_template_of(found)].entity);
             return analysis_result::well_formed;
         }
     }
@@ -246,7 +246,7 @@ analysis_result semantic_analysis::dependent_member_friend(
         return not_supported_because(n, "temp.friend",
                                      "a friend member of a dependent type with "
                                      "an unresolved template-id");
-    uint32_t ct = class_template_of(named);
+    template_ref ct = class_template_of(named);
     if (!ct)
         return not_supported_because(
             n, "temp.friend",
@@ -327,7 +327,7 @@ analysis_result semantic_analysis::dependent_member_friend(
         return r;
     member_friend f;
     f.granting = c;
-    f.template_entity = function_templates[ct - 1].entity;
+    f.template_entity = function_templates[ct].entity;
     f.declaration = n;
     f.member = declaration;
     f.first_parameter = first;

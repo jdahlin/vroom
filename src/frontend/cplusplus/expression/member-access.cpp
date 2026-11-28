@@ -665,7 +665,7 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
                                      "an ambiguous member name");
     if (e && (entity_table[e].kind == entity_kind::none ||
               entity_table[e].member_templates)) {
-        if (uint32_t vt = variable_template_of(e)) {
+        if (template_ref vt = variable_template_of(e)) {
             SyntaxElement id = member_template_id(n);
             if (id.is(syntax_kind::simple_template_id,
                       syntax_kind::template_id))
