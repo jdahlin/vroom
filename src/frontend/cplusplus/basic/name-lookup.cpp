@@ -1168,19 +1168,20 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             !entity_table[e].details().size && entity_table[e].instantiation &&
             e != defining_class && !entity_table[e].defined) {
             uint32_t k = entity_table[e].instantiation.index();
-            entity_index t_ent = instantiations[k].template_entity;
+            entity_index t_ent = instantiations.at_index(k).template_entity;
             template_ref ct = entity_table[t_ent].template_record;
-            if (ct && !instantiations[k].defining) {
+            if (ct && !instantiations.at_index(k).defining) {
                 entity_index done = e;
                 /* (a copy: instantiate_class may grow template_arguments) */
                 owned_array<template_argument> arguments;
-                for (uint32_t i = 0; i < instantiations[k].argument_count; i++)
+                for (uint32_t i = 0;
+                     i < instantiations.at_index(k).argument_count; i++)
                     arguments.append(
-                        template_arguments[instantiations[k].first_argument +
-                                           i]);
-                VTRY(ir,
-                     instantiate_class(n, ct, arguments.data(),
-                                       instantiations[k].argument_count, done));
+                        template_arguments
+                            [instantiations.at_index(k).first_argument + i]);
+                VTRY(ir, instantiate_class(
+                             n, ct, arguments.data(),
+                             instantiations.at_index(k).argument_count, done));
             }
         }
         /* [temp.inst]/2: a specialization named only (lazy) is defined
@@ -1194,8 +1195,10 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             uint32_t record = entity_table[e].instantiation.number();
             if (record && !entity_table[e].defined &&
                 !entity_table[e].details().size &&
-                !instantiations[record - 1].defining &&
-                instantiations[record - 1].specialization == e) {
+                !instantiations[instantiation_ref::from_number(record)]
+                     .defining &&
+                instantiations[instantiation_ref::from_number(record)]
+                        .specialization == e) {
                 entity_index done = e;
                 VTRY(dr, define_class_outside(n, record - 1, done));
             }

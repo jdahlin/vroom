@@ -4187,7 +4187,7 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
        needed where it was named (an unevaluated operand, instantiate): a
        constant evaluation needs it ([temp.inst]/5, [expr.const]/11) */
     for (size_t i = 0; i < instantiations.size(); i++) {
-        const instantiation_record &x = instantiations[i];
+        const instantiation_record &x = instantiations.at_index(i);
         if (x.specialization != f || x.defined || x.defining)
             continue;
         const function_template &ft =
@@ -4212,7 +4212,7 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
         } else {
             const template_member_definition o =
                 template_member_definitions[m.member_definition - 1];
-            if (instantiations[m.instantiation].specialization !=
+            if (instantiations.at_index(m.instantiation).specialization !=
                     entity_table[f].enclosing ||
                 o.definition.is(syntax_kind::simple_declaration) || o.inner ||
                 o.member_class)

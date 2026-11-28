@@ -255,18 +255,29 @@ template <typename T, typename Index = size_t> class owned_array
     size_t count = 0, capacity = 0;
 };
 
-/* an owned_array whose records also go by a Ref (record_ref) */
+/* an owned_array whose records go by a Ref (record_ref).  A bare number is
+   no subscript: a 1-based record number less one would pass for a
+   position, so a position is asked for by name (at_index) */
 template <typename T, typename Ref> class record_table : public owned_array<T>
 {
   public:
-    using owned_array<T>::operator[];
+    T &operator[](size_t) = delete;
+    const T &operator[](size_t) const = delete;
     T &operator[](Ref r)
     {
-        return (*this)[static_cast<size_t>(r.index())];
+        return at_index(r.index());
     }
     const T &operator[](Ref r) const
     {
-        return (*this)[static_cast<size_t>(r.index())];
+        return at_index(r.index());
+    }
+    T &at_index(size_t i)
+    {
+        return owned_array<T>::operator[](i);
+    }
+    const T &at_index(size_t i) const
+    {
+        return owned_array<T>::operator[](i);
     }
 };
 

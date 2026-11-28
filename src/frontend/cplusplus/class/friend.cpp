@@ -90,7 +90,8 @@ bool semantic_analysis::friend_names(const friend_record &f,
         if (e == f.template_entity)
             return true;
         uint32_t i = entity_table[e].instantiation.number();
-        return i && instantiations[i - 1].template_entity == f.template_entity;
+        return i && instantiations[instantiation_ref::from_number(i)]
+                            .template_entity == f.template_entity;
     }
     if (f.befriended)
         return f.befriended == e;
@@ -631,7 +632,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
                                          index, c));
         friend_record f;
         f.granting = c;
-        f.befriended = instantiations[index].specialization;
+        f.befriended = instantiations.at_index(index).specialization;
         friends.append(f);
         return analysis_result::well_formed;
     }

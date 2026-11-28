@@ -3200,9 +3200,9 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
                 entity_table[c].set(&entity_details::constructor_templates, to);
             }
             for (size_t i = 0, m = function_templates.size(); i < m; i++)
-                if (function_templates[i].name == from &&
-                    !function_templates[i].unusable) {
-                    function_template copy = function_templates[i];
+                if (function_templates.at_index(i).name == from &&
+                    !function_templates.at_index(i).unusable) {
+                    function_template copy = function_templates.at_index(i);
                     copy.name = to;
                     function_templates.append(copy);
                 }

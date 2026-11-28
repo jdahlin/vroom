@@ -848,7 +848,8 @@ uint64_t semantic_analysis::constraint_mapping(
 void semantic_analysis::specialization_atoms(uint32_t s,
                                              owned_array<uint64_t> &atoms)
 {
-    const function_template ft = function_templates[s - 1];
+    const function_template ft =
+        function_templates[template_ref::from_number(s)];
     entity_index scope = entity_table[ft.entity].enclosing;
     owned_array<constraint_binding> env;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
@@ -927,8 +928,10 @@ bool semantic_analysis::more_constrained_specialization(uint32_t s, uint32_t t)
 bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
                                                       bool &unknown)
 {
-    const function_template ss = function_templates[s - 1];
-    const function_template tt = function_templates[t - 1];
+    const function_template ss =
+        function_templates[template_ref::from_number(s)];
+    const function_template tt =
+        function_templates[template_ref::from_number(t)];
     if (ss.pattern_count != tt.pattern_count) {
         unknown = true;
         return false;

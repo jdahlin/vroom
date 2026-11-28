@@ -352,7 +352,7 @@ analysis_result semantic_analysis::member_definition_of_template(
     uint32_t mine_count = static_cast<uint32_t>(arguments.size());
     function_template of = function_templates[ct];
     if (pattern) {
-        of = function_templates[pattern - 1];
+        of = function_templates[template_ref::from_number(pattern)];
         mine = deduced.data();
         mine_count = static_cast<uint32_t>(deduced.size());
     }
@@ -633,7 +633,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
 {
     size_t refusals_before = unsupported.size();
     const template_member_definition o = template_member_definitions[member];
-    const instantiation_record x = instantiations[index];
+    const instantiation_record x = instantiations.at_index(index);
     if (instantiation_depth >= 64)
         return not_supported_because(
             o.declaration, "temp.inst",
@@ -649,7 +649,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         function_templates[entity_table[x.template_entity].template_record];
     uint32_t first = x.first_argument;
     if (x.pattern) {
-        of = function_templates[x.pattern - 1];
+        of = function_templates[template_ref::from_number(x.pattern)];
         first = x.first_deduced;
     }
     entity_index scope = entity_table.make(
@@ -681,13 +681,14 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         const template_member_definition outer =
             template_member_definitions[o.outer_record - 1];
         const instantiation_record ox =
-            instantiations[o.outer_instantiation - 1];
+            instantiations[instantiation_ref::from_number(
+                o.outer_instantiation)];
         function_template oof =
             function_templates[entity_table[ox.template_entity]
                                    .template_record];
         uint32_t ofirst = ox.first_argument;
         if (ox.pattern) {
-            oof = function_templates[ox.pattern - 1];
+            oof = function_templates[template_ref::from_number(ox.pattern)];
             ofirst = ox.first_deduced;
         }
         for (uint32_t i = 0; i < oof.parameter_count; i++)
@@ -822,7 +823,7 @@ semantic_analysis::define_member_of_member_class(uint32_t member,
 {
     size_t refusals_before = unsupported.size();
     const template_member_definition o = template_member_definitions[member];
-    entity_index c = instantiations[index].specialization;
+    entity_index c = instantiations.at_index(index).specialization;
     SyntaxRef nested = out_of_class_nested(o.definition);
     if (!c || !nested || nested.size() != 4 ||
         !nested[2].is(syntax_kind::simple_template_id) ||
@@ -937,7 +938,7 @@ semantic_analysis::record_template_member(const template_member_definition &m)
     template_member_definitions.append(m);
     analysis_result result = analysis_result::well_formed;
     for (uint32_t k = 0; k < instantiations.size(); k++) {
-        const instantiation_record &y = instantiations[k];
+        const instantiation_record &y = instantiations.at_index(k);
         if (y.template_entity != m.template_entity || y.pattern != m.pattern ||
             !y.specialization || y.defining ||
             entity_table[y.specialization].kind != entity_kind::class_type ||
@@ -1006,11 +1007,11 @@ analysis_result semantic_analysis::define_member_template(uint32_t member,
     const template_member_definition o = template_member_definitions[member];
     if (o.definition.is(syntax_kind::simple_declaration))
         return define_member_class_template_of(
-            instantiations[index].specialization, o.declaration, o.inner,
-            o.definition, recorded);
-    return define_member_template_of(instantiations[index].specialization,
-                                     o.declaration, o.inner, o.definition,
-                                     recorded, false, member + 1, index + 1);
+            instantiations.at_index(index).specialization, o.declaration,
+            o.inner, o.definition, recorded);
+    return define_member_template_of(
+        instantiations.at_index(index).specialization, o.declaration, o.inner,
+        o.definition, recorded, false, member + 1, index + 1);
 }
 
 /*
@@ -1142,13 +1143,14 @@ analysis_result semantic_analysis::define_member_template_of(
     if (r == analysis_result::well_formed && outer_member) {
         const template_member_definition od =
             template_member_definitions[outer_member - 1];
-        const instantiation_record ox = instantiations[outer_instantiation - 1];
+        const instantiation_record ox =
+            instantiations[instantiation_ref::from_number(outer_instantiation)];
         function_template oof =
             function_templates[entity_table[ox.template_entity]
                                    .template_record];
         uint32_t ofirst = ox.first_argument;
         if (ox.pattern) {
-            oof = function_templates[ox.pattern - 1];
+            oof = function_templates[template_ref::from_number(ox.pattern)];
             ofirst = ox.first_deduced;
         }
         for (uint32_t i = 0; od.first_parameter && i < oof.parameter_count;
@@ -1184,16 +1186,18 @@ analysis_result semantic_analysis::define_member_template_of(
                                              refusals_before);
     /* the declaration the definition matches: not defined yet, the same
        template-parameters and function type ([temp.over.link]/7) */
-    owned_array<uint32_t> group;
+    owned_array<template_ref> group;
     function_template_overloads(held, group);
     uint32_t count = static_cast<uint32_t>(parameters.size());
     /* [temp.over.link]: the declaration the template-head and type match;
        or, where a non-type parameter's type is spelled otherwise (libc++'s
        priority_queue names container_type in the class and _Container
        outside it), the one declaration of this signature there is */
-    uint32_t matched = 0, alike = 0, alike_count = 0;
-    for (uint32_t g : group) {
-        const function_template f = function_templates[g - 1];
+    template_ref alike;
+    template_ref matched;
+    uint32_t alike_count = 0;
+    for (template_ref g : group) {
+        const function_template f = function_templates[g];
         const entity old = entity_table[f.entity];
         if (old.enclosing != c || old.member_cv != cv ||
             old.constexpr_ != s.constexpr_)
@@ -1206,12 +1210,11 @@ analysis_result semantic_analysis::define_member_template_of(
             equivalent_template(f, inner, first, count, type))
             matched = g;
     }
-    if (!matched && alike_count == 1 &&
-        !function_templates[alike - 1].definition)
+    if (!matched && alike_count == 1 && !function_templates[alike].definition)
         matched = alike;
     if (matched) {
-        uint32_t g = matched;
-        const function_template f = function_templates[g - 1];
+        template_ref g = matched;
+        const function_template f = function_templates[g];
         const entity old = entity_table[f.entity];
         bool renamed = false;
         for (uint32_t i = 0; i < f.parameter_count; i++) {
@@ -1239,7 +1242,7 @@ analysis_result semantic_analysis::define_member_template_of(
                                                      refusals_before);
             return analysis_result::well_formed;
         }
-        function_template &record = function_templates[g - 1];
+        function_template &record = function_templates[g];
         record.declaration = declaration;
         record.definition = definition;
         /* the outer template-head's renamed parameters, bound again in
@@ -1248,7 +1251,8 @@ analysis_result semantic_analysis::define_member_template_of(
             const template_member_definition od =
                 template_member_definitions[outer_member - 1];
             const instantiation_record ox =
-                instantiations[outer_instantiation - 1];
+                instantiations[instantiation_ref::from_number(
+                    outer_instantiation)];
             const function_template oof =
                 function_templates[entity_table[ox.template_entity]
                                        .template_record];

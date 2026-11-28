@@ -232,7 +232,8 @@ semantic_analysis::instantiate_variable(SyntaxRef at, template_ref vt,
             at, "temp.inst",
             "a variable template-id with a different number of arguments");
     if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
-        const instantiation_record &x = instantiations[prior - 1];
+        const instantiation_record &x =
+            instantiations[instantiation_ref::from_number(prior)];
         /* (one whose initializer uses itself, or that failed) */
         if (!x.specialization || !x.defined)
             return not_supported_because(at, "temp.inst",
@@ -254,7 +255,7 @@ semantic_analysis::instantiate_variable(SyntaxRef at, template_ref vt,
     uint32_t index = record_instantiation(ft, arguments, count);
     function_template definition = ft;
     if (pattern) {
-        definition = function_templates[pattern - 1];
+        definition = function_templates[template_ref::from_number(pattern)];
         entity_index bound = entity_table.make(
             entity_kind::block_scope, 0, entity_table[ft.entity].enclosing);
         for (uint32_t i = 0; i < definition.parameter_count; i++)
@@ -262,33 +263,33 @@ semantic_analysis::instantiate_variable(SyntaxRef at, template_ref vt,
                 bound,
                 template_parameter_entities[definition.first_parameter + i],
                 deduced[i]);
-        instantiations[index].scope = bound;
-        instantiations[index].pattern = pattern;
+        instantiations.at_index(index).scope = bound;
+        instantiations.at_index(index).pattern = pattern;
     }
-    entity_index scope = instantiations[index].scope;
+    entity_index scope = instantiations.at_index(index).scope;
     instantiation_context context;
     enter_instantiation(context, scope, definition.declaration);
     template_member_scope = scope;
     expanding = false;
     instantiating = 0;
     variable_instantiating = index + 1;
-    instantiations[index].defining = true;
+    instantiations.at_index(index).defining = true;
     /* (a partial specialization's declarator-id: its template-id) */
     declarator_template_id = pattern != 0;
     size_t refusals_before = unsupported.size();
     analysis_result r = simple_declaration(definition.declarator);
     declarator_template_id = false;
-    instantiations[index].defining = false;
+    instantiations.at_index(index).defining = false;
     leave_instantiation(context);
     /* an argument that makes the declaration ill-formed: [impl.clang] clang
        reports it at the template, with a note at the use */
     if (r != analysis_result::well_formed ||
-        !instantiations[index].specialization)
+        !instantiations.at_index(index).specialization)
         return not_supported_since(
             at, "temp.inst", "a variable template instantiation that failed",
             refusals_before);
-    instantiations[index].defined = true;
-    e = instantiations[index].specialization;
+    instantiations.at_index(index).defined = true;
+    e = instantiations.at_index(index).specialization;
     return analysis_result::well_formed;
 }
 

@@ -124,7 +124,8 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
        operator their template specialization records so Itanium mangling
        matches clang's __invoke<T...>(T...) and operator auto(*)(T...)<T...>() */
     if (uint32_t call_inst = entity_table[call].instantiation.number()) {
-        const instantiation_record orig = instantiations[call_inst - 1];
+        const instantiation_record orig =
+            instantiations[instantiation_ref::from_number(call_inst)];
         entity_index call_tmpl = orig.template_entity;
         qualified_type pat_type = entity_table[call_tmpl].type;
 

@@ -621,7 +621,8 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                declaration. Merge by entity identity, keeping distinct
                functions even when their parameter types match. */
             for (size_t i = 0, k = function_templates.size(); i < k; i++) {
-                const function_template &imported = function_templates[i];
+                const function_template &imported =
+                    function_templates.at_index(i);
                 if (imported.name != held || imported.unusable)
                     continue;
                 bool present = false;

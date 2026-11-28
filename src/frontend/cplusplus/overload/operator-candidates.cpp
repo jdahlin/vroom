@@ -651,7 +651,7 @@ analysis_result semantic_analysis::overloaded_operator(
                                          "an operator whose argument-dependent "
                                          "lookup could not be completed");
         if (!held_names.empty()) {
-            owned_array<uint32_t> group;
+            owned_array<template_ref> group;
             owned_array<entity_index> associated_classes, associated_spaces;
             if (!associated_namespaces(types, associated_classes,
                                        associated_spaces))
@@ -660,10 +660,10 @@ analysis_result semantic_analysis::overloaded_operator(
                     "an operator whose associated namespaces could not be "
                     "determined");
             for (entity_index held : held_names) {
-                owned_array<uint32_t> one;
+                owned_array<template_ref> one;
                 function_template_overloads(held, one);
-                for (uint32_t t : one) {
-                    const function_template &entry = function_templates[t - 1];
+                for (template_ref t : one) {
+                    const function_template &entry = function_templates[t];
                     bool visible = !entry.hidden_friend;
                     if (entry.hidden_friend)
                         for (entity_index cls : associated_classes)

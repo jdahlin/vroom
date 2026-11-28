@@ -1769,7 +1769,9 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (function_cv &&
         !(instantiating &&
           !is_namespace(
-              entity_table[instantiations[instantiating - 1].template_entity]
+              entity_table[instantiations[instantiation_ref::from_number(
+                                              instantiating)]
+                               .template_entity]
                   .enclosing)))
         return ill_formed_at_token(m.id,
                                    "a function type with a cv-qualifier-seq "

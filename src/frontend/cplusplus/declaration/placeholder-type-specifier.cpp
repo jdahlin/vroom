@@ -714,7 +714,7 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
            in an unevaluated operand */
         if (entity_table[e].instantiation) {
             uint32_t idx = entity_table[e].instantiation.index();
-            instantiation_record &rec = instantiations[idx];
+            instantiation_record &rec = instantiations.at_index(idx);
             const entity tmpl = entity_table[rec.template_entity];
             const function_template ft =
                 function_templates[tmpl.template_record];
