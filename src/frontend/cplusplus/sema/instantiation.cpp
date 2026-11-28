@@ -1662,8 +1662,9 @@ bool semantic_analysis::specialization_dependent_value(entity_index e,
 bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
                                                  qualified_type &type) const
 {
-    for (const function_template &ft : function_templates) {
-        if (ft.entity != t || i >= ft.parameter_count)
+    for (uint32_t k = template_record(t); k; k = templates_by_entity.after(k)) {
+        const function_template &ft = function_templates[k - 1];
+        if (i >= ft.parameter_count)
             continue;
         const entity &p =
             entity_table[template_parameter_entities[ft.first_parameter + i]];
@@ -1684,8 +1685,9 @@ bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
 SyntaxRef semantic_analysis::parameter_type_constraint(entity_index t,
                                                        uint32_t i) const
 {
-    for (const function_template &ft : function_templates) {
-        if (ft.entity != t || i >= ft.parameter_count)
+    for (uint32_t k = template_record(t); k; k = templates_by_entity.after(k)) {
+        const function_template &ft = function_templates[k - 1];
+        if (i >= ft.parameter_count)
             continue;
         template_parameter_parts x;
         if (!template_parameter_form(

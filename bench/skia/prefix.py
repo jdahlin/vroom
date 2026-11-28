@@ -3,7 +3,10 @@
 build (work/skia-src/skia/out/vcc, read only), compiled with and without a
 prefix of the standard headers Skia names.  Outputs go to build/skia-prefix.
 
-  bench/skia/prefix.py [-j N] [--stride N]
+  bench/skia/prefix.py [-j N] [--stride N] [--project N]
+
+--project N adds the N of Skia's own public headers its .cpp files include
+most.
 
 own: one vpp per file.  prefix: one vpp --cxx-prefix-batch forking per file.
 Per side: failures, instructions, CPU, wall; then the defined symbols of the
@@ -80,11 +83,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-j', type=int, default=8)
     ap.add_argument('--stride', type=int, default=1)
+    ap.add_argument('--project', type=int, default=0)
     ap.add_argument('--bin-dir', default=os.path.join(R, 'build/linux/src'))
     a = ap.parse_args()
     vpp = os.path.abspath(os.path.join(a.bin_dir, 'vpp'))
     build = os.path.join(SKIA, 'out/vcc')
     flags, sources = commands(build)
+    included = collections.Counter()
+    for s in sources:
+        with open(os.path.join(build, s), errors='replace') as f:
+            included.update(set(re.findall(
+                r'^\s*#include\s+"((?:include|src)/[^"]+\.h)"', f.read(),
+                re.M)))
+    own_headers = [h for h, _ in included.most_common(a.project)]
     sources = sources[::a.stride]
     out = os.path.join(R, 'build/skia-prefix')
     for side in ('own', 'prefix'):
@@ -100,9 +111,16 @@ def main():
                 os.unlink(obj(side, s))
     prefix = os.path.join(out, 'prefix.h')
 
-    def compiles(headers):
+    def write(headers):
         with open(prefix, 'w') as f:
-            f.write(''.join('#include <%s>\n' % h for h in headers))
+            for h in headers:
+                if h in own_headers:
+                    f.write('#include "%s"\n' % h)
+                else:
+                    f.write('#include <%s>\n' % h)
+
+    def compiles(headers):
+        write(headers)
         with open(os.path.join(out, 'empty.cpp'), 'w') as f:
             f.write('')
         return not subprocess.run(
@@ -111,7 +129,7 @@ def main():
             cwd=build, capture_output=True).returncode
 
     # a header the front end cannot compile yet stays out of the prefix
-    named = standard_headers()
+    named = standard_headers() + own_headers
     refused = [h for h in named if not compiles([h])]
     headers = [h for h in named if h not in refused]
     if not compiles(headers):

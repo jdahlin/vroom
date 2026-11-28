@@ -225,10 +225,13 @@ bool semantic_analysis::names_template_parameter_pack(qualified_type t) const
         return names_template_parameter_pack(r.operand);
     if (r.kind != type_kind::template_parameter)
         return false;
-    for (size_t i = 0; i < template_parameter_entities.size(); i++)
-        if (template_parameter_entities[i] == r.entity)
-            return template_parameter_is_pack(static_cast<uint32_t>(i));
-    return false;
+    /* the first slot holding it */
+    uint32_t found = 0;
+    for (uint32_t k = first_parameter_slot(r.entity); k;
+         k = parameter_slot_next[k - 1])
+        if (!found || k < found)
+            found = k;
+    return found && template_parameter_is_pack(found - 1);
 }
 
 /* a pack's argument: its elements stored once, so that two packs of the
