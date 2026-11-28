@@ -446,7 +446,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
         entity_table[t].argument_bound =
             entity_table[c].kind == entity_kind::class_type &&
             entity_table[c].instantiation;
-        parameter_entities.append(t);
+        parameter_entities.append(t.index());
         function_state.this_entity = t;
     }
     /* [temp.variadic]/2: a function parameter pack's elements, whose
@@ -463,7 +463,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
             entity_table[e].automatic = true;
             entity_table[e].argument_bound = true;
             entity_table.add_declaration(e, definition);
-            parameter_entities.back() = e;
+            parameter_entities.back() = e.index();
             pack.append(e);
             pack_name = parameter.pack_name;
             continue;
@@ -496,7 +496,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
            compares them, defaulted_equality) */
         if (name)
             entity_table.bind(parameters, name, e);
-        parameter_entities.back() = e;
+        parameter_entities.back() = e.index();
     }
     if (current_lambda()) /* [expr.prim.lambda.capture]/6 */
         result = worse(result, bind_init_captures(parameters));
@@ -668,7 +668,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
         }
         if (!b.has(language_feature::non_literal_constexpr_variables))
             for (uint32_t v : found.variables) {
-                const entity &e = entity_table[semantics[v].a];
+                const entity &e = entity_table[entity_index_in(semantics[v].a)];
                 if (e.automatic &&
                     literal_type(e.type) == constness::not_constant)
                     result = worse(
@@ -781,7 +781,7 @@ entity_index semantic_analysis::synthesized_variable(synthesized_function &s,
     entity_table[v].defined = true;
     entity_table[v].automatic = true;
     if (parameter)
-        s.parameters.append(v);
+        s.parameters.append(v.index());
     return v;
 }
 

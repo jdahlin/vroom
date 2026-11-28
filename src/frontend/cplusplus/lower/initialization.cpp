@@ -62,7 +62,8 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
     const uint32_t *items = analysis.semantics.items(n.first);
     /* [abi:calls]: a class parameter passed by address is a temporary the
        caller constructs and destroys at the end of the full-expression */
-    qualified_type function_type = analysis.entity_table[n.b].type;
+    qualified_type function_type =
+        analysis.entity_table[entity_index_in(n.b)].type;
     const struct type &ft = record(function_type);
     const qualified_type *parameters =
         analysis.type_table.parameters(function_type.unqualified());
@@ -71,7 +72,7 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
         const semantic_node &item = node(items[i]);
         if (item.kind == semantic_kind::entity && item.op) {
             /* the address this function's caller passed, handed on */
-            uint32_t s = symbol(item.a, at);
+            uint32_t s = symbol(entity_index_in(item.a), at);
             if (!s)
                 return 0;
             ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_USED);
@@ -85,9 +86,9 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
             return 0;
         arguments.append(a);
     }
-    uint32_t call =
-        special_call(n.b, address_of(object, pointer_to(type_of(object))),
-                     arguments.data(), n.count, at, vtt);
+    uint32_t call = special_call(
+        entity_index_in(n.b), address_of(object, pointer_to(type_of(object))),
+        arguments.data(), n.count, at, vtt);
     if (!call || !n.op)
         return call;
     /* [dcl.init]/8.2: the object is zero-initialized, then the
@@ -125,7 +126,7 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
             return construct_at(x, object, 0, x.at);
         /* [dcl.init]/7.2: each element, first to last */
         uint32_t loop = each_element(s, t, type(element, x.at), count, false,
-                                     x.b, x.at, &x);
+                                     entity_index_in(x.b), x.at, &x);
         if (!loop)
             return 0;
         return statement_expression(void_type, block(&loop, 1));
@@ -233,7 +234,8 @@ uint32_t c_lowering::initialize_list_into(uint32_t object,
                ([dcl.init.aggr]/3.1); else from the first */
             uint32_t first = 0;
             while (k.union_ && x.a && first < k.member_count &&
-                   analysis.class_members[k.first_member + first] != x.a)
+                   analysis.class_members[k.first_member + first] !=
+                       entity_index_in(x.a))
                 first++;
             for (uint32_t i = first, item = 0; item < x.count; i++) {
                 if (i >= k.member_count)
@@ -515,12 +517,12 @@ entity_index c_lowering::returned_variable(uint32_t operand) const
     const semantic_node &named = node(argument);
     if (named.kind != semantic_kind::entity)
         return 0;
-    const entity &x = analysis.entity_table[named.a];
+    const entity &x = analysis.entity_table[entity_index_in(named.a)];
     if (x.kind != entity_kind::variable || !x.automatic ||
         x.type.unqualified() != n.type.unqualified() || x.type.cv() ||
         analysis.entity_table[x.enclosing].parameter_scope)
         return 0;
-    return named.a;
+    return entity_index_in(named.a);
 }
 
 /* [class.copy.elision]/1.1 as clang applies it: every return statement
@@ -784,7 +786,7 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
         if (x.union_ && n.a) {
             /* a union's member a designator named but the first (n.a): C's
                field a, the list holding its value alone after zeros */
-            uint32_t union_field = c_fields[n.a];
+            uint32_t union_field = c_fields[entity_index_in(n.a)];
             for (uint32_t i = 0; i < union_field; i++)
                 values.append(0);
             uint32_t e = expression(items[0]);

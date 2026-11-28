@@ -168,7 +168,7 @@ void semantic_analysis::bind_template_argument(entity_index scope,
     if (a.kind == template_argument::kind_t::template_name) {
         /* [temp.arg.template]: the class or alias template's name */
         for (const function_template &t : function_templates)
-            if (t.entity == static_cast<entity_index>(a.value) &&
+            if (t.entity == entity_index_in(a.value) &&
                 (t.is_class || t.is_alias) && !t.primary) {
                 entity_table.bind(scope, name, t.name);
                 if (is_template_template_parameter(parameter))
@@ -293,15 +293,15 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
         entity_index acc = parts[times - 1];
         for (uint32_t k = times - 1; k-- > 0;) {
             entity_index found = 0;
-            for (entity_index d : dependent_values_like(code, acc))
+            for (entity_index d : dependent_values_like(code, acc.index()))
                 if (entity_table[d].value == code &&
                     entity_table[d].enclosing == parts[k] &&
-                    entity_table[d].name == acc)
+                    entity_table[d].name == acc.index())
                     found = d;
             if (!found) {
                 found = entity_table.make(entity_kind::dependent_value, 0, 0);
                 entity_table[found].enclosing = parts[k];
-                entity_table[found].name = acc;
+                entity_table[found].name = acc.index();
                 entity_table[found].value = code;
                 dependent_values.append(found);
             }
@@ -325,12 +325,13 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
         entity_index rhs = dependent_value_entity(written[2]);
         if (!entity_table[lhs].value || !entity_table[rhs].value)
             return e;
-        for (entity_index d : dependent_values_like(binary, rhs))
+        for (entity_index d : dependent_values_like(binary, rhs.index()))
             if (entity_table[d].value == binary &&
-                entity_table[d].enclosing == lhs && entity_table[d].name == rhs)
+                entity_table[d].enclosing == lhs &&
+                entity_table[d].name == rhs.index())
                 return d;
         entity_table[e].enclosing = lhs;
-        entity_table[e].name = rhs;
+        entity_table[e].name = rhs.index();
         entity_table[e].value = binary;
         dependent_values.append(e);
         return e;
@@ -726,14 +727,14 @@ entity_index semantic_analysis::static_member_value_entity(entity_index c,
     entity_index member = 0;
     for (entity_index d : dependent_values_like(
              dependent_value_code(dependent_value_form::static_member),
-             x.entity))
+             x.entity.index()))
         if (entity_table[d].value ==
                 dependent_value_code(dependent_value_form::static_member) &&
-            entity_table[d].name == x.entity)
+            entity_table[d].name == x.entity.index())
             member = d;
     if (!member) {
         member = e;
-        entity_table[member].name = x.entity;
+        entity_table[member].name = x.entity.index();
         entity_table[member].value =
             dependent_value_code(dependent_value_form::static_member);
         dependent_values.append(member);
@@ -1367,7 +1368,7 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
         return not_supported_because(
             at, "temp.arg.nontype",
             "an address argument whose type does not match the parameter");
-    out.value = e;
+    out.value = e.index();
     return analysis_result::well_formed;
 }
 
@@ -1400,7 +1401,7 @@ semantic_analysis::member_pointer_argument(SyntaxRef at, qualified_type to,
                                      "another type than the parameter");
     entity_index e = 0;
     if (m.node && semantics[m.node].kind == semantic_kind::member_pointer)
-        e = semantics[m.node].a;
+        e = entity_index_in(semantics[m.node].a);
     if (!e ||
         (entity_table[e].kind != entity_kind::variable &&
          entity_table[e].kind != entity_kind::function) ||
@@ -1414,7 +1415,7 @@ semantic_analysis::member_pointer_argument(SyntaxRef at, qualified_type to,
         return not_supported_because(at, "temp.arg.nontype",
                                      "pointer to member argument names no "
                                      "one member that has an address");
-    out.value = e;
+    out.value = e.index();
     return analysis_result::well_formed;
 }
 
@@ -1578,7 +1579,7 @@ analysis_result semantic_analysis::template_template_argument(
         out.value = entity_table[given.entity].value;
         return analysis_result::well_formed;
     }
-    out.value = given.entity;
+    out.value = given.entity.index();
     return analysis_result::well_formed;
 }
 

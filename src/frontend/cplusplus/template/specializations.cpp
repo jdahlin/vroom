@@ -584,7 +584,7 @@ size_t semantic_analysis::instantiation_bucket(entity_index t,
                                                const template_argument *a,
                                                uint32_t count)
 {
-    uint64_t h = t;
+    uint64_t h = t.index();
     auto mix = [&](uint64_t v) {
         h = (h ^ v) * 0x9E3779B97F4A7C15u;
         h ^= h >> 29;
@@ -593,7 +593,8 @@ size_t semantic_analysis::instantiation_bucket(entity_index t,
         mix(static_cast<uint64_t>(a[i].type.bits) << 8 |
             static_cast<uint64_t>(a[i].kind));
         mix(a[i].value);
-        mix(static_cast<uint64_t>(a[i].template_entity) << 32 | a[i].count);
+        mix(static_cast<uint64_t>(a[i].template_entity.index()) << 32 |
+            a[i].count);
     }
     return h >> 48;
 }

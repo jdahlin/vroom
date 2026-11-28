@@ -384,8 +384,8 @@ uint32_t c_lowering::stdc_bits(const semantic_node &n, ast_qualified_type t,
     uint32_t callee = n.a;
     if (node(callee).kind == semantic_kind::conversion)
         callee = node(callee).a;
-    const gnu_builtin &row =
-        gnu_builtin_at(analysis.entity_table[node(callee).a].gnu_builtin_row);
+    const gnu_builtin &row = gnu_builtin_at(
+        analysis.entity_table[entity_index_in(node(callee).a)].gnu_builtin_row);
     ast_qualified_type x_type =
         AST_QUALIFIED_TYPE_UNQUALIFIED(type_of(argument));
     uint64_t bytes = ast_builder_type_size(c, x_type);
@@ -539,7 +539,7 @@ uint32_t c_lowering::x86_header_call(uint32_t function,
         function = node(function).a;
     if (node(function).kind != semantic_kind::entity)
         return 0;
-    const entity &f = analysis.entity_table[node(function).a];
+    const entity &f = analysis.entity_table[entity_index_in(node(function).a)];
     if (f.kind != entity_kind::function || !f.c_language_linkage || f.defined ||
         !f.name)
         return 0;
@@ -561,7 +561,7 @@ const char *c_lowering::library_name(uint32_t function, size_t &length,
         function = node(function).a;
     if (node(function).kind != semantic_kind::entity)
         return nullptr;
-    const entity &f = analysis.entity_table[node(function).a];
+    const entity &f = analysis.entity_table[entity_index_in(node(function).a)];
     if (f.kind != entity_kind::function || !f.name)
         return nullptr;
     const char *name = tokens.pp.identifier_spelling(f.name - 1, &length);
@@ -766,7 +766,8 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
         if (node(callee).kind == semantic_kind::conversion)
             callee = node(callee).a;
         const gnu_builtin &row = gnu_builtin_at(
-            analysis.entity_table[node(callee).a].gnu_builtin_row);
+            analysis.entity_table[entity_index_in(node(callee).a)]
+                .gnu_builtin_row);
         const uint32_t *items = analysis.semantics.items(n.first);
         bool pointer = record(node(items[0]).type).kind == type_kind::pointer;
         uint32_t alignment = items[1];
@@ -883,7 +884,7 @@ uint32_t c_lowering::call(const semantic_node &n)
             before_call = first;
         uint32_t object = read_again(r);
         uint32_t again = read_again(r);
-        callee = virtual_function(node(n.a).a, again, n.at);
+        callee = virtual_function(entity_index_in(node(n.a).a), again, n.at);
         if (!callee)
             return 0;
         arguments.append(object);
@@ -896,7 +897,7 @@ uint32_t c_lowering::call(const semantic_node &n)
                 conversion_kind::function_to_pointer)
             named = node(named).a;
         if (node(named).kind == semantic_kind::entity &&
-            (analysis.entity_table[node(named).a].gnu_flags &
+            (analysis.entity_table[entity_index_in(node(named).a)].gnu_flags &
              gnu_is_constant_evaluated))
             return ast_builder_integer(
                 c,
@@ -904,7 +905,7 @@ uint32_t c_lowering::call(const semantic_node &n)
                     type(record(function_type).operand, n.at)),
                 0);
         if (node(named).kind == semantic_kind::entity &&
-            (analysis.entity_table[node(named).a].gnu_flags &
+            (analysis.entity_table[entity_index_in(node(named).a)].gnu_flags &
              gnu_coroutine_builtin)) {
             const uint32_t *items = analysis.semantics.items(n.first);
             uint32_t seq = 0;
@@ -965,7 +966,8 @@ uint32_t c_lowering::call(const semantic_node &n)
            argument: fold to the argument itself (no function call emitted) */
         if (node(named).kind == semantic_kind::entity && n.count == 1 &&
             n.category != value_category::prvalue) {
-            const entity &fn = analysis.entity_table[node(named).a];
+            const entity &fn =
+                analysis.entity_table[entity_index_in(node(named).a)];
             entity_index enc = fn.enclosing;
             if (enc &&
                 analysis.entity_table[enc].kind ==
@@ -973,7 +975,7 @@ uint32_t c_lowering::call(const semantic_node &n)
                 analysis.entity_table[enc].enclosing == 0 && fn.name) {
                 owned_buffer ns_name, fn_name;
                 spelling(enc, ns_name);
-                spelling(node(named).a, fn_name);
+                spelling(entity_index_in(node(named).a), fn_name);
                 if (ns_name.size() == 3 && !memcmp(ns_name.data(), "std", 3) &&
                     ((fn_name.size() == 4 &&
                       !memcmp(fn_name.data(), "move", 4)) ||
@@ -998,10 +1000,10 @@ uint32_t c_lowering::call(const semantic_node &n)
            builtins themselves: a program's own sqrt (in any namespace, or
            the library's ::sqrt) is another entity and is called. */
         if (node(named).kind == semantic_kind::entity && n.count == 1 &&
-            (analysis.entity_table[node(named).a].gnu_flags &
+            (analysis.entity_table[entity_index_in(node(named).a)].gnu_flags &
              gnu_library_function)) {
             owned_buffer fn_name;
-            spelling(node(named).a, fn_name);
+            spelling(entity_index_in(node(named).a), fn_name);
             const uint32_t *items = analysis.semantics.items(n.first);
             const semantic_node &a0 = node(items[0]);
             if (a0.kind == semantic_kind::constant &&
@@ -1043,13 +1045,15 @@ uint32_t c_lowering::call(const semantic_node &n)
             }
         }
         if (node(named).kind == semantic_kind::entity &&
-            (analysis.entity_table[node(named).a].gnu_flags &
+            (analysis.entity_table[entity_index_in(node(named).a)].gnu_flags &
              gnu_compiler_builtin))
         /* [ext:gnu_library_builtins] no function: the C front end's
                builtin node, made below */
         {
-            builtin = analysis.entity_table[node(named).a].name;
-            uint16_t row = analysis.entity_table[node(named).a].gnu_builtin_row;
+            builtin =
+                analysis.entity_table[entity_index_in(node(named).a)].name;
+            uint16_t row = analysis.entity_table[entity_index_in(node(named).a)]
+                               .gnu_builtin_row;
             untyped_builtin = row && gnu_builtin_untyped(row);
             if (row)
                 lowering = gnu_builtin_at(row).lower;

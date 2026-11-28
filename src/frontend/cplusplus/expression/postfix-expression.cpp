@@ -407,7 +407,8 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
     m.category = value_category::lvalue;
     m.entity = object;
     m.evaluation = constness::constant;
-    m.node = expression_node(semantic_kind::entity, m, n.first_token(), object);
+    m.node = expression_node(semantic_kind::entity, m, n.first_token(),
+                             object.index());
     return analysis_result::well_formed;
 }
 
@@ -642,8 +643,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             entity_index deduced = 0;
             /* a lambda-expression among the arguments is one closure for
                the deduction and the initialization */
-            uint32_t saved_reuse = closure_reuse;
-            closure_reuse = n.index().index() | 0x80000000u;
+            entity_index saved_reuse = closure_reuse;
+            closure_reuse = entity_index{n.index().index() | 0x80000000u};
             analysis_result r = deduced_class(n, ct, deduced);
             if (r == analysis_result::well_formed)
                 r = class_conversion(n, deduced, m);
@@ -1909,7 +1910,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
     if (f.node &&
         semantics[f.node].kind == semantic_kind::bound_member_function) {
         object = semantics[f.node].a;
-        member = semantics[f.node].b;
+        member = entity_index_in(semantics[f.node].b);
     } else if (f.node &&
                semantics[f.node].kind == semantic_kind::member_pointer_access &&
                type_table[f.type.unqualified()].kind == type_kind::function) {
@@ -1967,12 +1968,12 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             semantics[f.node].kind == semantic_kind::bound_member_function) {
             /* (resolve_call's implied (*this)) */
             object = semantics[f.node].a;
-            member = semantics[f.node].b;
+            member = entity_index_in(semantics[f.node].b);
         }
         if (member) {
             if (semantics[f.node].kind ==
                 semantic_kind::bound_member_function) {
-                member = semantics[f.node].b;
+                member = entity_index_in(semantics[f.node].b);
             } else {
                 object = 0;
                 member = 0;
@@ -2794,7 +2795,7 @@ analysis_result semantic_analysis::call_function(
     callee.category = value_category::lvalue;
     callee.evaluation = constness::constant;
     callee.entity = f;
-    callee.node = expression_node(semantic_kind::entity, callee, at, f);
+    callee.node = expression_node(semantic_kind::entity, callee, at, f.index());
     owned_array<SyntaxElement> syntax;
     for (size_t i = 0; i < arguments.size(); i++)
         syntax.append(SyntaxElement{});
@@ -2982,7 +2983,7 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
         named.evaluation = constness::constant;
         named.entity = member;
         callee = expression_node(semantic_kind::entity, named, n.first_token(),
-                                 member);
+                                 member.index());
     }
     /* [class.virtual]/16: "Explicit qualification with the scope operator
        ([expr.prim.id.qual]) suppresses the virtual call mechanism" */

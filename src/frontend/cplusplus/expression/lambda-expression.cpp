@@ -497,7 +497,7 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
            arguments ([abi:closure-types]: d [<number>] _, number - 2 for
            the second) */
         default_parameter = 1;
-        for (entity_index k = 1; k < entity_table.size(); k++)
+        for (entity_index k{1}; k.index() < entity_table.size(); k++)
             if (entity_table[k].kind == entity_kind::class_type &&
                 entity_table[k].enclosing == scope &&
                 entity_table[k].default_argument_parameter)
@@ -511,7 +511,7 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
         scope = defining_class;
     }
     /* the key of the closures kept: the member's, or a deduction's */
-    uint32_t kept_key = member;
+    entity_index kept_key = member;
     if (!kept_key)
         kept_key = closure_reuse;
     if (kept_key)

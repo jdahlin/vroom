@@ -527,10 +527,9 @@ uint32_t semantic_analysis::template_record(entity_index t) const
 {
     if (!t)
         return 0;
-    templates_by_entity.update(function_templates,
-                               [](const function_template &f) {
-                                   return static_cast<size_t>(f.entity);
-                               });
+    templates_by_entity.update(
+        function_templates,
+        [](const function_template &f) { return f.entity; });
     return templates_by_entity.first(t);
 }
 
@@ -935,7 +934,7 @@ analysis_result semantic_analysis::template_constraints_satisfied(
                      static_cast<uint64_t>(a.type.cv()) << 8);
         words.append(a.type.unqualified().index());
         words.append(a.value);
-        words.append(a.template_entity);
+        words.append(a.template_entity.index());
         words.append(a.count);
     }
     uint32_t key = vhash_bytes(reinterpret_cast<const char *>(words.data()),

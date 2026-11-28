@@ -259,7 +259,7 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
         call.category = value_category::prvalue;
         call.evaluation = constness::not_constant;
         destroyed = expression_node(semantic_kind::destroy, call, at,
-                                    target.node, destructor);
+                                    target.node, destructor.index());
     }
     entity_index function = 0;
     bool sized = false;

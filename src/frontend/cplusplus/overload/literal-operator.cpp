@@ -245,7 +245,7 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
                     entity_table[f].type.unqualified())[0]) == p)
                 return f;
         }
-        return entity_index(0);
+        return entity_index{};
     };
     if (numeric) {
         /* [lex.ext]/3: "If L is a user-defined-integer-literal, let n be the

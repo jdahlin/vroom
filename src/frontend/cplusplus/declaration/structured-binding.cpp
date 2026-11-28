@@ -427,7 +427,8 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
     if (type_table[entity_table[e].type.unqualified()].kind !=
         type_kind::lvalue_reference) {
         object.category = value_category::xvalue;
-        object.node = expression_node(semantic_kind::entity, object, at, e);
+        object.node =
+            expression_node(semantic_kind::entity, object, at, e.index());
     }
     owned_array<uint32_t> group;
     for (entity_index h : held) {

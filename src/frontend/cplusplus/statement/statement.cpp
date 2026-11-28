@@ -796,7 +796,7 @@ analysis_result semantic_analysis::musttail_return(Statement n, uint32_t built)
     while (semantics[named].kind == semantic_kind::conversion)
         named = semantics[named].a;
     if (member && semantics[named].kind == semantic_kind::entity &&
-        entity_table[semantics[named].a].enclosing !=
+        entity_table[entity_index_in(semantics[named].a)].enclosing !=
             entity_table[function_state.function].enclosing)
         return ill_formed(n,
                           "member function cannot perform a tail call to a "
@@ -805,7 +805,8 @@ analysis_result semantic_analysis::musttail_return(Statement n, uint32_t built)
     /* clang refuses a [[noreturn]] callee, not a GNU noreturn one; the
        entity keeps one flag for both */
     if (semantics[named].kind == semantic_kind::entity &&
-        (entity_table[semantics[named].a].gnu_flags & gnu_noreturn))
+        (entity_table[entity_index_in(semantics[named].a)].gnu_flags &
+         gnu_noreturn))
         return not_supported_because(n, "dcl.attr",
                                      "a musttail call of a noreturn function");
     if (!musttail_similar(x.operand, y.operand))
@@ -909,9 +910,10 @@ uint32_t semantic_analysis::declaration_statements(size_t first, token_index at)
 {
     owned_array<uint32_t> each;
     for (size_t i = first; i < block_variables.size(); i++)
-        each.append(statement_node(
-            semantic_kind::declaration_statement, at, block_variables[i],
-            entity_table[block_variables[i]].definition));
+        each.append(
+            statement_node(semantic_kind::declaration_statement, at,
+                           block_variables[i].index(),
+                           entity_table[block_variables[i]].definition));
     block_variables.resize(first);
     if (each.empty())
         return statement_node(semantic_kind::null_statement, at);
@@ -1002,7 +1004,7 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
             m.entity = 0;
         }
         m.node = expression_node(semantic_kind::entity, m, first_token(at[1]),
-                                 last_declared);
+                                 last_declared.index());
     } else {
         VTRY_SET(r, expression(c, m));
     }

@@ -28,7 +28,7 @@ namespace
 
 uint32_t scope_hash(entity_index scope, uint32_t name)
 {
-    uint32_t key[2] = {scope, name};
+    uint32_t key[2] = {scope.index(), name};
     return vhash_string(reinterpret_cast<const char *>(key), sizeof key);
 }
 
@@ -47,7 +47,7 @@ entity_index entities::find(entity_index scope, uint32_t name) const
 /* [dcl.link]/7: the first namespace-scope declaration of this C name. */
 entity_index entities::find_c_linkage(uint32_t name, entity_kind kind) const
 {
-    const entity *entries = records.data();
+    const stable_array<entity, entity_index> &entries = records;
     size_t count = records.size();
     c_linkage_by_name.update(c_linkage,
                              [&](entity_index e) { return entries[e].name; });
@@ -57,7 +57,7 @@ entity_index entities::find_c_linkage(uint32_t name, entity_kind kind) const
          i = c_linkage_by_name.after(i)) {
         entity_index at = c_linkage[i - 1];
         const entity &e = entries[at];
-        if (at < count && e.kind == kind &&
+        if (at.index() < count && e.kind == kind &&
             (!e.enclosing ||
              entries[e.enclosing].kind == entity_kind::namespace_entity) &&
             (!found || at < found))
@@ -150,7 +150,7 @@ entity_index entities::make(entity_kind kind, uint32_t name,
     e.name = name;
     e.enclosing = enclosing;
     records.append(e);
-    return static_cast<entity_index>(records.size() - 1);
+    return entity_index{static_cast<uint32_t>(records.size() - 1)};
 }
 
 void entities::add_declaration(entity_index e, SyntaxRef node)

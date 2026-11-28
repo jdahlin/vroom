@@ -69,15 +69,17 @@ bool dump_analysis_selftest(vbuffer *out)
         ok &= analysis_check(
             out, t[f].parameter_count == 2 && t.parameters(f)[1] == two[1],
             "a function type's parameters");
-        ok &= analysis_check(out,
-                             t.of_entity(type_kind::class_type, 1) !=
-                                     t.of_entity(type_kind::class_type, 2) &&
-                                 t.of_entity(type_kind::class_type, 1) !=
-                                     t.of_entity(type_kind::enumeration, 1),
-                             "one type per class and enumeration");
         ok &= analysis_check(
-            out, t.pointer_to_member(1, plain) != t.pointer_to_member(2, plain),
-            "[dcl.mptr]/1: pointers to members by class");
+            out,
+            t.of_entity(type_kind::class_type, entity_index{1}) !=
+                    t.of_entity(type_kind::class_type, entity_index{2}) &&
+                t.of_entity(type_kind::class_type, entity_index{1}) !=
+                    t.of_entity(type_kind::enumeration, entity_index{1}),
+            "one type per class and enumeration");
+        ok &= analysis_check(out,
+                             t.pointer_to_member(entity_index{1}, plain) !=
+                                 t.pointer_to_member(entity_index{2}, plain),
+                             "[dcl.mptr]/1: pointers to members by class");
         /* enough types for the table to grow several times */
         size_t before = t.size();
         qualified_type chain = plain;
@@ -131,7 +133,7 @@ bool dump_analysis_selftest(vbuffer *out)
         qualified_type g =
             qualified_type::make(t.function(i, nullptr, 0, true), cv_none);
         qualified_type s = qualified_type::make(
-            t.of_entity(type_kind::class_type, 1), cv_none);
+            t.of_entity(type_kind::class_type, entity_index{1}), cv_none);
         owned_buffer encoded;
         auto claim = [&](qualified_type type, value_category category,
                          const char *expected) {
@@ -437,9 +439,9 @@ static void dump_lookup_claims(const semantic_analysis &analysis,
                                token_stream &tokens, vbuffer *out)
 {
     /* each entity's first declared name, in the order they were declared */
-    owned_array<token_index> first;
+    owned_array<token_index, entity_index> first;
     first.resize(analysis.entity_table.size());
-    for (size_t e = 0; e < analysis.entity_table.size(); e++)
+    for (entity_index e; e.index() < analysis.entity_table.size(); e++)
         first[e] = 0;
     /* only a name of the entity's first declaration: one declaration
        analysis records no declared_name for (a member's, in its class)
@@ -454,7 +456,7 @@ static void dump_lookup_claims(const semantic_analysis &analysis,
     }
     owned_buffer spelling;
     for (const semantic_analysis::name_use &u : analysis.name_uses) {
-        if (!u.entity || u.entity >= analysis.entity_table.size())
+        if (!u.entity || u.entity.index() >= analysis.entity_table.size())
             continue;
         token_index declared_at = first[u.entity];
         if (!declared_at || tokens[u.at].preprocessing.expansion ||
@@ -580,7 +582,7 @@ static void dump_layout_claims(const semantic_analysis &analysis,
                                token_stream &tokens, vbuffer *out)
 {
     owned_buffer name, lines;
-    for (entity_index c = 1; c < analysis.entity_table.size(); c++) {
+    for (entity_index c{1}; c.index() < analysis.entity_table.size(); c++) {
         const entity &x = analysis.entity_table[c];
         if (x.kind != entity_kind::class_type || !x.defined || !x.size ||
             tokens[x.class_key].preprocessing.expansion)

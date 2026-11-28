@@ -28,11 +28,12 @@ namespace cplusplus
 qualified_type semantic_analysis::placeholder_type(bool decltype_auto,
                                                    entity_index named_concept)
 {
-    uint32_t which = named_concept << 2 | 1;
+    uint32_t which = named_concept.index() << 2 | 1;
     if (decltype_auto)
-        which = named_concept << 2 | 2;
+        which = named_concept.index() << 2 | 2;
     return qualified_type::make(
-        type_table.of_entity(type_kind::placeholder, which), cv_none);
+        type_table.of_entity(type_kind::placeholder, entity_index{which}),
+        cv_none);
 }
 
 bool semantic_analysis::contains_placeholder(qualified_type t,
@@ -43,9 +44,9 @@ bool semantic_analysis::contains_placeholder(qualified_type t,
     switch (r.kind) {
     case type_kind::placeholder:
         if (decltype_auto)
-            *decltype_auto = (r.entity & 3) == 2;
+            *decltype_auto = (r.entity.index() & 3) == 2;
         if (named_concept)
-            *named_concept = r.entity >> 2;
+            *named_concept = entity_index{r.entity.index() >> 2};
         return true;
     case type_kind::pointer:
     case type_kind::lvalue_reference:

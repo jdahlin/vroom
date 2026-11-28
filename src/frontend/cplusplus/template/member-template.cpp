@@ -606,7 +606,7 @@ analysis_result semantic_analysis::static_member_call(
     callee.category = value_category::lvalue;
     callee.evaluation = constness::constant;
     callee.entity = f;
-    callee.node = expression_node(semantic_kind::entity, callee, at, f);
+    callee.node = expression_node(semantic_kind::entity, callee, at, f.index());
     if (object)
         callee.node = expression_node(semantic_kind::comma, callee, at,
                                       object->node, callee.node);

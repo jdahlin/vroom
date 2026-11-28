@@ -31,7 +31,7 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     for (uint32_t i = 0; i < body.count; i++) {
         uint32_t p = 0;
         if (items[i])
-            p = symbol(items[i], body.at);
+            p = symbol(entity_index_in(items[i]), body.at);
         else if (i >= implicit)
             p = c_local(c, parameter_type(types[i - implicit], body.at));
         if (!p)
@@ -45,7 +45,7 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     vtt_parameter = 0;
     if (variant) {
         structor_class = x.enclosing;
-        structor_this = items[0];
+        structor_this = entity_index_in(items[0]);
     }
     if (variant == 2) {
         /* the VTT parameter after this */
@@ -137,7 +137,7 @@ bool c_lowering::function_definition_or_drop(entity_index e)
        since calls it */
     if (!used && !lowering_waiting && x.inline_ &&
         !x.member_definition_needed) {
-        while (is_waiting.size() <= e)
+        while (is_waiting.size() <= e.index())
             is_waiting.append(0);
         if (is_waiting[e])
             return true;
@@ -171,7 +171,7 @@ bool c_lowering::function_definition(entity_index e)
         if (!base)
             return false;
         owned_array<entity_index> before;
-        for (entity_index i = 0; i < symbols.size(); i++)
+        for (entity_index i; i.index() < symbols.size(); i++)
             if (!symbols[i])
                 before.append(i);
         if (!definition_body(e, base, 2))
@@ -393,7 +393,7 @@ bool c_lowering::translation_unit()
             return false;
     }
     /* by entity: those of declared_names seen */
-    owned_array<uint8_t> done;
+    owned_array<uint8_t, entity_index> done;
     for (const declared_name &d : analysis.declared_names) {
         if (!d.entity)
             continue;
@@ -411,7 +411,7 @@ bool c_lowering::translation_unit()
         if (analysis.explicitly_instantiated(d.entity) ==
             instantiation_kind::declaration)
             continue;
-        while (done.size() <= d.entity)
+        while (done.size() <= d.entity.index())
             done.append(0);
         if (done[d.entity])
             continue;
@@ -428,7 +428,7 @@ bool c_lowering::translation_unit()
         return false;
     /* [abi:vague-vtable]: the virtual table of each class whose key
        function this translation unit defines */
-    for (entity_index k = 1; k < analysis.entity_table.size(); k++) {
+    for (entity_index k{1}; k.index() < analysis.entity_table.size(); k++) {
         const dynamic_class *d = analysis.dynamic_of(k);
         if (d && d->key_function &&
             analysis.entity_table[d->key_function].defined && !vtable(k, 0))

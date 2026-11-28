@@ -429,7 +429,7 @@ uint32_t semantic_analysis::expression_structure(SyntaxElement e)
                                         entity_table[named].value, 0, 0);
         lookup_result x = lookup_unqualified(identifier, lookup_filter::any);
         if (x.entity && !entity_table[x.entity].instantiation)
-            return expression_node_make(tag_entity, 0, x.entity, 0);
+            return expression_node_make(tag_entity, 0, x.entity.index(), 0);
         return expression_node_make(tag_identifier, 0, identifier, 0);
     }
     if (k.literal != literal_kind::none) {
@@ -509,7 +509,7 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
                 at, "temp.dep.constexpr",
                 "an array bound parameter that is not integral");
         type = qualified_type::make(
-            type_table.array_of_parameter_bound(type, named), cv_none);
+            type_table.array_of_parameter_bound(type, named.index()), cv_none);
         return analysis_result::well_formed;
     }
     /* ... and an expression of one (T (&)[N + 1]) is value-dependent too
@@ -518,10 +518,10 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
        [temp.deduct.type]/5.3); each instantiation analyses the declarator
        again */
     if (entity_index named = value_parameter_in(bound)) {
-        type =
-            qualified_type::make(type_table.array_of_parameter_bound(
-                                     type, named, expression_structure(bound)),
-                                 cv_none);
+        type = qualified_type::make(
+            type_table.array_of_parameter_bound(type, named.index(),
+                                                expression_structure(bound)),
+            cv_none);
         return analysis_result::well_formed;
     }
     expression_meaning m;

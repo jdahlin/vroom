@@ -138,14 +138,14 @@ bool semantic_analysis::argument_unit_local(const template_argument &a) const
             !address_parameter_type(a.type))
             return false;
         {
-            entity_index named = static_cast<entity_index>(a.value);
+            entity_index named = entity_index_in(a.value);
             return entity_table[named].linkage_of_name == linkage::internal ||
                    unit_local(named);
         }
     case template_argument::kind_t::template_name: {
         if (a.template_entity)
             return false;
-        entity_index named = static_cast<entity_index>(a.value);
+        entity_index named = entity_index_in(a.value);
         return entity_table[named].linkage_of_name == linkage::internal ||
                unit_local(named);
     }
@@ -810,8 +810,8 @@ analysis_result semantic_analysis::declare(
             c.linkage_of_name = linkage::external;
             /* (and its unnamed member classes have it now,
                class_specifier) */
-            for (entity_index k = record.entity + 1; k < entity_table.size();
-                 k++) {
+            for (entity_index k = record.entity + 1;
+                 k.index() < entity_table.size(); k++) {
                 entity &m = entity_table[k];
                 if (m.kind == entity_kind::class_type && !m.name &&
                     !m.linkage_name && !m.lambda && m.enclosing &&

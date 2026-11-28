@@ -86,7 +86,7 @@ uint64_t itanium_mangler::local_class_ordinal(entity_index c,
     if (!name)
         name = table[c].linkage_name;
     uint64_t ordinal = 0;
-    for (entity_index other = 1; other < c; other++) {
+    for (entity_index other{1}; other < c; other++) {
         const entity &x = table[other];
         uint32_t other_name = x.name;
         if (!other_name)
@@ -154,7 +154,7 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
     if (!unqualified_name(e))
         return false;
     uint64_t earlier = 0;
-    for (entity_index other = 1; other < e; other++)
+    for (entity_index other{1}; other < e; other++)
         if (table[other].kind == entity_kind::variable &&
             !table[other].automatic && table[other].name == x.name &&
             table[other].enclosing &&

@@ -708,7 +708,7 @@ bool semantic_analysis::associated_with(qualified_type t,
                         associated_with(a.type, classes, namespaces, false);
                     } else if (a.kind ==
                                template_argument::kind_t::template_name) {
-                        entity_index named = static_cast<entity_index>(a.value);
+                        entity_index named = entity_index_in(a.value);
                         entity_index in = entity_table[named].enclosing;
                         if (in &&
                             entity_table[in].kind == entity_kind::class_type)

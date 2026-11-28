@@ -1647,7 +1647,7 @@ analysis_result semantic_analysis::construct(
     VTRY(du, diagnose_if_call(at.first_token(), chosen, nodes.data(),
                               nodes.size()));
     result.node = expression_node(semantic_kind::construct, made,
-                                  at.first_token(), object, chosen);
+                                  at.first_token(), object, chosen.index());
     if (!nodes.empty()) {
         semantics.set_list(result.node, &nodes[0], nodes.size());
     }
@@ -3317,7 +3317,7 @@ analysis_result semantic_analysis::inherited_base_construct(
             from.category = value_category::xvalue;
         }
         from.evaluation = constness::not_constant;
-        from.node = expression_node(semantic_kind::entity, from, at, p);
+        from.node = expression_node(semantic_kind::entity, from, at, p.index());
         if (kind.kind == type_kind::class_type && !trivial_class(kind.entity)) {
             semantics[from.node].op = 1;
             nodes.append(from.node);
@@ -3335,7 +3335,7 @@ analysis_result semantic_analysis::inherited_base_construct(
     made.category = value_category::prvalue;
     made.evaluation = constness::unknown;
     uint32_t built = expression_node(semantic_kind::construct, made, at,
-                                     object.node, chosen);
+                                     object.node, chosen.index());
     if (!nodes.empty())
         semantics.set_list(built, &nodes[0], nodes.size());
     statement = statement_node(semantic_kind::expression_statement, at, built);
@@ -3629,7 +3629,8 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
         from.category = value_category::lvalue;
         from.type = type_table[entity_table[source].type.unqualified()].operand;
         from.evaluation = constness::not_constant;
-        from.node = expression_node(semantic_kind::entity, from, at, source);
+        from.node =
+            expression_node(semantic_kind::entity, from, at, source.index());
         analysis_result r = analysis_result::well_formed;
         if (entity_table[e].base_subobject)
             r = to_base(at,
@@ -3805,8 +3806,9 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
                 type_table.fundamental(fundamental_type::void_), cv_none);
             call.category = value_category::prvalue;
             call.evaluation = constness::not_constant;
-            uint32_t destroyed = expression_node(semantic_kind::destroy, call,
-                                                 at, elem.node, destructor);
+            uint32_t destroyed =
+                expression_node(semantic_kind::destroy, call, at, elem.node,
+                                destructor.index());
             statements.append(array_loop_statement(
                 at, bound, true,
                 statement_node(semantic_kind::expression_statement, at,
@@ -3833,7 +3835,7 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
         call.category = value_category::prvalue;
         call.evaluation = constness::not_constant;
         uint32_t destroyed = expression_node(semantic_kind::destroy, call, at,
-                                             object.node, destructor);
+                                             object.node, destructor.index());
         statements.append(
             statement_node(semantic_kind::expression_statement, at, destroyed));
         if (entity_table[order[i]].virtual_base)

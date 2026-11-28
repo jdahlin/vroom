@@ -148,9 +148,9 @@ class c_lowering
                                 owned_array<uint32_t> &out);
     uint32_t local_function(const char *name, size_t length);
     /* the C symbol of each entity, 0 until made */
-    owned_array<uint32_t> symbols;
+    owned_array<uint32_t, entity_index> symbols;
     /* the C struct of each class, 0 until made */
-    owned_array<ast_qualified_type> records;
+    owned_array<ast_qualified_type, entity_index> records;
     /* [ext:clang_vla] the C type of each variable length array type (by
        the type's index), made once: its bound is lowered once, where the
        array is first named (its declaration) */
@@ -159,15 +159,15 @@ class c_lowering
        C struct, which has padding fields where C's layout would place a
        member earlier than the ABI does; a class: its C struct's number of
        fields */
-    owned_array<uint32_t> c_fields;
+    owned_array<uint32_t, entity_index> c_fields;
     /* a base subobject whose field is the char array of its data size */
-    owned_array<uint8_t> tail_reused;
+    owned_array<uint8_t, entity_index> tail_reused;
     /* a class named through a pointer or reference while another class's
        struct is being made: its tag exists, its fields wait until the
        outermost class is complete (else a member of it that is the class
        being made would be an incomplete struct); the classes waiting,
        with where each was named */
-    owned_array<uint8_t> deferred_class;
+    owned_array<uint8_t, entity_index> deferred_class;
     owned_array<entity_index> deferred_classes;
     owned_array<token_index> deferred_at;
     /* the nesting depth of the classes being made */
@@ -182,13 +182,13 @@ class c_lowering
     /* the complete object constructor or destructor's symbol (C1, D1) of
        each special member function, 0 until made; symbols has the base
        object one (C2, D2) */
-    owned_array<uint32_t> complete_symbols;
+    owned_array<uint32_t, entity_index> complete_symbols;
     /* each virtual destructor's deleting destructor (D0), 0 until made */
-    owned_array<uint32_t> deleting_symbols;
+    owned_array<uint32_t, entity_index> deleting_symbols;
     bool deleting_destructor(entity_index e, token_index at, bool define);
     /* [abi:vtable]: each dynamic class's virtual table symbol, 0 until
        made, and __cxa_pure_virtual's ([abi:pure-virtual]) */
-    owned_array<uint32_t> vtables;
+    owned_array<uint32_t, entity_index> vtables;
     uint32_t pure_virtual = 0;
     /* __cxa_deleted_virtual, the slot of a destructor defined as deleted */
     uint32_t deleted_virtual = 0;
@@ -292,7 +292,7 @@ class c_lowering
                      owned_array<entity_index> &seen) const;
     /* class k's VTT symbol, defined with its construction virtual tables
        where k's virtual table is */
-    owned_array<uint32_t> vtts;
+    owned_array<uint32_t, entity_index> vtts;
     uint32_t vtt(entity_index k, token_index at);
     uint32_t vtt_define(entity_index k, uint32_t table, int storage,
                         uint32_t flags, token_index at);
@@ -898,7 +898,7 @@ class c_lowering
        builtins vcc lacks); one a use already named is not */
     bool function_definition_or_drop(entity_index e);
     /* per entity: a use made its symbol (symbol(), not declaring) */
-    owned_array<uint8_t> used_symbols;
+    owned_array<uint8_t, entity_index> used_symbols;
     struct dropped_function {
         entity_index entity;
         lowering_failure failure;
@@ -909,7 +909,7 @@ class c_lowering
        (lower_waiting_functions); 0 for one lowered */
     owned_array<entity_index> waiting_functions;
     /* by entity: whether it is in waiting_functions now */
-    owned_array<uint8_t> is_waiting;
+    owned_array<uint8_t, entity_index> is_waiting;
     bool lowering_waiting = false;
     bool lower_waiting_functions();
     bool variable_definition(entity_index e);

@@ -329,7 +329,7 @@ class record_chains
     void update(const owned_array<T> &records, Key key)
     {
         for (size_t i = next.size(); i < records.size(); i++) {
-            size_t k = key(records[i]);
+            size_t k = table_slot(key(records[i]));
             while (ends.size() <= k)
                 ends.append(chain{0, 0});
             uint32_t at = static_cast<uint32_t>(i + 1);
@@ -342,8 +342,9 @@ class record_chains
         }
     }
     /* a record's index plus one, 0 at the chain's end */
-    uint32_t first(size_t k) const
+    template <typename Key> uint32_t first(Key key) const
     {
+        size_t k = table_slot(key);
         if (k < ends.size())
             return ends[k].first;
         return 0;

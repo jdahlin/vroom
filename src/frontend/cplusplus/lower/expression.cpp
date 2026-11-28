@@ -62,7 +62,7 @@ uint32_t c_lowering::expression(uint32_t index)
         return statement_expression(void_type, block(items));
     }
     case semantic_kind::entity: {
-        entity_index e = n.a;
+        entity_index e = entity_index_in(n.a);
         const entity &x = analysis.entity_table[e];
         uint32_t s = symbol(e, n.at);
         if (!s)
@@ -351,7 +351,7 @@ uint32_t c_lowering::expression(uint32_t index)
             vtt = vtt_argument(b, n.at);
         if (failure.what)
             return 0;
-        return special_call(n.b,
+        return special_call(entity_index_in(n.b),
                             address_of(object, pointer_to(type_of(object))),
                             nullptr, 0, n.at, vtt);
     }

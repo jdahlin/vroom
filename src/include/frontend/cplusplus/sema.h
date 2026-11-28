@@ -59,6 +59,15 @@ inline type_index type_index_in(uint64_t field)
     return type_index{static_cast<uint32_t>(field)};
 }
 
+/* an entity of the translation unit; 0 is no entity */
+using entity_index = table_index<struct entity_tag>;
+
+/* an entity_index kept in a field that holds other things too */
+inline entity_index entity_index_in(uint64_t field)
+{
+    return entity_index{static_cast<uint32_t>(field)};
+}
+
 /*
  * A possibly cv-qualified type: the cv-unqualified type's index and the
  * qualifiers.  [basic.type.qualifier]/1: "The cv-qualified or
@@ -158,7 +167,7 @@ struct type {
     qualified_type operand;
     /* class, enumeration: the entity; pointer to member: the class's (0
        for a dependent class, whose type is bound) */
-    uint32_t entity = 0;
+    entity_index entity = 0;
     /* array: the bound N; in a template's own declaration a bound that is
        a non-type template-parameter's name (T[N], [temp.deduct.type]/8's
        T[i]) is that parameter's entity, with bound_known and bound 0; an
@@ -207,8 +216,9 @@ class types
     /* the function type f with the qualifiers of [dcl.fct]/6 */
     type_index function_qualified(type_index f, uint32_t function_cv,
                                   uint32_t function_ref);
-    type_index of_entity(type_kind kind, uint32_t entity);
-    type_index pointer_to_member(uint32_t class_entity, qualified_type member);
+    type_index of_entity(type_kind kind, entity_index entity);
+    type_index pointer_to_member(entity_index class_entity,
+                                 qualified_type member);
     type_index dependent_pointer_to_member(type_index class_type,
                                            qualified_type member);
     type_index pack_expansion_of(qualified_type pattern);
@@ -259,9 +269,6 @@ class types
 };
 
 /* ---- entities ----------------------------------------------------------- */
-
-/* an entity of the translation unit; 0 is no entity */
-using entity_index = uint32_t;
 
 /* [basic.pre]/3: "An entity is a value, object, reference, structured
    binding, function, enumerator, type, class member, bit-field, template,
@@ -1172,7 +1179,7 @@ class entities
     }
 
   private:
-    stable_array<entity> records;
+    stable_array<entity, entity_index> records;
     stable_array<entity_declaration> declarations;
     /* the names bound in scopes: open addressing over (scope, name); an
        empty slot has entity 0 */
@@ -3729,7 +3736,7 @@ class semantic_analysis
        under this key (a node's index with the top bit set: no
        entity's), while the expression is
        analysed); 0 when none */
-    uint32_t closure_reuse = 0;
+    entity_index closure_reuse = 0;
     /* a generic lambda's closure: what its specializations' bodies need of
        the lambda-expression, and the captures it made */
     struct generic_closure {
@@ -5856,13 +5863,14 @@ class semantic_analysis
     /* the slots of template_parameter_entities that hold an entity: a chain
        from the entity (slot plus one, 0 ends it), written only by
        set_template_parameter_entity */
-    owned_array<uint32_t> parameter_slot_of_entity, parameter_slot_next;
+    owned_array<uint32_t, entity_index> parameter_slot_of_entity;
+    owned_array<uint32_t> parameter_slot_next;
     void set_template_parameter_entity(uint32_t slot, entity_index e)
     {
         if (template_parameter_entities[slot] == e)
             return;
         template_parameter_entities[slot] = e;
-        while (parameter_slot_of_entity.size() <= e)
+        while (parameter_slot_of_entity.size() <= e.index())
             parameter_slot_of_entity.append(0);
         while (parameter_slot_next.size() <= slot)
             parameter_slot_next.append(0);
@@ -5871,7 +5879,7 @@ class semantic_analysis
     }
     uint32_t first_parameter_slot(entity_index e) const
     {
-        if (e < parameter_slot_of_entity.size())
+        if (e.index() < parameter_slot_of_entity.size())
             return parameter_slot_of_entity[e];
         return 0;
     }
