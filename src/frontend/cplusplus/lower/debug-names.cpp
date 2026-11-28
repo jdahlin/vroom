@@ -212,9 +212,10 @@ void c_lowering::debug_virtual_bases(entity_index e, ast_qualified_type made,
         return;
     const entity x = analysis.entity_table[e];
     owned_array<uint32_t> pairs;
-    for (uint32_t i = 0; i < x.base_count; i++) {
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
         const entity b =
-            analysis.entity_table[analysis.class_bases[x.first_base + i]];
+            analysis
+                .entity_table[analysis.class_bases[x.details().first_base + i]];
         if (!b.virtual_base)
             continue;
         const dynamic_class *d = analysis.dynamic_of(e);
