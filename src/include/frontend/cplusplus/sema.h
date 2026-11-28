@@ -6523,6 +6523,28 @@ class semantic_analysis
        typedef-name of the type, or a constant of the value */
     void bind_template_argument(entity_index scope, entity_index parameter,
                                 const template_argument &a);
+    /*
+     * A scope in outer that binds the count template-parameters from
+     * template_parameter_entities[first] to arguments, for analysing a part
+     * of a template again (an alias's type-id, a constraint, a default
+     * template-argument).  One scope for the same names, arguments and outer,
+     * made the first time: most substitutions repeat an earlier one, and the
+     * bindings of each were most of a translation unit's entities.  What a
+     * specialization keeps as its own is not one of these.  forwarded[i], if
+     * not 0, is what parameter i's name is bound to instead.
+     */
+    entity_index argument_scope(uint32_t first, uint32_t count,
+                                const template_argument *arguments,
+                                entity_index outer,
+                                const entity_index *forwarded = nullptr);
+    struct argument_scope_record {
+        /* its key: argument_scope_keys[first_word .. first_word + words) */
+        uint32_t first_word, words;
+        entity_index scope;
+    };
+    owned_array<argument_scope_record> argument_scopes;
+    owned_array<uint64_t> argument_scope_keys;
+    record_chains argument_scopes_by_key;
     bool explicitly_specialized_class(entity_index c) const;
     /* [temp.expl.spec]/17: a member class of a specialization */
     bool member_class_specialization(SyntaxRef n, SyntaxRef specifier,

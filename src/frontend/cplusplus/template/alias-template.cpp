@@ -176,18 +176,9 @@ analysis_result semantic_analysis::alias_template_specialization(
                 id, "temp.names",
                 "an alias template-id whose constraints are not satisfied");
     }
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                           entity_table[ft.entity].enclosing);
-    for (uint32_t i = 0; i < ft.parameter_count; i++) {
-        entity_index parameter =
-            template_parameter_entities[ft.first_parameter + i];
-        if (forwarded[i]) {
-            entity_table.bind(scope, entity_table[parameter].name,
-                              forwarded[i]);
-            continue;
-        }
-        bind_template_argument(scope, parameter, arguments[i]);
-    }
+    entity_index scope =
+        argument_scope(ft.first_parameter, ft.parameter_count, arguments.data(),
+                       entity_table[ft.entity].enclosing, forwarded.data());
     entity_index saved_scope = current_scope;
     token_index saved_horizon = lookup_horizon;
     bool saved_expanding = expanding;

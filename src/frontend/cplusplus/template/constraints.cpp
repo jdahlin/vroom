@@ -975,12 +975,9 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     }
     if (!constrained)
         return analysis_result::well_formed;
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                           entity_table[ft.entity].enclosing);
-    for (uint32_t i = 0; i < ft.parameter_count; i++)
-        bind_template_argument(
-            scope, template_parameter_entities[ft.first_parameter + i],
-            values[i]);
+    entity_index scope =
+        argument_scope(ft.first_parameter, ft.parameter_count, values.data(),
+                       entity_table[ft.entity].enclosing);
     for (uint32_t i = 0; i < ft.parameter_count && satisfied; i++) {
         SyntaxRef p = template_parameter_nodes[ft.first_parameter + i];
         template_parameter_parts x;

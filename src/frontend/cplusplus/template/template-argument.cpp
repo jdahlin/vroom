@@ -200,6 +200,73 @@ void semantic_analysis::bind_template_argument(entity_index scope,
     entity_table.bind(scope, name, e);
 }
 
+entity_index semantic_analysis::argument_scope(
+    uint32_t first, uint32_t count, const template_argument *arguments,
+    entity_index outer, const entity_index *forwarded)
+{
+    uint32_t first_word = static_cast<uint32_t>(argument_scope_keys.size());
+    argument_scope_keys.append(static_cast<uint64_t>(first) << 32 | count);
+    argument_scope_keys.append(outer.index());
+    /* a template template-argument's binding is recorded each time it is
+       made (bound_template_templates): its scope is not shared */
+    bool shared = true;
+    for (uint32_t i = 0; i < count; i++) {
+        const template_argument &a = arguments[i];
+        uint64_t instead = 0;
+        if (forwarded)
+            instead = forwarded[i].index();
+        if (a.kind == template_argument::kind_t::template_name)
+            shared = false;
+        argument_scope_keys.append(static_cast<uint64_t>(a.kind) |
+                                   static_cast<uint64_t>(a.count) << 8 |
+                                   instead << 40);
+        argument_scope_keys.append(static_cast<uint64_t>(a.type.cv()) << 32 |
+                                   a.type.unqualified().index());
+        argument_scope_keys.append(a.value);
+        argument_scope_keys.append(a.template_entity.index());
+    }
+    uint32_t words =
+        static_cast<uint32_t>(argument_scope_keys.size()) - first_word;
+    auto bucket = [&](uint32_t from, uint32_t n) {
+        return vhash_bytes(reinterpret_cast<const char *>(
+                               argument_scope_keys.data() + from),
+                           n * sizeof(uint64_t)) &
+               0xffff;
+    };
+    argument_scopes_by_key.update(argument_scopes,
+                                  [&](const argument_scope_record &r) {
+                                      return bucket(r.first_word, r.words);
+                                  });
+    uint32_t key = bucket(first_word, words);
+    if (shared)
+        for (uint32_t k = argument_scopes_by_key.first(key); k;
+             k = argument_scopes_by_key.after(k)) {
+            const argument_scope_record &r = argument_scopes[k - 1];
+            if (r.words != words ||
+                memcmp(argument_scope_keys.data() + r.first_word,
+                       argument_scope_keys.data() + first_word,
+                       words * sizeof(uint64_t)) != 0)
+                continue;
+            argument_scope_keys.resize(first_word);
+            return r.scope;
+        }
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
+    for (uint32_t i = 0; i < count; i++) {
+        entity_index parameter = template_parameter_entities[first + i];
+        if (forwarded && forwarded[i]) {
+            entity_table.bind(scope, entity_table[parameter].name,
+                              forwarded[i]);
+            continue;
+        }
+        bind_template_argument(scope, parameter, arguments[i]);
+    }
+    if (shared)
+        argument_scopes.append({first_word, words, scope});
+    else
+        argument_scope_keys.resize(first_word);
+    return scope;
+}
+
 /* a dependent_value's code for a relational or equality operator
    (dependent_value_entity, dependent_value_operators); 0 for another */
 static uint64_t dependent_comparison_value(SyntaxElement op)
@@ -1658,16 +1725,13 @@ analysis_result semantic_analysis::default_template_arguments(
             return not_supported_because(
                 at, "temp.arg", "a parameter with no argument and no default");
         }
-        entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                               template_lexical_outer(ft));
         /* the names of the declaration that gave the default
            ([temp.param]/12, merged: they may differ from the
            definition's) */
         uint32_t names =
             template_parameter_default_names[ft.first_parameter + i];
-        for (uint32_t k = 0; k < i; k++)
-            bind_template_argument(
-                scope, template_parameter_entities[names + k], arguments[k]);
+        entity_index scope = argument_scope(names, i, arguments.data(),
+                                            template_lexical_outer(ft));
         current_scope = scope;
         lookup_horizon = ft.declaration.first_token();
         template_argument a;
