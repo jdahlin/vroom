@@ -93,7 +93,7 @@ analysis_result semantic_analysis::throw_expression(ThrowExpression n,
                is an id-expression that names an implicitly movable entity ... overload resolution to select the
                constructor for the copy is first performed as if the expression were an rvalue" */
             entity_index movable = implicitly_movable(n[1]);
-            if (movable && movable >= try_entities &&
+            if (movable && movable.index() >= try_entities &&
                 operand.category == value_category::lvalue &&
                 operand.type.unqualified() == object.unqualified() &&
                 declares_move_constructor(k.entity))

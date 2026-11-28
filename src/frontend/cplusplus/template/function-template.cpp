@@ -546,7 +546,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         }
     for (uint32_t g : local)
         function_templates[g - 1].unusable = !overload;
-    if (!overload && (!held || held < before ||
+    if (!overload && (!held || held.index() < before ||
                       entity_table[held].kind != entity_kind::none)) {
         record.unusable = true;
         for (function_template &other : function_templates)

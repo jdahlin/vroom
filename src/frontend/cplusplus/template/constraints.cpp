@@ -932,7 +932,7 @@ analysis_result semantic_analysis::template_constraints_satisfied(
                      static_cast<uint64_t>(a.type.cv()) << 8);
         words.append(a.type.unqualified().index());
         words.append(a.value);
-        words.append(a.template_entity);
+        words.append(a.template_entity.index());
         words.append(a.count);
     }
     uint32_t key = vhash_bytes(reinterpret_cast<const char *>(words.data()),

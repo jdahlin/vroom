@@ -705,7 +705,7 @@ analysis_result semantic_analysis::address_parameter(token_index t,
     qualified_type to = entity_table[parameter].type;
     const struct type record = type_table[to.unqualified()];
     bool reference = record.kind == type_kind::lvalue_reference;
-    entity_index e = static_cast<entity_index>(entity_table[parameter].value);
+    entity_index e = entity_index_in(entity_table[parameter].value);
     if (!e) {
         m.type = to;
         m.category = value_category::prvalue;
@@ -723,7 +723,7 @@ analysis_result semantic_analysis::address_parameter(token_index t,
     m.category = value_category::lvalue;
     m.entity = e;
     m.evaluation = constness::constant;
-    m.node = expression_node(semantic_kind::entity, m, t, e);
+    m.node = expression_node(semantic_kind::entity, m, t, e.index());
     if (reference) {
         m.entity = 0;
         m.evaluation = constness::unknown;
@@ -910,7 +910,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     }
     if (captured_view.unqualified())
         m.type = captured_view;
-    m.node = expression_node(semantic_kind::entity, m, t, e);
+    m.node = expression_node(semantic_kind::entity, m, t, e.index());
     if (deferred_use) {
         pending_use u;
         u.node = m.node;
@@ -1306,7 +1306,7 @@ analysis_result semantic_analysis::class_member_value(SyntaxRef n,
         m.entity = 0;
         m.evaluation = constness::unknown;
     }
-    m.node = expression_node(semantic_kind::entity, m, t, e);
+    m.node = expression_node(semantic_kind::entity, m, t, e.index());
     return analysis_result::well_formed;
 }
 

@@ -72,7 +72,7 @@ semantic_analysis::clang_ext_vector_type(SyntaxRef at, const gnu_attributes &g,
     type = qualified_type::make(
         type_table.ext_vector_of(
             qualified_type::make(type.unqualified(), cv_none),
-            g.ext_vector.count, g.ext_vector.parameter),
+            g.ext_vector.count, g.ext_vector.parameter.index()),
         cv_none);
     return analysis_result::well_formed;
 }

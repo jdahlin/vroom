@@ -670,7 +670,7 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
            function's parameter or return type): [basic.def]/5 and
            [class.abstract]/3, which clang applies at the closing } */
         type_index self = x.type.unqualified();
-        for (entity_index e = c + 1; e < entity_table.size(); e++) {
+        for (entity_index e = c + 1; e.index() < entity_table.size(); e++) {
             const entity &m = entity_table[e];
             if (m.enclosing != c)
                 continue;
@@ -765,7 +765,7 @@ uint32_t semantic_analysis::vtable_pointer_store(entity_index c, token_index at)
     stored.category = value_category::prvalue;
     stored.evaluation = constness::not_constant;
     uint32_t e = expression_node(semantic_kind::vtable_pointer_store, stored,
-                                 at, self.node, c);
+                                 at, self.node, c.index());
     return statement_node(semantic_kind::expression_statement, at, e);
 }
 

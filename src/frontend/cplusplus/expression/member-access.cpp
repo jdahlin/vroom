@@ -73,7 +73,7 @@ analysis_result semantic_analysis::function_this(token_index t,
     m.type = entity_table[e].type;
     m.entity = e;
     m.evaluation = constness::not_constant;
-    m.node = expression_node(semantic_kind::entity, m, t, e);
+    m.node = expression_node(semantic_kind::entity, m, t, e.index());
     analysis_result r = operand_value(current_declaration, m);
     m.evaluation = constness::not_constant;
     return r;
@@ -221,8 +221,8 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         result.evaluation = constness::unknown;
         if (m.evaluation == constness::not_constant && !aggregate_prvalue(m))
             result.evaluation = constness::not_constant;
-        result.node =
-            expression_node(semantic_kind::member, result, at, object, e);
+        result.node = expression_node(semantic_kind::member, result, at, object,
+                                      e.index());
         /* [expr.ref]/6.2: "If E2 is a bit-field, E1.E2 is a bit-field." */
         if (x.bit_field)
             result.bit_field_width = x.bit_width;
@@ -291,11 +291,11 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         result.category = value_category::prvalue;
         result.evaluation = constness::not_constant;
         result.node = expression_node(semantic_kind::bound_member_function,
-                                      result, at, address.node, e);
+                                      result, at, address.node, e.index());
         /* the class of the object expression as written, before the
            conversion to the member's class above: [class.protected]/1's
            check of the function chosen is made against it */
-        semantics[result.node].c = accessed_through;
+        semantics[result.node].c = accessed_through.index();
         m = result;
         return analysis_result::well_formed;
     }
@@ -400,8 +400,8 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
                 m.category = value_category::lvalue;
                 m.evaluation = constness::constant;
                 m.entity = static_fn;
-                m.node =
-                    expression_node(semantic_kind::entity, m, at, static_fn);
+                m.node = expression_node(semantic_kind::entity, m, at,
+                                         static_fn.index());
                 return analysis_result::well_formed;
             }
         }

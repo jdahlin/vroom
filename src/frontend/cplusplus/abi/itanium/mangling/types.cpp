@@ -463,8 +463,8 @@ bool itanium_mangler::placeholder_type(const struct type &r)
         {terminal::Da_auto_type, terminal::Dc_decltype_auto_type},
         {terminal::Dk_constrained_auto_type,
          terminal::DK_constrained_decltype_auto_type}};
-    entity_index constraint = r.entity >> 2;
-    enc.write(codes[constraint != 0][(r.entity & 3) == 2]);
+    entity_index constraint{r.entity.index() >> 2};
+    enc.write(codes[constraint != 0][(r.entity.index() & 3) == 2]);
     return !constraint || name(constraint);
 }
 
@@ -663,10 +663,10 @@ bool itanium_mangler::make_integer_seq_of_written(qualified_type t)
         return false;
     /* (the builtin template's name a candidate as a template prefix is; no
        entity: a scope of its own) */
-    if (!substitution(UINT32_MAX)) {
+    if (!substitution(entity_index{UINT32_MAX})) {
         enc.source_name("__make_integer_seq");
         candidate builtin;
-        builtin.scope = UINT32_MAX;
+        builtin.scope = entity_index{UINT32_MAX};
         enc.add_candidate(builtin);
     }
     enc.write(terminal::I_template_args);

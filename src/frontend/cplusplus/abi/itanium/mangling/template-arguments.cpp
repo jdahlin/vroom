@@ -430,7 +430,7 @@ bool itanium_mangler::template_arg_of(entity_index c, uint32_t i,
            the <expr-primary> below, L <type> 0 E */
         enc.write(terminal::X_template_arg_expression);
         enc.write(itanium_operator::ad_address_of);
-        if (!expr_primary_external(static_cast<entity_index>(v)))
+        if (!expr_primary_external(entity_index_in(v)))
             return false;
         enc.write(terminal::E_end);
         return true;

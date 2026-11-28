@@ -1190,7 +1190,7 @@ analysis_result semantic_analysis::predefined_name(token_index t,
         type_table.array_of(element, uint64_t(text.size()) + 1), cv_none);
     m.category = value_category::lvalue;
     m.evaluation = constness::unknown;
-    m.node = expression_node(semantic_kind::predefined_name, m, t, 0, f,
+    m.node = expression_node(semantic_kind::predefined_name, m, t, 0, f.index(),
                              static_cast<uint8_t>(form));
     return analysis_result::well_formed;
 }

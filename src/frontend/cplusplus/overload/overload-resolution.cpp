@@ -539,7 +539,8 @@ analysis_result semantic_analysis::best_viable_function(
                                     list_initializer_list(list_target);
                                 if (semantics[value.node].kind ==
                                     semantic_kind::construct)
-                                    a.function = semantics[value.node].b;
+                                    a.function = entity_index_in(
+                                        semantics[value.node].b);
                             }
                             if (tr.kind == type_kind::lvalue_reference ||
                                 tr.kind == type_kind::rvalue_reference) {
@@ -823,8 +824,8 @@ analysis_result semantic_analysis::best_viable_function(
             entity_table[x.function].enclosing !=
                 entity_table[y.function].enclosing)
             return false;
-        const entity_index both[2] = {x.template_index, y.template_index};
-        for (entity_index t : both) {
+        const uint32_t both[2] = {x.template_index, y.template_index};
+        for (uint32_t t : both) {
             SyntaxRef d = function_templates[t - 1].declaration;
             if (template_head_constrained(d) || trailing_constraint(d) ||
                 uses_decltype(d))

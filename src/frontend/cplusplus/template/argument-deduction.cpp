@@ -17,9 +17,10 @@ qualified_type semantic_analysis::remove_cv(qualified_type t, uint32_t cv)
         return qualified_type::make(t.unqualified(), t.cv() & ~cv);
     qualified_type element = remove_cv(record.operand, cv);
     if (record.entity)
-        return qualified_type::make(type_table.array_of_parameter_bound(
-                                        element, record.entity, record.bound),
-                                    t.cv() & ~cv);
+        return qualified_type::make(
+            type_table.array_of_parameter_bound(element, record.entity.index(),
+                                                record.bound),
+            t.cv() & ~cv);
     if (record.bound_known)
         return qualified_type::make(type_table.array_of(element, record.bound),
                                     t.cv() & ~cv);
@@ -171,7 +172,7 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             }
             template_argument named;
             named.kind = template_argument::kind_t::template_name;
-            named.value = at;
+            named.value = at.index();
             if (set[k] && !(deduced[k] == named))
                 return false;
             deduced[k] = named;

@@ -1328,9 +1328,9 @@ bool semantic_analysis::explicit_instantiation_takes_verdict(
 bool semantic_analysis::emitted_functions_needed()
 {
     bool marked = false;
-    for (entity_index f = 1; f < entity_table.size(); f++) {
+    for (entity_index f{1}; f.index() < entity_table.size(); f++) {
         /* (the walk waits on memory: entities are large) */
-        if (f + 16 < entity_table.size())
+        if (f.index() + 16 < entity_table.size())
             __builtin_prefetch(&entity_table[f + 16]);
         entity &x = entity_table[f];
         if (x.kind != entity_kind::function || !x.defined ||
@@ -1707,7 +1707,7 @@ bool semantic_analysis::specialization_template_name(entity_index e, uint32_t i,
     parameter = 0;
     if (a.kind != template_argument::kind_t::template_name)
         return false;
-    named = static_cast<entity_index>(a.value);
+    named = entity_index_in(a.value);
     if (a.template_entity) {
         named = a.template_entity;
         parameter = static_cast<uint32_t>(a.value) + 1;
@@ -1727,7 +1727,7 @@ bool semantic_analysis::specialization_address(entity_index e, uint32_t i,
     if (a.kind != template_argument::kind_t::value || a.template_entity ||
         !a.value || !address_parameter_type(a.type))
         return false;
-    object = static_cast<entity_index>(a.value);
+    object = entity_index_in(a.value);
     reference =
         type_table[a.type.unqualified()].kind == type_kind::lvalue_reference;
     return true;

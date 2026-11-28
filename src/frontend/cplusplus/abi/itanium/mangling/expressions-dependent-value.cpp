@@ -52,7 +52,7 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
         if (is(b.form)) {
             enc.write(operator_written(b.op, 2));
             return expression_of_dependent_value(x.enclosing) &&
-                   expression_of_dependent_value(x.name);
+                   expression_of_dependent_value(entity_index_in(x.name));
         }
     if (is(form::sizeof_type)) {
         enc.write(terminal::st_sizeof_type);
@@ -72,7 +72,7 @@ bool itanium_mangler::expression_of_dependent_value(entity_index d)
     }
     if (is(form::static_member)) {
         /* a static data member: an external name, L_Z <encoding> E */
-        if (!expr_primary_external(x.name))
+        if (!expr_primary_external(entity_index_in(x.name)))
             return false;
         return true;
     }

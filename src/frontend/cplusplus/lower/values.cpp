@@ -62,14 +62,15 @@ uint32_t c_lowering::address_of(uint32_t lvalue, ast_qualified_type pointer)
    left operand evaluated once */
 uint32_t c_lowering::member_access(const semantic_node &n, uint32_t object)
 {
-    const entity &x = analysis.entity_table[n.b];
+    const entity &x = analysis.entity_table[entity_index_in(n.b)];
     if (!is_reference(x.type) || is_reference(n.type))
         /* a reference member being initialized ([class.base.init]) is the
            pointer itself */
-        return ast_builder_member(c, object, c_fields[n.b], type(n.type, n.at));
+        return ast_builder_member(c, object, c_fields[entity_index_in(n.b)],
+                                  type(n.type, n.at));
     /* [expr.ref]/6.1: a reference member is the object it refers to */
-    uint32_t pointer =
-        ast_builder_member(c, object, c_fields[n.b], type(x.type, n.at));
+    uint32_t pointer = ast_builder_member(
+        c, object, c_fields[entity_index_in(n.b)], type(x.type, n.at));
     return dereference(pointer, type(n.type, n.at));
 }
 
@@ -127,8 +128,10 @@ bool c_lowering::folded_read(const semantic_node &x) const
 {
     return x.kind == semantic_kind::entity &&
            x.evaluation == constness::constant &&
-           analysis.entity_table[x.a].kind == entity_kind::variable &&
-           analysis.entity_table[x.a].usable == constness::constant &&
+           analysis.entity_table[entity_index_in(x.a)].kind ==
+               entity_kind::variable &&
+           analysis.entity_table[entity_index_in(x.a)].usable ==
+               constness::constant &&
            /* (a class object or a vector has no scalar value to fold: its
               definition is read) */
            record(x.type).kind != type_kind::class_type &&
@@ -151,14 +154,16 @@ uint32_t c_lowering::read(uint32_t n)
        definition to read */
     if (folded_read(x)) {
         semantic_node value = x;
-        value.value = analysis.entity_table[x.a].value;
+        value.value = analysis.entity_table[entity_index_in(x.a)].value;
         return constant(value);
     }
     /* (one of a 128-bit value: the evaluator's, wide_variables) */
     if (x.kind == semantic_kind::entity &&
-        analysis.entity_table[x.a].kind == entity_kind::variable &&
-        analysis.entity_table[x.a].wide_value)
-        return wide_integer(x.type, analysis.wide_variable_value(x.a));
+        analysis.entity_table[entity_index_in(x.a)].kind ==
+            entity_kind::variable &&
+        analysis.entity_table[entity_index_in(x.a)].wide_value)
+        return wide_integer(x.type,
+                            analysis.wide_variable_value(entity_index_in(x.a)));
     return expression(n);
 }
 
@@ -296,7 +301,7 @@ uint32_t c_lowering::string_literal(const semantic_node &n)
 uint32_t c_lowering::source_location(const semantic_node &n)
 {
     token_index at = n.at;
-    entity_index function = n.b;
+    entity_index function = entity_index_in(n.b);
     if (call_site_at) {
         at = call_site_at;
         function = call_site_function;
@@ -380,8 +385,8 @@ uint32_t c_lowering::source_location(const semantic_node &n)
 uint32_t c_lowering::predefined_name(const semantic_node &n)
 {
     owned_buffer text;
-    analysis.predefined_name_text(n.b, static_cast<predefined_name_form>(n.op),
-                                  text);
+    analysis.predefined_name_text(
+        entity_index_in(n.b), static_cast<predefined_name_form>(n.op), text);
     owned_array<uint8_t> bytes;
     bytes.resize(text.size() + 1);
     for (size_t i = 0; i < text.size(); i++)
@@ -400,7 +405,7 @@ uint32_t c_lowering::default_argument(const semantic_node &n)
     entity_index outer_function = call_site_function;
     if (!outer_at) {
         call_site_at = n.at;
-        call_site_function = n.b;
+        call_site_function = entity_index_in(n.b);
     }
     uint32_t made = expression(n.a);
     call_site_at = outer_at;
@@ -422,7 +427,8 @@ uint32_t c_lowering::conversion(const semantic_node &n)
             const semantic_node &object = node(n.a);
             if (folded_read(object)) {
                 semantic_node value = object;
-                value.value = analysis.entity_table[object.a].value;
+                value.value =
+                    analysis.entity_table[entity_index_in(object.a)].value;
                 value.type = n.type;
                 return constant(value);
             }
@@ -435,7 +441,8 @@ uint32_t c_lowering::conversion(const semantic_node &n)
                for a read) */
             const semantic_node &object = node(n.a);
             if (object.kind == semantic_kind::entity) {
-                const entity &x = analysis.entity_table[object.a];
+                const entity &x =
+                    analysis.entity_table[entity_index_in(object.a)];
                 if (x.kind == entity_kind::variable && x.constexpr_ &&
                     x.definition && !(x.type.cv() & cv_volatile) &&
                     analysis.type_table[x.type.unqualified()].kind ==
@@ -531,20 +538,24 @@ uint32_t c_lowering::conversion(const semantic_node &n)
                     null_dst, 0, 0);
     }
     case conversion_kind::derived_to_base:
-        if (analysis.entity_table[n.b].virtual_base) {
+        if (analysis.entity_table[entity_index_in(n.b)].virtual_base) {
             /* [class.mi]/4: a virtual base, where the object's virtual
                table says ([abi:vtable-components] vbase offset); in a
                complete object constructor or destructor, *this is a
                complete object whose layout gives the offset */
-            entity_index k = analysis.entity_table[n.b].enclosing;
-            entity_index v = record(analysis.entity_table[n.b].type).entity;
+            entity_index k =
+                analysis.entity_table[entity_index_in(n.b)].enclosing;
+            entity_index v =
+                record(analysis.entity_table[entity_index_in(n.b)].type).entity;
             if ((structor_variant == 1 || structor_variant == 3) &&
                 k == structor_class && at_this(n.a)) {
                 uint32_t p = expression(n.a);
                 if (!p)
                     return 0;
                 return offset_pointer(
-                    p, static_cast<int64_t>(analysis.entity_table[n.b].offset),
+                    p,
+                    static_cast<int64_t>(
+                        analysis.entity_table[entity_index_in(n.b)].offset),
                     t);
             }
             /* the pointer read three times: a temporary holds one with
@@ -578,16 +589,22 @@ uint32_t c_lowering::conversion(const semantic_node &n)
         }
         /* [conv.ptr]/3: a base at offset 0 (which analysis makes sure
            of): the same address, a null pointer one too */
-        if (analysis.entity_table[n.b].offset)
+        if (analysis.entity_table[entity_index_in(n.b)].offset)
             return null_checked_offset(
-                n, static_cast<int64_t>(analysis.entity_table[n.b].offset), t);
+                n,
+                static_cast<int64_t>(
+                    analysis.entity_table[entity_index_in(n.b)].offset),
+                t);
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
     case conversion_kind::base_to_derived:
         /* [expr.static.cast]/11: "the resulting pointer points to the
            enclosing object of type D": the base's offset subtracted */
-        if (analysis.entity_table[n.b].offset)
+        if (analysis.entity_table[entity_index_in(n.b)].offset)
             return null_checked_offset(
-                n, -static_cast<int64_t>(analysis.entity_table[n.b].offset), t);
+                n,
+                -static_cast<int64_t>(
+                    analysis.entity_table[entity_index_in(n.b)].offset),
+                t);
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
     case conversion_kind::pointer_to_integral:
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_INTEGER);

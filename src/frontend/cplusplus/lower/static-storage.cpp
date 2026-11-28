@@ -243,7 +243,7 @@ void c_lowering::guarded_initialization(const semantic_node &n,
                                         entity_index destructor,
                                         owned_array<uint32_t> &out)
 {
-    entity_index e = n.a;
+    entity_index e = entity_index_in(n.a);
     entity_index function = enclosing_function(e);
     if (!function) {
         fail("a guarded local static outside a function", n.at);

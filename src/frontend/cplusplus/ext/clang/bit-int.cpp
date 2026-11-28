@@ -52,8 +52,8 @@ analysis_result semantic_analysis::clang_bit_int_type(SyntaxRef n,
                 n, "temp.dep.constexpr",
                 "a _BitInt width naming a non-type template parameter of "
                 "non-integral type");
-        type = qualified_type::make(type_table.bit_int(0, named, is_unsigned),
-                                    cv_none);
+        type = qualified_type::make(
+            type_table.bit_int(0, named.index(), is_unsigned), cv_none);
         return analysis_result::well_formed;
     }
     expression_meaning m;

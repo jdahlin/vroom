@@ -705,7 +705,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             scope = saved;
         }
     } no_claims = {claim_scope, claim_scope};
-    claim_scope = UINT32_MAX;
+    claim_scope = entity_index{UINT32_MAX};
     __int128 previous = -1;
     fundamental_type previous_type = fundamental_type::int_;
     if (is_fixed)
@@ -1076,7 +1076,8 @@ semantic_analysis::using_enum_declaration(UsingEnumDeclaration n)
     bool any = false;
     /* (the enumerators are made after their enumeration's entity, an
        opaque declaration's too) */
-    for (entity_index en = enumeration + 1; en < entity_table.size(); en++) {
+    for (entity_index en = enumeration + 1; en.index() < entity_table.size();
+         en++) {
         const entity &x = entity_table[en];
         if (x.kind != entity_kind::enumerator || x.enclosing != enumeration)
             continue;

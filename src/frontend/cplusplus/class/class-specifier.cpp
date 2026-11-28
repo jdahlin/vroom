@@ -153,7 +153,7 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
     if (in_namespace && !x.union_)
         return not_supported_because(n, "class.union.anon",
                                      "a namespace-scope anonymous struct");
-    for (entity_index f = u + 1; f < entity_table.size(); f++) {
+    for (entity_index f = u + 1; f.index() < entity_table.size(); f++) {
         const entity &member = entity_table[f];
         if (member.enclosing == u && member.kind == entity_kind::variable &&
             !member.nonstatic_member)
@@ -741,7 +741,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     }
     owned_array<SyntaxRef> bodies;
     entity_index first_member_entity =
-        static_cast<entity_index>(entity_table.size());
+        entity_index{static_cast<uint32_t>(entity_table.size())};
     size_t nested_start = nested_bodies.size();
     auto spec = n.class_specifier().member_specification();
     token_index outer_members_first = defining_members_first;
@@ -787,7 +787,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             continue;
         }
         entity_index before_member =
-            static_cast<entity_index>(entity_table.size());
+            entity_index{static_cast<uint32_t>(entity_table.size())};
         analysis_result declared =
             member_declaration(c, declaration, access, bodies);
         /* [temp.inst]/3: a specialization's member class is declared, not
@@ -795,7 +795,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            definition is ill-formed does not make the specialization so */
         if (declared == analysis_result::ill_formed &&
             entity_table[c].instantiation)
-            for (entity_index e = before_member; e < entity_table.size(); e++)
+            for (entity_index e = before_member;
+                 e.index() < entity_table.size(); e++)
                 if (entity_table[e].enclosing == c &&
                     entity_table[e].kind == entity_kind::none)
                     declared =
@@ -915,8 +916,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         if (!(incomplete_argument || specialization) ||
             body.function_definition().function_body().deleted())
             return false;
-        for (entity_index f = first_member_entity; f < entity_table.size();
-             f++) {
+        for (entity_index f = first_member_entity;
+             f.index() < entity_table.size(); f++) {
             entity &member = entity_table[f];
             if (member.kind != entity_kind::function || member.enclosing != c ||
                 member.virtual_ ||
@@ -951,8 +952,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 continue;
             bool placeholder = false;
             entity_index body_fn = 0;
-            for (entity_index f = first_member_entity; f < entity_table.size();
-                 f++) {
+            for (entity_index f = first_member_entity;
+                 f.index() < entity_table.size(); f++) {
                 const entity &member = entity_table[f];
                 if (member.kind != entity_kind::function ||
                     !declared_by(f, body))
@@ -3307,7 +3308,7 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         if (bound && semantics[bound].kind == semantic_kind::bind_reference)
             bound = semantics[bound].a;
         if (bound && semantics[bound].kind == semantic_kind::entity) {
-            entity_index referent = semantics[bound].a;
+            entity_index referent = entity_index_in(semantics[bound].a);
             const entity &r2 = entity_table[referent];
             if (((r2.kind == entity_kind::variable && !r2.automatic &&
                   !r2.c11_thread_local) ||

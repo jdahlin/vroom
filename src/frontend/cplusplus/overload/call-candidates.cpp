@@ -258,7 +258,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     if (object &&
         semantics[f.node].kind == semantic_kind::bound_member_function &&
         semantics[f.node].c)
-        object_class = semantics[f.node].c;
+        object_class = entity_index_in(semantics[f.node].c);
     entity_index access_class_of = object_class;
     if (!access_class_of)
         access_class_of = using_naming_class(callee_at);
@@ -296,18 +296,18 @@ semantic_analysis::resolve_call(SyntaxRef n,
     if (implicit_this && !static_with_object) {
         selected.kind = semantic_kind::bound_member_function;
         selected.a = implicit_this;
-        selected.b = c;
+        selected.b = c.index();
         selected.c = 0;
     } else if (static_with_object) {
         selected.kind = semantic_kind::entity;
-        selected.a = c;
+        selected.a = c.index();
         selected.b = 0;
         selected.c = 0;
         f.entity = c;
     } else if (bound) {
-        selected.b = c;
+        selected.b = c.index();
     } else {
-        selected.a = c;
+        selected.a = c.index();
         f.entity = c;
     }
     f.type = x.type;

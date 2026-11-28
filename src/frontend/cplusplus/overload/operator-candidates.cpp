@@ -1469,7 +1469,8 @@ analysis_result semantic_analysis::overloaded_operator(
         if (!x.nonstatic_member) {
             /* [over.match.funcs]/4: a static member function: the object
                expression is evaluated and discarded */
-            callee.node = expression_node(semantic_kind::entity, callee, at, f);
+            callee.node =
+                expression_node(semantic_kind::entity, callee, at, f.index());
             callee.node = expression_node(semantic_kind::comma, callee, at,
                                           e.node, callee.node);
             object = 0;
@@ -1478,7 +1479,8 @@ analysis_result semantic_analysis::overloaded_operator(
     } else {
         /* "Otherwise, if a non-member function is selected, the expression
            is interpreted as operator @ ( x , y )" */
-        callee.node = expression_node(semantic_kind::entity, callee, at, f);
+        callee.node =
+            expression_node(semantic_kind::entity, callee, at, f.index());
     }
     /* the arguments for the parameters: a member's object is not one */
     owned_array<expression_meaning> call_arguments;
