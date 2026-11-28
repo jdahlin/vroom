@@ -3,7 +3,8 @@
 
 Each program is compiled by vpp and clang++ -g -c at -O0: every line marked
 "// row", in the program and the headers beside it, has a line-table row in
-both, and llvm-dwarfdump verifies vcc's object.
+both, llvm-dwarfdump verifies vcc's object, and the object's functions are
+the ones its DW_TAG_subprogram entries name.
 """
 import glob, importlib.util, os, re, subprocess, sys, tempfile
 
@@ -33,6 +34,23 @@ def rows(obj):
     return found
 
 
+def undescribed(obj):
+    """the functions obj defines and the ones its subprograms name, where
+    they differ"""
+    out = subprocess.run([DWARFDUMP, '--debug-info', obj], capture_output=True,
+                         text=True, check=True).stdout
+    described = set()
+    for entry in re.split(r'\n(?=0x[0-9a-f]+: )', out):
+        if 'DW_TAG_subprogram' in entry:
+            names = dict(re.findall(r'DW_AT_(name|linkage_name)\s+\("(.*?)"\)', entry))
+            described.add(names.get('linkage_name', names.get('name')))
+    nm = subprocess.run([ct.llvm('llvm-nm'), '--defined-only', obj],
+                        capture_output=True, text=True, check=True).stdout
+    defined = {p[2] for p in map(str.split, nm.splitlines())
+               if len(p) == 3 and p[1] in 'tTW' and not p[2].startswith('.')}
+    return sorted(defined ^ described)
+
+
 def marked():
     for path in glob.glob(f'{TESTS}/*'):
         with open(path) as f:
@@ -53,6 +71,9 @@ def main():
                 if missing := wanted - rows(obj):
                     print(f'FAIL {who} {os.path.basename(source)}: no row for {sorted(missing)}')
                     failed += 1
+            if odd := undescribed(f'{tmp}/vcc.o'):
+                print(f'FAIL {os.path.basename(source)}: functions and subprograms differ: {odd}')
+                failed += 1
             if subprocess.run([DWARFDUMP, '--verify', f'{tmp}/vcc.o'], capture_output=True).returncode:
                 print(f'FAIL {os.path.basename(source)}: llvm-dwarfdump --verify')
                 failed += 1

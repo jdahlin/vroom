@@ -342,6 +342,12 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     s = ast_builder_symbol(c, kind, name.data(), name.size(), t, storage, flags,
                            0);
     *slot = s;
+    if (x.kind == entity_kind::function && x.name) {
+        owned_buffer identifier;
+        spelling(e, identifier);
+        ast_builder_symbol_debug_name(c, s, identifier.data(),
+                                      identifier.size());
+    }
     if (x.asm_label) {
         /* [ext:gnu_asm_labels] the symbol is the label's characters, as
            written (codegen writes an assembler name as given): the

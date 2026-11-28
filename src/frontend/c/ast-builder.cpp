@@ -313,6 +313,14 @@ void ast_builder_symbol_assembler_name(cc *c, uint32_t s, const char *name,
         ast_builder_attribute_string(c, name, length);
 }
 
+void ast_builder_symbol_debug_name(cc *c, uint32_t s, const char *name,
+                                   size_t length)
+{
+    if (c->describe_location) /* (-g) */
+        ast_builder_attributes(c, s)->debug_name =
+            ast_builder_attribute_string(c, name, length);
+}
+
 void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,
                                 size_t length)
 {
