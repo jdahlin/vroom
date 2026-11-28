@@ -496,12 +496,12 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
             vtable_adjustments[s] = 0;
             vtable_own[s] = true;
             if (!replaced)
-                entity_table[v.f].edit().vtable_slot = k;
+                entity_table[v.f].set(&entity_details::vtable_slot, k);
             replaced = true;
         }
         if (replaced)
             continue;
-        entity_table[v.f].edit().vtable_slot = d.slot_count;
+        entity_table[v.f].set(&entity_details::vtable_slot, d.slot_count);
         /* [abi:vtable-components]: "The entries for virtual destructors
            are actually pairs of entries.  The first destructor, called the
            complete object destructor, performs the destruction without
@@ -714,8 +714,8 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
         }
     }
     dynamic_classes.append(d);
-    entity_table[c].edit().dynamic =
-        static_cast<uint32_t>(dynamic_classes.size());
+    entity_table[c].set(&entity_details::dynamic,
+                        static_cast<uint32_t>(dynamic_classes.size()));
     return analysis_result::well_formed;
 }
 

@@ -420,7 +420,7 @@ void semantic_analysis::declare_implicit_assignment(entity_index c, bool move,
     f.type = type;
     f.nonstatic_member = true;
     f.operator_function = true;
-    f.edit().implemented = preprocessing_op_or_punc::EQUAL;
+    f.set(&entity_details::implemented, preprocessing_op_or_punc::EQUAL);
     f.inline_ = true;
     f.defined = true;
     f.implicit = true;
@@ -439,12 +439,12 @@ void semantic_analysis::declare_implicit_assignment(entity_index c, bool move,
         /* [temp.mem]/2: member function templates of the name are
            overloaded with it: it heads the name's chain and keeps their
            held name (as a declared one does, class-specifier.cpp) */
-        entity_table[e].edit().member_templates = head;
+        entity_table[e].set(&entity_details::member_templates, head);
         entity_table.bind(c, name, e);
         return;
     }
     if (!head || entity_table[head].enclosing != c) {
-        entity_table[e].edit().next_overload = head;
+        entity_table[e].set(&entity_details::next_overload, head);
         entity_table.bind(c, name, e);
         return;
     }
@@ -454,9 +454,9 @@ void semantic_analysis::declare_implicit_assignment(entity_index c, bool move,
            entity_table[entity_table[last].details().next_overload].enclosing ==
                c)
         last = entity_table[last].details().next_overload;
-    entity_table[e].edit().next_overload =
-        entity_table[last].details().next_overload;
-    entity_table[last].edit().next_overload = e;
+    entity_table[e].set(&entity_details::next_overload,
+                        entity_table[last].details().next_overload);
+    entity_table[last].set(&entity_details::next_overload, e);
 }
 
 /*
@@ -652,8 +652,8 @@ semantic_analysis::implicit_assignment_definitions(entity_index c, SyntaxRef n)
                                   "definition could not be formed");
         entity_table[f].defined = false;
         body_failures.append(unsupported[before]);
-        entity_table[f].edit().unsupported_body =
-            static_cast<uint32_t>(body_failures.size());
+        entity_table[f].set(&entity_details::unsupported_body,
+                            static_cast<uint32_t>(body_failures.size()));
         unsupported.resize(before);
     }
     return analysis_result::well_formed;

@@ -1171,7 +1171,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                 entity_table.make(entity_kind::none, name, current_scope);
             entity_table[e].held_by_template = by_template;
             note_held(e);
-            entity_table[e].edit().hidden_type = found;
+            entity_table[e].set(&entity_details::hidden_type, found);
             entity_table.bind(current_scope, name, e);
             continue;
         }

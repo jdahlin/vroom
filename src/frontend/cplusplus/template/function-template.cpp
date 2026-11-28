@@ -439,7 +439,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     /* [over.oper]: an operator function template's specializations are
        operator functions (named by the operator: [abi:mangling-operator]) */
     entity_table[t].operator_function = m.operator_function;
-    entity_table[t].edit().implemented = m.implemented;
+    entity_table[t].set(&entity_details::implemented, m.implemented);
     /* [basic.link]/3.1: a function template declared static has internal
        linkage */
     if (s.static_)

@@ -257,11 +257,11 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
     }
     if (default_argument_nodes.empty())
         default_argument_nodes.append(0);
-    entity_table[f].edit().first_default =
-        static_cast<uint32_t>(default_argument_nodes.size());
+    entity_table[f].set(&entity_details::first_default,
+                        static_cast<uint32_t>(default_argument_nodes.size()));
     for (size_t i = 0; i < count; i++)
         default_argument_nodes.append(nodes[i]);
-    entity_table[f].edit().default_arguments = trailing;
+    entity_table[f].set(&entity_details::default_arguments, trailing);
     return analysis_result::well_formed;
 }
 

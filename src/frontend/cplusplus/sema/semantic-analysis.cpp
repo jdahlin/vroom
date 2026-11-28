@@ -458,10 +458,10 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     for (size_t i = held_before; i < held_pending.size(); i++) {
         entity &held = entity_table[held_pending[i]];
         if (d.has_unsupported && !held.details().held_because)
-            held.edit().held_because =
-                unsupported[unsupported_before].subclause;
+            held.set(&entity_details::held_because,
+                     unsupported[unsupported_before].subclause);
         else if (!d.has_unsupported && !held.details().held_because)
-            held.edit().held_by = cause;
+            held.set(&entity_details::held_by, cause);
         /* (a well-formed declaration that holds a name, a definition of a
            class template whose first declaration was refused, keeps the
            holder that declaration was; it is the holder when there is no
@@ -473,10 +473,10 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     for (size_t i = scopes_before; i < unknown_scopes_pending.size(); i++) {
         entity &scope = entity_table[unknown_scopes_pending[i]];
         if (d.has_unsupported && !scope.details().unknown_because)
-            scope.edit().unknown_because =
-                unsupported[unsupported_before].subclause;
+            scope.set(&entity_details::unknown_because,
+                      unsupported[unsupported_before].subclause);
         else if (!d.has_unsupported && !scope.details().unknown_because)
-            scope.edit().unknown_by = cause;
+            scope.set(&entity_details::unknown_by, cause);
     }
     unknown_scopes_pending.resize(scopes_before);
     declaration_refusals = outer_refusals;

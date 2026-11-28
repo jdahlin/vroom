@@ -160,9 +160,10 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
             static_cast<uint32_t>(instantiations.size());
     }
     if (entity_index existing = entity_table.find(c, conversion_name)) {
-        entity_table[conversion].edit().next_overload =
-            entity_table[existing].details().next_overload;
-        entity_table[existing].edit().next_overload = conversion;
+        entity_table[conversion].set(
+            &entity_details::next_overload,
+            entity_table[existing].details().next_overload);
+        entity_table[existing].set(&entity_details::next_overload, conversion);
     } else {
         entity_table.bind(c, conversion_name, conversion);
     }

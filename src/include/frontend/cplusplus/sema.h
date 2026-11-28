@@ -832,6 +832,11 @@ inline constexpr entity_details no_entity_details{};
 inline thread_local stable_array<entity_details> *entity_details_table =
     nullptr;
 
+/* T, as a parameter's type that does not take part in deducing T */
+template <typename T> struct member_value {
+    using type = T;
+};
+
 /*
  * An entity's details.  A copy of an entity shares them until either writes
  * one, so a copy of a record keeps its values.
@@ -950,6 +955,15 @@ struct entity {
     entity_details &edit()
     {
         return rest.write();
+    }
+    /* edit().member = value, which makes no details (and no copy of shared
+       ones) where the member already has the value, a default for most */
+    template <typename T>
+    void set(T entity_details::*member,
+             const typename member_value<T>::type &assigned)
+    {
+        if (!(details().*member == assigned))
+            edit().*member = assigned;
     }
     /*
      * The flags, one bit each and together: a translation unit has more than a

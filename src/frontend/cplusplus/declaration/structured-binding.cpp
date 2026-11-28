@@ -742,8 +742,8 @@ analysis_result semantic_analysis::structured_binding_declaration(
     }
     if (r != analysis_result::well_formed)
         return give_up(r);
-    entity_table[e].edit().first_binding = first_binding;
-    entity_table[e].edit().binding_count = count;
+    entity_table[e].set(&entity_details::first_binding, first_binding);
+    entity_table[e].set(&entity_details::binding_count, count);
     /* "The type of the id-expression e is called E." */
     qualified_type type = entity_table[e].type;
     const struct type &declared = type_table[type.unqualified()];
@@ -752,7 +752,7 @@ analysis_result semantic_analysis::structured_binding_declaration(
         type = declared.operand;
     const struct type object = type_table[type.unqualified()];
     for (uint32_t k = 0; k < count; k++) {
-        entity_table[first_binding + k].edit().binding_object = e;
+        entity_table[first_binding + k].set(&entity_details::binding_object, e);
         entity_table[first_binding + k].field = k;
     }
     if (object.kind == type_kind::array) {
@@ -810,7 +810,8 @@ analysis_result semantic_analysis::structured_binding_declaration(
                         false, false, false, v);
                 if (r != analysis_result::well_formed)
                     return give_up(r);
-                entity_table[first_binding + k].edit().binding_target = v;
+                entity_table[first_binding + k].set(
+                    &entity_details::binding_target, v);
                 entity_table[first_binding + k].type = element;
             }
             return analysis_result::well_formed;
@@ -844,7 +845,8 @@ analysis_result semantic_analysis::structured_binding_declaration(
                     declaration, "dcl.struct.bind",
                     "static bindings of non-public members"));
             if (k < count)
-                entity_table[first_binding + k].edit().binding_target = x;
+                entity_table[first_binding + k].set(
+                    &entity_details::binding_target, x);
             k++;
         }
         if (k != count)

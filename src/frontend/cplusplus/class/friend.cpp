@@ -752,7 +752,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         befriended = entity_table.make(entity_kind::function, name, space);
         entity &made = entity_table[befriended];
         made.type = type;
-        made.edit().implemented = m.implemented;
+        made.set(&entity_details::implemented, m.implemented);
         made.operator_function = m.operator_function;
         made.linkage_of_name = linkage::external;
         /* [basic.link]/4: within an unnamed namespace, internal */
@@ -810,7 +810,7 @@ analysis_result semantic_analysis::constrained_friend_function(
                                        tokens.identifier(m.id), space);
     entity &made = entity_table[f];
     made.type = type;
-    made.edit().implemented = m.implemented;
+    made.set(&entity_details::implemented, m.implemented);
     made.operator_function = m.operator_function;
     made.linkage_of_name = linkage::external;
     if (within_unnamed_namespace(space))

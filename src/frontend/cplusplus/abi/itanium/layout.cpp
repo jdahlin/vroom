@@ -441,7 +441,7 @@ const char *class_layout::base(entity &b)
         while (conflicts(of, at, false))
             at += base_alignment;
     }
-    b.edit().offset = at;
+    b.set(&entity_details::offset, at);
     record(of, at, false);
     if (empty) {
         raise_size(at + d.details().size);
@@ -485,8 +485,8 @@ void class_layout::bit_field(entity &m, bool packed)
     if (table[c].union_) {
         /* [class.union]/2: each member "as if it were the sole member of
            a non-union class": at offset 0, its bytes the union's data */
-        m.edit().offset = 0;
-        m.edit().bit_offset = 0;
+        m.set(&entity_details::offset, 0);
+        m.set(&entity_details::bit_offset, 0);
         uint64_t bits = align_up(m.details().bit_width, 8);
         if (bits > data_bits)
             data_bits = bits;
@@ -499,8 +499,8 @@ void class_layout::bit_field(entity &m, bool packed)
         (!m.details().bit_width ||
          (at % bit_alignment) + m.details().bit_width > unit))
         at = align_up(at, bit_alignment);
-    m.edit().offset = at / 8;
-    m.edit().bit_offset = at;
+    m.set(&entity_details::offset, at / 8);
+    m.set(&entity_details::bit_offset, at);
     data_bits = at + m.details().bit_width;
     raise_size(data_size());
     raise_alignment(class_alignment);
@@ -520,16 +520,17 @@ void class_layout::potentially_overlapping_member(entity &m, entity_index of,
                                                   uint64_t member_alignment)
 {
     if (empty_class(analysis, of)) {
-        m.edit().offset = 0;
+        m.set(&entity_details::offset, 0);
         if (conflicts(of, 0, true)) {
-            m.edit().offset = align_up(data_size(), member_alignment);
+            m.set(&entity_details::offset,
+                  align_up(data_size(), member_alignment));
             while (conflicts(of, m.details().offset, true))
                 m.edit().offset += member_alignment;
         }
         record(of, m.details().offset, true);
         raise_size(m.details().offset + table[of].details().size);
     } else {
-        m.edit().offset = align_up(data_size(), member_alignment);
+        m.set(&entity_details::offset, align_up(data_size(), member_alignment));
         while (conflicts(of, m.details().offset, true))
             m.edit().offset += member_alignment;
         record(of, m.details().offset, true);
@@ -570,16 +571,16 @@ const char *class_layout::data_member(entity &m)
     if (cap && member_alignment > cap) {
         member_alignment = cap;
         m.gnu_flags |= gnu_packed;
-        m.edit().alignment = 0;
+        m.set(&entity_details::alignment, 0);
         if (cap > 1)
-            m.edit().alignment = cap;
+            m.set(&entity_details::alignment, cap);
     }
     if (table[c].union_) {
         /* [class.union]/2: "The size of a union is sufficient to contain
            the largest of its non-static data members.  Each non-static
            data member is allocated as if it were the sole member of a
            non-union class." */
-        m.edit().offset = 0;
+        m.set(&entity_details::offset, 0);
         if (member_size > data_size())
             data_bits = member_size * 8;
         else
@@ -599,7 +600,7 @@ const char *class_layout::data_member(entity &m)
             element = table[of].details().size;
             count = elements(m, of);
         }
-        m.edit().offset = align_up(data_size(), member_alignment);
+        m.set(&entity_details::offset, align_up(data_size(), member_alignment));
         while (elements_conflict(of, m.details().offset, element, count))
             m.edit().offset += member_alignment;
         for (uint64_t k = 0; k < count; k++)
@@ -691,8 +692,8 @@ const char *class_layout::allocation_of_members()
 const char *class_layout::virtual_base_allocation()
 {
     entity &x = table[c];
-    x.edit().nv_size = size;
-    x.edit().nv_alignment = alignment;
+    x.set(&entity_details::nv_size, size);
+    x.set(&entity_details::nv_alignment, alignment);
     if (!x.details().virtual_base_count)
         return nullptr;
     owned_array<entity_index> order;
@@ -706,13 +707,15 @@ const char *class_layout::virtual_base_allocation()
             const entity &pb = table[dyn->primary_base];
             entity_index pk = class_of_component(analysis, pb);
             if (dyn->primary_is_virtual && pk == v) {
-                b.edit().offset = pb.details().offset;
+                b.set(&entity_details::offset, pb.details().offset);
                 continue;
             }
             if (analysis.primary_chain_has(pk, v)) {
-                b.edit().offset =
-                    pb.details().offset +
-                    table[analysis.virtual_base_of(pk, v)].details().offset;
+                b.set(&entity_details::offset,
+                      pb.details().offset +
+                          table[analysis.virtual_base_of(pk, v)]
+                              .details()
+                              .offset);
                 continue;
             }
         }
@@ -752,9 +755,9 @@ bool class_layout::zero_size_members_only(const entity &x) const
 const char *class_layout::finalization()
 {
     entity &x = table[c];
-    x.edit().alignment = alignment;
+    x.set(&entity_details::alignment, alignment);
     raise_size(data_size());
-    x.edit().size = align_up(size, alignment);
+    x.set(&entity_details::size, align_up(size, alignment));
     /* (a class whose data members are all arrays of zero elements or of
        unknown bound (flexible), with
        no base class or virtual table pointer, takes no bytes: clang's and
@@ -762,13 +765,13 @@ const char *class_layout::finalization()
     if (!x.details().size && zero_size_members_only(x))
         return "class.mem";
     if (!x.details().size)
-        x.edit().size = alignment;
-    x.edit().data_size = data_size();
+        x.set(&entity_details::size, alignment);
+    x.set(&entity_details::data_size, data_size());
     if (pod_for_layout(analysis, c))
-        x.edit().data_size = x.details().size;
+        x.set(&entity_details::data_size, x.details().size);
     if (!x.details().virtual_base_count) {
-        x.edit().nv_size = x.details().data_size;
-        x.edit().nv_alignment = x.details().alignment;
+        x.set(&entity_details::nv_size, x.details().data_size);
+        x.set(&entity_details::nv_alignment, x.details().alignment);
     }
     return nullptr;
 }
@@ -786,7 +789,7 @@ const char *itanium_class_layout(semantic_analysis &analysis, entity_index c)
     if (!rule)
         rule = layout.finalization();
     if (rule)
-        analysis.entity_table[c].edit().size = 0;
+        analysis.entity_table[c].set(&entity_details::size, 0);
     return rule;
 }
 

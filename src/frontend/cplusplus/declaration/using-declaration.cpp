@@ -307,8 +307,8 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
     }
     auto shadow = [&](entity_index f) {
         entity copy = entity_table[f];
-        copy.edit().next_overload = 0;
-        copy.edit().using_shadow_of = f;
+        copy.set(&entity_details::next_overload, 0);
+        copy.set(&entity_details::using_shadow_of, f);
         entity_index s =
             entity_table.make(entity_kind::function, name, copy.enclosing);
         entity_table[s] = copy;
@@ -324,7 +324,7 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
         for (entity_index f : present) {
             entity_index s = shadow(f);
             if (last)
-                entity_table[last].edit().next_overload = s;
+                entity_table[last].set(&entity_details::next_overload, s);
             else
                 entity_table.bind(c, name, s, true);
             last = s;
@@ -332,7 +332,7 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
     }
     for (entity_index f : introduced) {
         entity_index s = shadow(f);
-        entity_table[last].edit().next_overload = s;
+        entity_table[last].set(&entity_details::next_overload, s);
         last = s;
     }
     used(t, e);
@@ -739,7 +739,7 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
             }
             if (entity_table[last].details().next_overload)
                 return using_join_chains(n, t, c, name, own, e);
-            entity_table[last].edit().next_overload = e;
+            entity_table[last].set(&entity_details::next_overload, e);
             if (entity_table[e].details().member_templates)
                 introduce_member_templates(
                     c, own, entity_table[e].details().member_templates);
@@ -835,7 +835,7 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
             }
             if (entity_table[last].details().next_overload)
                 return using_join_chains(n, t, scope, name, prior, e);
-            entity_table[last].edit().next_overload = e;
+            entity_table[last].set(&entity_details::next_overload, e);
             used(t, e);
             return analysis_result::well_formed;
         }

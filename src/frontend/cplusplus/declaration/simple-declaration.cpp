@@ -1054,8 +1054,8 @@ analysis_result semantic_analysis::defer_unsupported_body(SyntaxRef n,
     if (!in_system_header(n.first_token()))
         return r;
     body_failures.append(unsupported[before]);
-    entity_table[f].edit().unsupported_body =
-        static_cast<uint32_t>(body_failures.size());
+    entity_table[f].set(&entity_details::unsupported_body,
+                        static_cast<uint32_t>(body_failures.size()));
     entity_table[f].defined = false;
     unsupported.resize(before);
     return analysis_result::well_formed;
@@ -1959,8 +1959,10 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (r == analysis_result::well_formed && m.operator_function &&
             kind == entity_kind::function) {
             entity_table[declared_entity].operator_function = true;
-            entity_table[declared_entity].edit().implemented = m.implemented;
-            entity_table[declared_entity].edit().allocation = m.allocation;
+            entity_table[declared_entity].set(&entity_details::implemented,
+                                              m.implemented);
+            entity_table[declared_entity].set(&entity_details::allocation,
+                                              m.allocation);
             r = operator_function_declaration(declaration, declared_entity);
         }
         if (r == analysis_result::well_formed && m.literal_operator)
@@ -1993,7 +1995,8 @@ analysis_result semantic_analysis::declare_with_initializer(
         entity_table[declared_entity].placeholder_return = true;
     if (r == analysis_result::well_formed && typedef_alignment &&
         entity_table[declared_entity].kind == entity_kind::typedef_name)
-        entity_table[declared_entity].edit().alignment = typedef_alignment;
+        entity_table[declared_entity].set(&entity_details::alignment,
+                                          typedef_alignment);
     if (r == analysis_result::well_formed && !s.typedef_ &&
         (aligned || gnu_flags || object_alignment)) {
         entity &x = entity_table[declared_entity];
@@ -2033,19 +2036,19 @@ analysis_result semantic_analysis::declare_with_initializer(
                 return not_supported_because(
                     declaration, "ext.gnu",
                     "a cleanup attribute on this variable or function");
-            x.edit().gnu_cleanup = cleanup_function;
+            x.set(&entity_details::gnu_cleanup, cleanup_function);
         }
         x.gnu_flags |= gnu_flags;
         if (gnu_flags & (gnu_constructor | gnu_destructor))
-            x.edit().gnu_priority = gnu_priority;
+            x.set(&entity_details::gnu_priority, gnu_priority);
         if (section)
-            x.edit().section = section;
+            x.set(&entity_details::section, section);
         if (abi_tag)
             x.abi_tag = abi_tag;
         if (aligned > x.details().alignment)
-            x.edit().alignment = static_cast<uint32_t>(aligned);
+            x.set(&entity_details::alignment, static_cast<uint32_t>(aligned));
         if (object_alignment > x.details().alignment)
-            x.edit().alignment = object_alignment;
+            x.set(&entity_details::alignment, object_alignment);
         if (gnu_flags & gnu_diagnose_if)
             diagnose_if_declared(declaration, declared_entity);
     }
@@ -2104,7 +2107,7 @@ analysis_result semantic_analysis::declare_with_initializer(
             return not_supported_because(
                 declaration, "ext.gnu",
                 "a redeclaration with a different asm label");
-        x.edit().asm_label = m.asm_label;
+        x.set(&entity_details::asm_label, m.asm_label);
     }
     /* [dcl.array]/8: the bound of an earlier declaration (declare took it)
        is the one the initializer fills */
@@ -2499,8 +2502,8 @@ analysis_result semantic_analysis::declare_with_initializer(
                     type_kind::lvalue_reference &&
                 type_table[r2.type.unqualified()].kind !=
                     type_kind::rvalue_reference)
-                entity_table[declared_entity].edit().constant_referent =
-                    referent;
+                entity_table[declared_entity].set(
+                    &entity_details::constant_referent, referent);
         }
     }
     return analysis_result::well_formed;

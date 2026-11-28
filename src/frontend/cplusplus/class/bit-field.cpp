@@ -133,9 +133,10 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
     entity_table[e].defined = true;
     entity_table[e].field = entity_table[c].member_count;
     entity_table[e].bit_field = true;
-    entity_table[e].edit().bit_width = static_cast<uint16_t>(width);
+    entity_table[e].set(&entity_details::bit_width,
+                        static_cast<uint16_t>(width));
     if (default_init)
-        entity_table[e].edit().default_initializer = default_init;
+        entity_table[e].set(&entity_details::default_initializer, default_init);
     entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
     entity_table[e].access = access;
     /* (a class analysed since added its members after c's) */

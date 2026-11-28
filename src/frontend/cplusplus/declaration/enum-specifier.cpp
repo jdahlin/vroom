@@ -456,7 +456,7 @@ analysis_result semantic_analysis::enum_specifier(SyntaxRef n, type_index &type)
         type_table[type].kind == type_kind::enumeration) {
         entity &x = entity_table[type_table[type].entity];
         if (!x.defined)
-            x.edit().underlying = fundamental_type::none;
+            x.set(&entity_details::underlying, fundamental_type::none);
     }
     return r;
 }
@@ -684,10 +684,10 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
        incomplete type from its point of declaration
        ([basic.scope.pdecl]) to immediately after its enum-base (if any),
        at which point it becomes a complete type." */
-    entity_table[e].edit().underlying = fixed;
+    entity_table[e].set(&entity_details::underlying, fixed);
     if (opaque) {
         /* [conv.prom]/4: a fixed underlying type promotes as itself */
-        entity_table[e].edit().promoted = fixed;
+        entity_table[e].set(&entity_details::promoted, fixed);
         return analysis_result::well_formed;
     }
 
@@ -992,11 +992,13 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     /* [dcl.enum]/5: "Following the closing brace of an enum-specifier,
        each enumerator has the type of its enumeration." */
     entity &z = entity_table[e];
-    z.edit().underlying = underlying;
-    z.edit().promoted = promoted;
+    z.set(&entity_details::underlying, underlying);
+    z.set(&entity_details::promoted, promoted);
     if (!is_fixed) {
-        z.edit().positive_bits = static_cast<uint8_t>(positive_bits);
-        z.edit().negative_bits = static_cast<uint8_t>(negative_bits);
+        z.set(&entity_details::positive_bits,
+              static_cast<uint8_t>(positive_bits));
+        z.set(&entity_details::negative_bits,
+              static_cast<uint8_t>(negative_bits));
     }
     z.defined = true;
     for (entity_index en : enumerators_declared) {

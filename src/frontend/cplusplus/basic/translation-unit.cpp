@@ -802,7 +802,7 @@ analysis_result semantic_analysis::declare(
          record.kind == type_kind::enumeration)) {
         entity &c = entity_table[record.entity];
         if (!c.name && !c.details().linkage_name) {
-            c.edit().linkage_name = name;
+            c.set(&entity_details::linkage_name, name);
             c.linkage_of_name = linkage::external;
             /* (and its unnamed member classes have it now,
                class_specifier) */
@@ -934,9 +934,9 @@ analysis_result semantic_analysis::declare(
                 entity_index last = prior;
                 while (entity_table[last].details().next_overload)
                     last = entity_table[last].details().next_overload;
-                entity_table[last].edit().next_overload = u;
-                entity_table[u].edit().hidden_type =
-                    entity_table[prior].details().hidden_type;
+                entity_table[last].set(&entity_details::next_overload, u);
+                entity_table[u].set(&entity_details::hidden_type,
+                                    entity_table[prior].details().hidden_type);
                 same = u;
             }
         }
@@ -1152,7 +1152,7 @@ analysis_result semantic_analysis::declare(
             if (entity_table[o].named_by_using)
                 shared = true;
         entity_index e = entity_table.make(kind, name, scope);
-        entity_table[e].edit().hidden_type = hides;
+        entity_table[e].set(&entity_details::hidden_type, hides);
         entity_table[e].unnamed_type_linkage = unnamed_type;
         entity_table[e].type = type;
         entity_table[e].linkage_of_name = implied;
@@ -1161,9 +1161,9 @@ analysis_result semantic_analysis::declare(
             entity_table[e].exceptions = exceptions;
         entity_table.add_declaration(e, declaration);
         if (overloads && shared) {
-            entity_table[e].edit().next_overload = overloads;
-            entity_table[e].edit().hidden_type =
-                entity_table[overloads].details().hidden_type;
+            entity_table[e].set(&entity_details::next_overload, overloads);
+            entity_table[e].set(&entity_details::hidden_type,
+                                entity_table[overloads].details().hidden_type);
             entity_table.bind(scope, name, e);
         } else if (overloads) {
             /* another function of the set: last in its chain, the name
@@ -1171,9 +1171,9 @@ analysis_result semantic_analysis::declare(
             entity_index last = overloads;
             while (entity_table[last].details().next_overload)
                 last = entity_table[last].details().next_overload;
-            entity_table[last].edit().next_overload = e;
-            entity_table[e].edit().hidden_type =
-                entity_table[overloads].details().hidden_type;
+            entity_table[last].set(&entity_details::next_overload, e);
+            entity_table[e].set(&entity_details::hidden_type,
+                                entity_table[overloads].details().hidden_type);
         } else if (held_name) {
             template_name_function x;
             x.name = held_name;
@@ -1629,7 +1629,7 @@ analysis_result semantic_analysis::declare_local(
     }
     no_claims_after_hiding(name);
     entity_index e = entity_table.make(kind, name, scope);
-    entity_table[e].edit().hidden_type = hides;
+    entity_table[e].set(&entity_details::hidden_type, hides);
     entity_table[e].type = type;
     entity_table[e].argument_bound =
         argument_named && argument_bound_type(type);

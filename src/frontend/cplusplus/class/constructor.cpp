@@ -596,8 +596,8 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     if (constructed && !aggregate_value_stored(record.entity, value.node) &&
         semantics[value.node].kind == semantic_kind::zero &&
         semantics[value.node].type.unqualified() == type.unqualified()) {
-        entity_table[e].edit().initializer_throws =
-            initializer_exception::cannot_throw;
+        entity_table[e].set(&entity_details::initializer_throws,
+                            initializer_exception::cannot_throw);
         statement = subobject_store(object, type, at, value.node, true);
         return analysis_result::well_formed;
     }
@@ -628,11 +628,11 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     size_t unsupported_before = unsupported.size();
     if (potentially_throwing(init, value.node, throwing) ==
         analysis_result::well_formed) {
-        entity_table[e].edit().initializer_throws =
-            initializer_exception::cannot_throw;
+        entity_table[e].set(&entity_details::initializer_throws,
+                            initializer_exception::cannot_throw);
         if (throwing)
-            entity_table[e].edit().initializer_throws =
-                initializer_exception::may_throw;
+            entity_table[e].set(&entity_details::initializer_throws,
+                                initializer_exception::may_throw);
     }
     unsupported.resize(unsupported_before);
     if (constructed && !aggregate_value_stored(record.entity, value.node)) {
@@ -951,14 +951,14 @@ analysis_result semantic_analysis::special_member_declarator(
         defer_default_arguments(e, declaration, listed);
     diagnose_if_declared(declaration, e);
     if (kind == special_member::destructor) {
-        entity_table[c].edit().destructor = e;
+        entity_table[c].set(&entity_details::destructor, e);
     } else if (!entity_table[c].details().first_constructor) {
-        entity_table[c].edit().first_constructor = e;
+        entity_table[c].set(&entity_details::first_constructor, e);
     } else {
         entity_index k = entity_table[c].details().first_constructor;
         while (entity_table[k].details().next_constructor)
             k = entity_table[k].details().next_constructor;
-        entity_table[k].edit().next_constructor = e;
+        entity_table[k].set(&entity_details::next_constructor, e);
     }
     last_declared = e;
     if (kind == special_member::destructor) {
@@ -1223,10 +1223,10 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
             "assignment, or with unknown lookup");
     if (move) {
         entity_table[c].defaulted_move_assignment = true;
-        entity_table[c].edit().defaulted_move_access = access;
+        entity_table[c].set(&entity_details::defaulted_move_access, access);
     } else {
         entity_table[c].defaulted_copy_assignment = true;
-        entity_table[c].edit().defaulted_copy_access = access;
+        entity_table[c].set(&entity_details::defaulted_copy_access, access);
     }
     return analysis_result::well_formed;
 }
@@ -3197,7 +3197,7 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             entity_index to = entity_table[c].details().constructor_templates;
             if (!to) {
                 to = make_held_name(entity_table[c].name, c);
-                entity_table[c].edit().constructor_templates = to;
+                entity_table[c].set(&entity_details::constructor_templates, to);
             }
             for (size_t i = 0, m = function_templates.size(); i < m; i++)
                 if (function_templates[i].name == from &&
@@ -3301,22 +3301,23 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             f.inline_ = true;
             f.defined = true;
             f.implicit = true;
-            f.edit().inherited_constructor = k;
+            f.set(&entity_details::inherited_constructor, k);
             f.linkage_of_name = entity_table[c].linkage_of_name;
             f.explicit_ = entity_table[k].explicit_;
             f.deleted = entity_table[k].deleted;
             f.access = entity_table[k].access;
-            f.edit().first_default = entity_table[k].details().first_default;
-            f.edit().default_arguments =
-                entity_table[k].details().default_arguments;
+            f.set(&entity_details::first_default,
+                  entity_table[k].details().first_default);
+            f.set(&entity_details::default_arguments,
+                  entity_table[k].details().default_arguments);
             entity_index last = entity_table[c].details().first_constructor;
             if (!last) {
-                entity_table[c].edit().first_constructor = e;
+                entity_table[c].set(&entity_details::first_constructor, e);
                 continue;
             }
             while (entity_table[last].details().next_constructor)
                 last = entity_table[last].details().next_constructor;
-            entity_table[last].edit().next_constructor = e;
+            entity_table[last].set(&entity_details::next_constructor, e);
         }
     }
     return analysis_result::well_formed;
@@ -3372,15 +3373,15 @@ analysis_result semantic_analysis::inherit_specialization(SyntaxRef at,
     f.defined = true;
     f.implicit = true;
     f.constexpr_ = from.constexpr_;
-    f.edit().inherited_constructor = inner;
+    f.set(&entity_details::inherited_constructor, inner);
     /* ([abi:mangling]: its name has the specialization's arguments) */
     f.instantiation = from.instantiation;
     f.linkage_of_name = entity_table[c].linkage_of_name;
     f.explicit_ = from.explicit_;
     f.deleted = from.deleted;
     f.access = from.access;
-    f.edit().first_default = from.details().first_default;
-    f.edit().default_arguments = from.details().default_arguments;
+    f.set(&entity_details::first_default, from.details().first_default);
+    f.set(&entity_details::default_arguments, from.details().default_arguments);
     inherited_specializations.append({c, inner, e});
     chosen = e;
     if (from.deleted)
@@ -3549,17 +3550,17 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
     f.explicit_ = kind == special_member::constructor && !copy && !move &&
                   entity_table[c].explicit_default_constructor;
     if (kind == special_member::destructor) {
-        entity_table[c].edit().destructor = e;
+        entity_table[c].set(&entity_details::destructor, e);
         return;
     }
     if (!entity_table[c].details().first_constructor) {
-        entity_table[c].edit().first_constructor = e;
+        entity_table[c].set(&entity_details::first_constructor, e);
         return;
     }
     entity_index k = entity_table[c].details().first_constructor;
     while (entity_table[k].details().next_constructor)
         k = entity_table[k].details().next_constructor;
-    entity_table[k].edit().next_constructor = e;
+    entity_table[k].set(&entity_details::next_constructor, e);
 }
 
 /*
@@ -4065,7 +4066,8 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
             entity_index dtor = entity_table[sub].details().destructor;
             if (!dtor || instantiation_depth)
                 continue;
-            entity_table[dtor].edit().member_needed_by = definition;
+            entity_table[dtor].set(&entity_details::member_needed_by,
+                                   definition);
             mark_needed(dtor);
         }
     }

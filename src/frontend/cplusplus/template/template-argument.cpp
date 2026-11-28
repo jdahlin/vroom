@@ -346,7 +346,7 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
     uint32_t structure = expression_structure(written);
     if (entity_index d = expression_nodes[structure].dependent_value)
         return d;
-    entity_table[e].edit().expression = structure;
+    entity_table[e].set(&entity_details::expression, structure);
     expression_nodes[structure].dependent_value = e;
     dependent_values.append(e);
     return e;

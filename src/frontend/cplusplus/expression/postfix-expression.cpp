@@ -425,7 +425,7 @@ entity_index semantic_analysis::typeid_object(qualified_type type,
     entity_index e = entity_table.make(entity_kind::variable, 0, 0);
     entity_table[e].type =
         qualified_type::make(entity_table[info].type.unqualified(), cv_const);
-    entity_table[e].edit().typeinfo_of = named;
+    entity_table[e].set(&entity_details::typeinfo_of, named);
     entity_table[e].linkage_of_name = linkage::external;
     typeid_objects.append(e);
     return e;

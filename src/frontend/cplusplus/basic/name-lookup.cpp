@@ -154,8 +154,8 @@ void semantic_analysis::note_held(entity_index e)
        the reason now, not when the whole declaration ends */
     if (!entity_table[e].details().held_because &&
         unsupported.size() > declaration_refusals)
-        entity_table[e].edit().held_because =
-            unsupported[declaration_refusals].subclause;
+        entity_table[e].set(&entity_details::held_because,
+                            unsupported[declaration_refusals].subclause);
 }
 
 /* scope's names are not all known from now on, for the reason the
@@ -166,8 +166,8 @@ void semantic_analysis::note_unknown_scope(entity_index scope)
     unknown_scopes_pending.append(scope);
     if (!entity_table[scope].details().unknown_because &&
         unsupported.size() > declaration_refusals)
-        entity_table[scope].edit().unknown_because =
-            unsupported[declaration_refusals].subclause;
+        entity_table[scope].set(&entity_details::unknown_because,
+                                unsupported[declaration_refusals].subclause);
 }
 
 /* a name that the member function templates, or the constructor

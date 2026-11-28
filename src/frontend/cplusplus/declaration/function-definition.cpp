@@ -359,8 +359,8 @@ void semantic_analysis::record_target_features(SyntaxRef definition,
     if (!features.size())
         return;
     vbuffer_append(features.get(), "", 1);
-    entity_table[f].edit().target_features =
-        static_cast<uint32_t>(target_strings.size() + 1);
+    entity_table[f].set(&entity_details::target_features,
+                        static_cast<uint32_t>(target_strings.size() + 1));
     vbuffer_append(target_strings.get(), features.data(), features.size());
 }
 
@@ -389,7 +389,8 @@ analysis_result semantic_analysis::analyse_function_body(
         analyse_function_body_of(definition, compound, ctor_init);
     if (result == analysis_result::unsupported && unsupported.size() > before &&
         f && !entity_table[f].details().held_because)
-        entity_table[f].edit().held_because = unsupported[before].subclause;
+        entity_table[f].set(&entity_details::held_because,
+                            unsupported[before].subclause);
     /* the body's own declarations (a local alias, a variable) are not the
        function: its definition's caller asks which function it defined */
     last_declared = f;

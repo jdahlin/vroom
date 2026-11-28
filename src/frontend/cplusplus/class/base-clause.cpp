@@ -408,9 +408,9 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         named_bases.append(base);
         named_ids.append(id);
     }
-    entity_table[c].edit().first_base =
-        static_cast<uint32_t>(class_bases.size());
-    entity_table[c].edit().base_count = 0;
+    entity_table[c].set(&entity_details::first_base,
+                        static_cast<uint32_t>(class_bases.size()));
+    entity_table[c].set(&entity_details::base_count, 0);
     for (size_t si = 0; si < specifiers.size(); si++) {
         SyntaxElement specifier = specifiers[si];
         uint8_t access = 0;
@@ -558,9 +558,9 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         }
         class_virtual_bases.append(v);
     }
-    entity_table[c].edit().first_virtual_base = first;
-    entity_table[c].edit().virtual_base_count =
-        static_cast<uint32_t>(order.size());
+    entity_table[c].set(&entity_details::first_virtual_base, first);
+    entity_table[c].set(&entity_details::virtual_base_count,
+                        static_cast<uint32_t>(order.size()));
     return analysis_result::well_formed;
 }
 

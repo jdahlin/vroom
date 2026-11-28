@@ -210,7 +210,7 @@ analysis_result semantic_analysis::member_function_template(
         prior = entity_table[head2].details().member_templates;
         if (!prior) {
             prior = make_held_name(name, c);
-            entity_table[head2].edit().member_templates = prior;
+            entity_table[head2].set(&entity_details::member_templates, prior);
         }
     } else if (prior && entity_table[prior].enclosing != c) {
         /* [namespace.udecl]/15, [temp.mem]/2: a name a using-declaration
@@ -220,20 +220,20 @@ analysis_result semantic_analysis::member_function_template(
         if (entity_table[prior].kind == entity_kind::function &&
             entity_table[prior].special == special_member::none) {
             entity copy = entity_table[prior];
-            copy.edit().next_overload = 0;
-            copy.edit().using_shadow_of = prior;
+            copy.set(&entity_details::next_overload, 0);
+            copy.set(&entity_details::using_shadow_of, prior);
             entity_index shadow =
                 entity_table.make(entity_kind::function, name, copy.enclosing);
             entity_index held = make_held_name(name, c);
-            entity_table[held].edit().using_shadow_of =
-                copy.details().member_templates;
-            copy.edit().member_templates = held;
+            entity_table[held].set(&entity_details::using_shadow_of,
+                                   copy.details().member_templates);
+            copy.set(&entity_details::member_templates, held);
             entity_table[shadow] = copy;
             entity_table.bind(c, name, shadow);
             prior = held;
         } else if (member_function_template_of(prior)) {
             entity_index held = make_held_name(name, c);
-            entity_table[held].edit().using_shadow_of = prior;
+            entity_table[held].set(&entity_details::using_shadow_of, prior);
             entity_table.bind(c, name, held);
             prior = held;
         } else {
@@ -302,9 +302,9 @@ analysis_result semantic_analysis::member_function_template(
     entity_table[t].constexpr_ = s.constexpr_;
     entity_table[t].immediate = s.consteval_;
     entity_table[t].operator_function = m.operator_function;
-    entity_table[t].edit().allocation = m.allocation;
+    entity_table[t].set(&entity_details::allocation, m.allocation);
     entity_table[t].conversion_function = conversion;
-    entity_table[t].edit().implemented = m.implemented;
+    entity_table[t].set(&entity_details::implemented, m.implemented);
     if (conversion) {
         entity_table[t].explicit_ = s.explicit_;
         entity_table[t].explicit_dependent = s.explicit_dependent;
@@ -318,7 +318,7 @@ analysis_result semantic_analysis::member_function_template(
         prior = entity_table[c].details().constructor_templates;
         if (!prior) {
             prior = make_held_name(name, c);
-            entity_table[c].edit().constructor_templates = prior;
+            entity_table[c].set(&entity_details::constructor_templates, prior);
         }
     }
     if (prior) {
@@ -443,7 +443,7 @@ void semantic_analysis::introduce_member_templates(entity_index c,
     if (!held) {
         held = entity_table.make(entity_kind::none, entity_table[head].name, c);
         entity_table[held].held_by_template = true;
-        entity_table[head].edit().member_templates = held;
+        entity_table[head].set(&entity_details::member_templates, held);
     }
     for (size_t i = 0, k = function_templates.size(); i < k; i++)
         if (function_templates[i].name == from &&

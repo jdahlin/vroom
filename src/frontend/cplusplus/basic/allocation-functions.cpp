@@ -93,7 +93,7 @@ void semantic_analysis::declare_implicit_allocation_function(
         cv_none);
     x.linkage_of_name = linkage::external;
     x.operator_function = true;
-    x.edit().allocation = kind;
+    x.set(&entity_details::allocation, kind);
     x.implicit = true;
     /* [except.spec]/12: a deallocation function with no explicit
        noexcept-specifier has a non-throwing exception specification; an
@@ -114,7 +114,7 @@ void semantic_analysis::declare_implicit_allocation_function(
             /* the program declared it already: the same function */
             return;
     }
-    entity_table[last].edit().next_overload = e;
+    entity_table[last].set(&entity_details::next_overload, e);
 }
 
 /*

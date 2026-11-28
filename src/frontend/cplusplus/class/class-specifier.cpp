@@ -83,7 +83,7 @@ analysis_result semantic_analysis::class_specifier(ClassSpecifier n,
             note_held(e);
         } else if (entity_table[e].kind == entity_kind::class_type) {
             entity_table[e].kind = entity_kind::none;
-            entity_table[e].edit().size = 0;
+            entity_table[e].set(&entity_details::size, 0);
             note_held(e);
         }
         break;
@@ -175,7 +175,7 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
         entity_table[e].defined = true;
         entity_table[e].linkage_of_name = linkage::internal;
         entity_table.add_declaration(e, n);
-        entity_table[u].edit().anonymous_object = e;
+        entity_table[u].set(&entity_details::anonymous_object, e);
         return bind_anonymous_members(c, n, u);
     }
     entity_table[e].nonstatic_member = true;
@@ -188,7 +188,7 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
     make_members_contiguous(c);
     class_members.append(e);
     entity_table[c].member_count++;
-    entity_table[u].edit().anonymous_object = e;
+    entity_table[u].set(&entity_details::anonymous_object, e);
     if (entity_table[c].union_ && variant_initialized(e))
         /* [class.union]/2: a variant member of an anonymous union within
            the union counts among its variant members */
@@ -472,7 +472,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 if (declared) {
                     entity_table[y].kind = entity_kind::none;
                     note_held(y);
-                    entity_table[y].edit().size = 0;
+                    entity_table[y].set(&entity_details::size, 0);
                 }
                 return not_supported_because(
                     n, "class.nest",
@@ -501,7 +501,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                    warning): the class may be defined here all the same */
                 entity_table[found.entity].kind = entity_kind::none;
                 note_held(found.entity);
-                entity_table[found.entity].edit().size = 0;
+                entity_table[found.entity].set(&entity_details::size, 0);
                 return not_supported_because(
                     n, "class.pre",
                     "a qualified class definition in a namespace that may not "
@@ -571,7 +571,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 tokens.files.behavior.microsoft_extensions) {
                 entity_table[c].kind = entity_kind::none;
                 note_held(c);
-                entity_table[c].edit().size = 0;
+                entity_table[c].set(&entity_details::size, 0);
             }
             return not_supported_because(
                 n, "namespace.udecl",
@@ -656,7 +656,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         entity_table[c].type = qualified_type::make(
             type_table.of_entity(type_kind::class_type, c), cv_none);
         if (hider)
-            entity_table[hider].edit().hidden_type = c;
+            entity_table[hider].set(&entity_details::hidden_type, c);
         else
             entity_table.bind(scope, name, c);
     }
@@ -683,7 +683,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     member_friends_of(c, false);
     entity_table[c].final_ = is_final;
     entity_table[c].union_ = key == standard_keyword::union_;
-    entity_table[c].edit().class_key = head_children[0].token();
+    entity_table[c].set(&entity_details::class_key, head_children[0].token());
     entity_table[c].first_member = static_cast<uint32_t>(class_members.size());
     entity_table[c].member_count = 0;
     type = entity_table[c].type.unqualified();
@@ -707,9 +707,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         if (outer)
             make_members_contiguous(outer);
     };
-    entity_table[c].edit().first_base =
-        static_cast<uint32_t>(class_bases.size());
-    entity_table[c].edit().base_count = 0;
+    entity_table[c].set(&entity_details::first_base,
+                        static_cast<uint32_t>(class_bases.size()));
+    entity_table[c].set(&entity_details::base_count, 0);
     analysis_result result = analysis_result::well_formed;
     if (has_bases) {
         /* [basic.lookup.unqual]/7: the names of a class defined outside its
@@ -728,8 +728,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         result = base_clause(c, head_children[next], key);
         require_complete_class--;
     }
-    entity_table[c].edit().requested_alignment = trailing_class_alignment;
-    entity_table[c].edit().max_field_alignment = packing;
+    entity_table[c].set(&entity_details::requested_alignment,
+                        trailing_class_alignment);
+    entity_table[c].set(&entity_details::max_field_alignment, packing);
     entity_table[c].gnu_flags |= trailing_class_flags;
     trailing_class_alignment = 0;
     trailing_class_flags = 0;
@@ -738,14 +739,14 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         if (result == analysis_result::well_formed)
             result = alignment_specifier(a, alignment);
         if (alignment > entity_table[c].details().requested_alignment)
-            entity_table[c].edit().requested_alignment =
-                static_cast<uint32_t>(alignment);
+            entity_table[c].set(&entity_details::requested_alignment,
+                                static_cast<uint32_t>(alignment));
     }
     if (result != analysis_result::well_formed) {
         resume_outer();
         entity_table[c].kind = entity_kind::none;
         note_held(c);
-        entity_table[c].edit().size = 0;
+        entity_table[c].set(&entity_details::size, 0);
         return result;
     }
     owned_array<SyntaxRef> bodies;
@@ -841,7 +842,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            of it declared before) is neither complete nor incomplete */
         entity_table[c].kind = entity_kind::none;
         note_held(c);
-        entity_table[c].edit().size = 0;
+        entity_table[c].set(&entity_details::size, 0);
         return result;
     }
     /* [temp.friend]/4: the members of a specialization that friend
@@ -1076,7 +1077,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     if (result != analysis_result::well_formed && !class_kept_ill_formed) {
         entity_table[c].kind = entity_kind::none;
         note_held(c);
-        entity_table[c].edit().size = 0;
+        entity_table[c].set(&entity_details::size, 0);
     }
     return result;
 }
@@ -1409,7 +1410,7 @@ entity_index semantic_analysis::declare_class(entity_index scope, uint32_t name,
     entity_table.add_declaration(c, current_declaration);
     entity_index hider = entity_table.find(scope, name);
     if (hider)
-        entity_table[hider].edit().hidden_type = c;
+        entity_table[hider].set(&entity_details::hidden_type, c);
     else
         entity_table.bind(scope, name, c);
     return c;
@@ -2267,7 +2268,7 @@ analysis_result semantic_analysis::member_declarator(
                                       "class.union");
             }
         }
-        entity_table[e].edit().default_initializer = d[1].index();
+        entity_table[e].set(&entity_details::default_initializer, d[1].index());
         return analysis_result::well_formed;
     }
     if (!s.has_type && declares_special_member(c, d))
@@ -2646,8 +2647,8 @@ analysis_result semantic_analysis::member_declarator(
         diagnose_if_declared(declaration, e);
         if (m.operator_function) {
             entity_table[e].operator_function = true;
-            entity_table[e].edit().implemented = m.implemented;
-            entity_table[e].edit().allocation = m.allocation;
+            entity_table[e].set(&entity_details::implemented, m.implemented);
+            entity_table[e].set(&entity_details::allocation, m.allocation);
             VTRY(checked, operator_function_declaration(declaration, e));
             /* (one deleted on this, its first, declaration: not counted,
                layout's pod_for_layout reads the count at the class's end,
@@ -2732,7 +2733,8 @@ analysis_result semantic_analysis::member_declarator(
         entity_table[e].nonstatic_member = false;
         entity_table[e].inline_ = s.inline_;
         entity_table[e].defined = s.inline_;
-        entity_table[e].edit().alignment = static_cast<uint32_t>(m.aligned);
+        entity_table[e].set(&entity_details::alignment,
+                            static_cast<uint32_t>(m.aligned));
         entity_table[e].gnu_flags |= m.gnu_flags & static_member_symbol_flags;
         entity_table[e].abi_tag = m.abi_tag;
         /* its first declaration, which a name found refers to (the
@@ -2866,14 +2868,15 @@ analysis_result semantic_analysis::member_declarator(
         entity_table[e].mutable_member = s.mutable_;
         entity_table[e].defined = true;
         entity_table[e].field = entity_table[c].member_count;
-        entity_table[e].edit().alignment = static_cast<uint32_t>(m.aligned);
+        entity_table[e].set(&entity_details::alignment,
+                            static_cast<uint32_t>(m.aligned));
         /* [ext:gnu_attributes] a member of a typedef-name's type declared
            with aligned */
         uint32_t named =
             typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
         VTRY(checked, array_element_alignment(declaration, type, named));
         if (named > entity_table[e].details().alignment)
-            entity_table[e].edit().alignment = named;
+            entity_table[e].set(&entity_details::alignment, named);
         entity_table[e].gnu_flags =
             (m.gnu_flags | entity_table[c].gnu_flags) & gnu_packed;
         /* [dcl.attr.nouniqueaddr]/2: the declaration's or the
@@ -2888,7 +2891,7 @@ analysis_result semantic_analysis::member_declarator(
     entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
     entity_table[e].access = access;
     entity_table.add_declaration(e, declaration);
-    entity_table[e].edit().hidden_type = hides;
+    entity_table[e].set(&entity_details::hidden_type, hides);
     if (overloads) {
         /* another member function of the set, last in its chain */
         entity_index last = overloads;
@@ -2897,14 +2900,14 @@ analysis_result semantic_analysis::member_declarator(
                        .enclosing == c)
             last = entity_table[last].details().next_overload;
         /* before the base's functions, if any */
-        entity_table[e].edit().next_overload =
-            entity_table[last].details().next_overload;
-        entity_table[last].edit().next_overload = e;
-        entity_table[e].edit().hidden_type =
-            entity_table[overloads].details().hidden_type;
+        entity_table[e].set(&entity_details::next_overload,
+                            entity_table[last].details().next_overload);
+        entity_table[last].set(&entity_details::next_overload, e);
+        entity_table[e].set(&entity_details::hidden_type,
+                            entity_table[overloads].details().hidden_type);
     } else {
-        entity_table[e].edit().next_overload = introduced;
-        entity_table[e].edit().member_templates = templates;
+        entity_table[e].set(&entity_details::next_overload, introduced);
+        entity_table[e].set(&entity_details::member_templates, templates);
         entity_table.bind(c, name, e);
         /* the member function templates of the base's name */
         if (introduced && entity_table[introduced].details().member_templates)
@@ -2962,7 +2965,7 @@ analysis_result semantic_analysis::member_typedef(
         entity &named = entity_table[record.entity];
         if (!named.name && !named.details().linkage_name &&
             named.enclosing == c && !named.details().lambda) {
-            named.edit().linkage_name = name;
+            named.set(&entity_details::linkage_name, name);
             named.linkage_of_name = entity_table[c].linkage_of_name;
         }
     }
@@ -3036,8 +3039,9 @@ analysis_result semantic_analysis::instantiated_member_body(entity_index c,
         entity_table[last_declared].defined = false;
         if (unsupported.size() > unsupported_before) {
             body_failures.append(unsupported[unsupported_before]);
-            entity_table[last_declared].edit().unsupported_body =
-                static_cast<uint32_t>(body_failures.size());
+            entity_table[last_declared].set(
+                &entity_details::unsupported_body,
+                static_cast<uint32_t>(body_failures.size()));
             if (failure)
                 *failure = static_cast<uint32_t>(body_failures.size());
         }
@@ -3190,8 +3194,8 @@ semantic_analysis::member_function_definition(entity_index c,
             entity_table[eq].defined = true;
             entity_table[eq].implicit = true;
             entity_table[eq].operator_function = true;
-            entity_table[eq].edit().implemented =
-                preprocessing_op_or_punc::EQUAL_EQUAL;
+            entity_table[eq].set(&entity_details::implemented,
+                                 preprocessing_op_or_punc::EQUAL_EQUAL);
             entity_table[eq].exceptions = entity_table[fn].exceptions;
             last_declared = eq;
             VTRY(eq_r, analyse_function_body(definition, body));
@@ -3456,7 +3460,7 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
                     type_kind::lvalue_reference &&
                 type_table[r2.type.unqualified()].kind !=
                     type_kind::rvalue_reference)
-                x.edit().constant_referent = referent;
+                x.set(&entity_details::constant_referent, referent);
         }
     }
     if (s.constexpr_ || s.inline_) {

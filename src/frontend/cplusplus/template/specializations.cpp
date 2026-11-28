@@ -1323,8 +1323,8 @@ analysis_result semantic_analysis::named_specialization(
                 "definition or use");
         if (extern_) {
             instantiations[prior - 1].pending = false;
-            entity_table[e].edit().explicitly_instantiated =
-                instantiation_kind::declaration;
+            entity_table[e].set(&entity_details::explicitly_instantiated,
+                                instantiation_kind::declaration);
             entity_table.add_declaration(e, declaration);
             index = prior - 1;
             return analysis_result::well_formed;
@@ -1780,11 +1780,11 @@ void semantic_analysis::mark_explicit_instantiation(entity_index e,
                                                     bool extern_)
 {
     if (extern_)
-        entity_table[e].edit().explicitly_instantiated =
-            instantiation_kind::declaration;
+        entity_table[e].set(&entity_details::explicitly_instantiated,
+                            instantiation_kind::declaration);
     else
-        entity_table[e].edit().explicitly_instantiated =
-            instantiation_kind::definition;
+        entity_table[e].set(&entity_details::explicitly_instantiated,
+                            instantiation_kind::definition);
 }
 
 entity_index

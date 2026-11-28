@@ -412,8 +412,9 @@ semantic_analysis::quiet_definition_failed(SyntaxRef at, uint32_t index,
         not_supported_because(at, "temp.inst", what);
     body_failures.append(unsupported[before]);
     unsupported.resize(before);
-    entity_table[x.specialization].edit().unsupported_body =
-        static_cast<uint32_t>(body_failures.size());
+    entity_table[x.specialization].set(
+        &entity_details::unsupported_body,
+        static_cast<uint32_t>(body_failures.size()));
     /* (the quiet body that wanted it fails too, and is left undefined:
        no code calls a specialization that has none) */
     return r;
@@ -573,8 +574,8 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
            in an unevaluated operand is as well-formed as before.) */
         entity_index f = instantiations[index].specialization;
         body_failures.append(unsupported[unsupported_before]);
-        entity_table[f].edit().unsupported_body =
-            static_cast<uint32_t>(body_failures.size());
+        entity_table[f].set(&entity_details::unsupported_body,
+                            static_cast<uint32_t>(body_failures.size()));
     }
     explicit_instantiation_verdict(
         instantiations[index].specialization, r,
@@ -1660,7 +1661,7 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].immediate = t.immediate;
     entity_table[e].operator_function = t.operator_function;
     entity_table[e].conversion_function = t.conversion_function;
-    entity_table[e].edit().implemented = t.details().implemented;
+    entity_table[e].set(&entity_details::implemented, t.details().implemented);
     entity_table[e].instantiation = index + 1;
     /* a member function template's specialization: a member function of
        its class ([temp.mem]) */

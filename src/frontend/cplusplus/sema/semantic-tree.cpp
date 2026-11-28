@@ -135,8 +135,8 @@ void semantic_analysis::require_destructor_definition(qualified_type type)
            this declaration's error, instantiate_pending) */
         if (!instantiation_depth &&
             !entity_table[destructor].details().member_needed_by)
-            entity_table[destructor].edit().member_needed_by =
-                current_declaration;
+            entity_table[destructor].set(&entity_details::member_needed_by,
+                                         current_declaration);
         mark_needed(destructor);
     }
 }
@@ -238,8 +238,8 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
         if (function) {
             if (!instantiation_depth &&
                 !entity_table[function].details().member_needed_by)
-                entity_table[function].edit().member_needed_by =
-                    current_declaration;
+                entity_table[function].set(&entity_details::member_needed_by,
+                                           current_declaration);
             mark_needed(function);
         }
         require_complete(m.type);

@@ -479,7 +479,7 @@ analysis_result semantic_analysis::init_capture(InitCapture n,
         each.member = capture_member_of(l.closure, member);
         if (pack)
             each.pack_name = tokens.identifier(name);
-        entity_table[v].edit().capture_member = each.member;
+        entity_table[v].set(&entity_details::capture_member, each.member);
         lambda_captures.append(each);
     }
     /* (an empty pack has no member: its name is bound all the same) */
