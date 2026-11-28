@@ -613,6 +613,12 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
             E.local_register_count > CODEGEN_LOCAL_REGISTER_MAX)
             E.local_register_count = CODEGEN_LOCAL_REGISTER_MAX;
     }
+    if (o->debug && !o->opt) {
+        E.debug_frames = (codegen_debug_frame **)calloc((size_t)c->nsym + 64,
+                                                        sizeof *E.debug_frames);
+        if (!E.debug_frames)
+            vout_of_memory();
+    }
     E.stats = getenv("VCC_EMIT_STATS") != NULL;
     E.vir_statistics = o->vir_aid.stats;
     virbuild_pass_switch_read(&E.vir_pass_switch,
@@ -822,7 +828,11 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
             }
         }
         if (dbg)
-            codegen_debug_unit_append(c, &tail, E.chunks, E.chunk_count);
+            codegen_debug_unit_append(c, &tail, E.chunks, E.chunk_count,
+                                      E.debug_frames);
+        for (uint32_t i = 0; E.debug_frames && i < c->nsym; i++)
+            free(E.debug_frames[i]);
+        free(E.debug_frames);
         if (WASM(c))
             wasm_tail(c, &tail, E.claimed);
         else if (CODEGEN_IS_WIN64(c))

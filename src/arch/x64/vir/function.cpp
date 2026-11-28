@@ -487,6 +487,7 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
     for (uint32_t k = 0; k < f->slot_count; k++)
         L.slot[k] =
             walk_slot_temporary(e, f->slot[k].size ?: 1, f->slot[k].align);
+    virbuild_debug_locals_place(e, L.slot);
     for (uint32_t k = 0; k < V->allocation.spill_count; k++)
         L.spill[k] = walk_slot_temporary(e, V->allocation.slot_sizes[k],
                                          V->allocation.slot_sizes[k] > 16

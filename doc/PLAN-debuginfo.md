@@ -25,10 +25,27 @@ registers; D3 changes that and measures run time and compile time.
   with it exactly (not a result's, not under a pointer, array or qualifier:
   the AST's types are canonical); vectors, `_BitInt` and scalable types are
   `DW_TAG_unspecified_type`.  C++ functions have no types yet (D4).
-- **D3, variables at -O0**: locals and parameters in memory; globals, formal
-  parameters and locals in lexical blocks (`DW_OP_fbreg`).
-- **D4, C++ types**: classes, members, bases, references, namespaces,
-  templates.
+- **D3a, locals in memory at -O0** (done): VIR pins the slot of a named local
+  or parameter.  x86-64, SQLite amalgamation, `-O0`, against D2: compiler
+  instructions 3.85 G -> 2.96 G, text 1457 kB -> 1187 kB; speedtest1
+  (`--size 20 :memory:`) instructions executed +2.5 % (task clock too noisy
+  to say).
+- **D3b, variables** (done for C): globals, parameters and locals of C
+  functions at `-O0` (`codegen/debug-frame.cpp`, `DW_OP_fbreg`);
+  `bench/debug-values.py` prints them.  Left: lexical blocks (locals are the
+  function's, so a shadowed name is ambiguous); no location for VLAs, arm64
+  locals aligned over 16, parameters passed by reference (arm64) or left in
+  the caller's frame, and x86-64 frames without a frame pointer; thread-local
+  and function-local static variables; C++ (D4).
+- **D4a, C++ variables** (done): the C entries for C++ too: parameters,
+  `this`, locals and globals at `-O0`; classes with members, base classes
+  (`DW_TAG_inheritance`) and references.
+- **D4b, C++ names** (done): namespaces as `DW_TAG_namespace` around
+  functions, globals and classes; a class's name with its template arguments
+  (types, integers and packs of them; other arguments are `?`) and the
+  classes around it.
+- **D4c**: enumerations (now their integer type), member functions and static
+  members in their class, virtual bases.
 - **D5, optimized code**: location lists at `-O1` and up; until then a
   variable there is optimized out.
 

@@ -279,6 +279,8 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, name.data(), name.size(),
                                t, AST_STORAGE_AUTO, 0, 1);
         *slot = s;
+        if (is_reference(x.type))
+            ast_builder_symbol_debug_kind(c, s, reference_debug_kind(x.type));
         gnu_attributes(e, s);
         return s;
     }
@@ -342,7 +344,16 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     s = ast_builder_symbol(c, kind, name.data(), name.size(), t, storage, flags,
                            0);
     *slot = s;
-    if (x.kind == entity_kind::function && x.name) {
+    if (x.kind == entity_kind::variable && is_reference(x.type))
+        ast_builder_symbol_debug_kind(c, s, reference_debug_kind(x.type));
+    /* (a member's scope is its class, which entries do not nest in yet) */
+    if (x.enclosing && analysis.entity_table[x.enclosing].kind ==
+                           entity_kind::namespace_entity) {
+        owned_buffer scope;
+        debug_scope(e, scope.get());
+        ast_builder_symbol_debug_scope(c, s, scope.data(), scope.size());
+    }
+    if (x.name) {
         owned_buffer identifier;
         spelling(e, identifier);
         ast_builder_symbol_debug_name(c, s, identifier.data(),
