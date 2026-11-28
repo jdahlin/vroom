@@ -294,7 +294,8 @@ void c_lowering::guarded_initialization(const semantic_node &n,
             c, AST_SYMBOL_VARIABLE, guard_name.data(), guard_name.size(), i64,
             AST_STORAGE_NONE,
             AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
-                AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED | per_thread,
+                AST_SYMBOL_FLAG_COMDAT | AST_SYMBOL_FLAG_DEFINED |
+                AST_SYMBOL_FLAG_USED | per_thread,
             0);
         ast_builder_toplevel(c, guard);
     } else if (!made) {
@@ -413,7 +414,8 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
             c, AST_SYMBOL_VARIABLE, guard_name.data(), guard_name.size(),
             guard_type, AST_STORAGE_NONE,
             AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
-                AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED,
+                AST_SYMBOL_FLAG_COMDAT | AST_SYMBOL_FLAG_DEFINED |
+                AST_SYMBOL_FLAG_USED,
             0);
         ast_builder_symbol_keep(c, guard);
         ast_builder_toplevel(c, guard);

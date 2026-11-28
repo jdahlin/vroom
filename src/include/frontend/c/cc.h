@@ -239,6 +239,8 @@ enum {
         << 26, /* C23 constant object: initializer is a constant expression */
     AST_SYMBOL_FLAG_LINKONCE = 1u
         << 28, /* C++: an inline function's or a template instance's definition (weak): emitted only if this TU refers to it */
+    AST_SYMBOL_FLAG_COMDAT = 1u
+        << 29, /* C++ vague linkage ([abi:vague-linkage]): on ELF a COMDAT group of its own, signature the symbol */
     AST_SYMBOL_FLAG_EXTERNAL_DECLARATION = 1u
         << 27, /* function: a file-scope declaration without inline, or extern (C99 6.7.4p7: an inline definition is external) */
     AST_SYMBOL_FLAG_OBJECT_SIZE_INITIALIZER = 1u

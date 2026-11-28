@@ -22,8 +22,8 @@ ast_qualified_type c_lowering::vtable_type(entity_index k)
  * [abi:vague-vtable]: "If the class has a key function ..., the virtual
  * table is emitted in the object file containing the definition of the
  * key function"; else it is emitted where it is used, each copy weak so
- * that they link as one (as an inline function's, symbol: COMDAT is the
- * C code generator's to come).  A class without linkage has a local one.
+ * that they link as one, in a COMDAT group (as an inline function's,
+ * symbol_linkage).  A class without linkage has a local one.
  */
 uint32_t c_lowering::vtable(entity_index k, token_index at)
 {
@@ -46,7 +46,8 @@ uint32_t c_lowering::vtable(entity_index k, token_index at)
     int storage = AST_STORAGE_NONE;
     uint32_t flags = AST_SYMBOL_FLAG_GLOBAL;
     if (!key)
-        flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
+        flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK |
+                 AST_SYMBOL_FLAG_COMDAT;
     if (class_internal(k)) {
         storage = AST_STORAGE_STATIC;
         flags = AST_SYMBOL_FLAG_GLOBAL;
