@@ -37,6 +37,9 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
         if (!p)
             return fail("a parameter", body.at);
         ast_builder_symbol_flags_add(c, p, AST_SYMBOL_FLAG_PARAMETER);
+        /* -g: a member function's object parameter */
+        if (i < implicit)
+            ast_builder_symbol_debug_name(c, p, "this", 4);
         parameters.append(p);
     }
     structor_variant = variant;

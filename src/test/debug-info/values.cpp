@@ -1,0 +1,58 @@
+/* bench/debug-values.py: C++ parameters, this, references, bases and
+   members print as from clang's program */
+namespace ns
+{
+struct Base {
+    int b;
+    virtual int v() { return b; }
+};
+int hidden = 6;
+} // namespace ns
+
+struct S : ns::Base {
+    int m;
+    int &r;
+    S(int &x) : m(2), r(x) { b = 1; }
+};
+
+template <class T> struct Box {
+    T item;
+};
+
+namespace outer
+{
+namespace
+{
+int anonymous = 8;
+}
+template <class T, int N> struct Many {
+    T item[N];
+};
+} // namespace outer
+
+int total = 5;
+
+__attribute__((noinline)) static int use(const S &s, Box<long> box, S *p,
+                                         int &&moved)
+{
+    outer::Many<Box<long>, 2> many{{{1}, {2}}};
+
+    int x = s.m + (int)box.item;
+    const int &alias = x;
+
+    int sum = x + total + ns::hidden + p->b + moved + alias;
+
+    sum += outer::anonymous + (int)many.item[1].item;
+    return sum; /* STOP */
+}
+
+int main()
+{
+    int v = 7;
+    S s(v);
+    Box<long> box{9};
+
+    return use(s, box, &s, 4) == 0;
+}
+/* PRINT s.m s.b s.r box.item p->m p->b moved x alias total ns::hidden outer::anonymous */
+/* WHATIS box many s p */

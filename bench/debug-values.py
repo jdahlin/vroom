@@ -17,12 +17,15 @@ spec.loader.exec_module(ct)
 TESTS = f'{os.path.dirname(B)}/src/test/debug-info'
 
 
-def values(program, source, line, names):
-    """name -> what the debugger prints for it at source:line"""
+def values(program, source, line, names, types):
+    """name -> what the debugger prints for it at source:line, and for the
+    names of types the type gdb says each has (lldb: not asked)"""
     if shutil.which('gdb'):
         command = ['gdb', '-batch', '-nx', '-ex', f'break {source}:{line}', '-ex', 'run']
         for n in names:
             command += ['-ex', f'echo @{n}=', '-ex', f'output {n}', '-ex', 'echo \\n']
+        for n in types:
+            command += ['-ex', f'echo @type:{n}=', '-ex', f'whatis {n}']
         command.append(program)
     else:
         command = [ct.llvm('lldb'), '-b', '-o', f'breakpoint set -f {source} -l {line}', '-o', 'run']
@@ -34,32 +37,50 @@ def values(program, source, line, names):
     return {m[1]: re.sub(r'0x[0-9a-f]+', '0x?', m[2]) for m in re.finditer(r'^@([^=\s]+)[= ](.*)$', out, re.M)}
 
 
+def isystem(name):
+    """vpp's resource headers for C; the C++ test includes none"""
+    if name.endswith('.cpp'):
+        return []
+    return ['-isystem', ct.RES]
+
+
 def main():
     if not shutil.which('gdb') and not shutil.which(ct.llvm('lldb')):
         print('debug-values: skipped, no gdb or lldb')
         return
     failed = count = 0
     sources = []
-    for source in sorted(glob.glob(f'{TESTS}/*.c')):
+    for source in sorted(glob.glob(f'{TESTS}/*.c') + glob.glob(f'{TESTS}/*.cpp')):
         with open(source) as f:
             text = f.read()
         if m := re.search(r'/\* PRINT (.*?) \*/', text):
             stop = next(n for n, line in enumerate(text.splitlines(), 1) if '/* STOP */' in line)
-            sources.append((source, stop, m[1].split()))
+            types = []
+            if w := re.search(r'/\* WHATIS (.*?) \*/', text):
+                types = w[1].split()
+            sources.append((source, stop, m[1].split(), types))
     emitters = [[]]
     if platform.machine() == 'x86_64':
         emitters.append(['-fno-vir'])
     with tempfile.TemporaryDirectory() as tmp:
-        for source, stop, names in sources:
+        for source, stop, names, types in sources:
             name = os.path.basename(source)
-            subprocess.run([ct.llvm('clang'), '-g', '-O0', '-w', source, '-o', f'{tmp}/clang'], check=True)
-            expected = values(f'{tmp}/clang', name, stop, names)
+            driver = ct.llvm('clang')
+            if name.endswith('.cpp'):
+                driver = ct.llvm('clang++')
+            subprocess.run([driver, '-g', '-O0', '-w', source, '-o', f'{tmp}/clang'], check=True)
+            expected = values(f'{tmp}/clang', name, stop, names, types)
             for flags in emitters:
-                subprocess.run([ct.VPP, '-g', '-O0', '-w', '-isystem', ct.RES, *flags, '-c', source,
+                if flags and name.endswith('.cpp'):
+                    continue  # (C++ is VIR's)
+                subprocess.run([ct.VPP, '-g', '-O0', '-w', *isystem(name), *flags, '-c', source,
                                 '-o', f'{tmp}/vcc.o'], check=True)
-                subprocess.run([ct.llvm('clang'), f'{tmp}/vcc.o', '-o', f'{tmp}/vcc'], check=True)
-                got = values(f'{tmp}/vcc', name, stop, names)
-                for n in names:
+                subprocess.run([driver, f'{tmp}/vcc.o', '-o', f'{tmp}/vcc'], check=True)
+                got = values(f'{tmp}/vcc', name, stop, names, types)
+                asked = list(names)
+                if shutil.which('gdb'):
+                    asked += [f'type:{n}' for n in types]
+                for n in asked:
                     count += 1
                     if n not in expected or got.get(n) != expected[n]:
                         print(f'FAIL {name} {" ".join(flags)}: {n}: vcc {got.get(n)}, clang {expected.get(n)}')
