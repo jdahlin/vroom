@@ -287,8 +287,9 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
        (void_t<T>): that type.  In a dependent value (And<void_t<T>>::value)
        clang has the value too, which the analysis does not: not mangled
        there */
-    if (r.kind == type_kind::dependent &&
-        analysis.entity_table[r.entity].alias_expansion.unqualified()) {
+    if (r.kind == type_kind::dependent && analysis.entity_table[r.entity]
+                                              .details()
+                                              .alias_expansion.unqualified()) {
         if (dependent_value_depth && !alias_value_trial) {
             alias_value_refused = true;
             return refuse("an alias template's specialization of dependent "
@@ -296,7 +297,8 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
                           "value-dependent template argument (clang "
                           "evaluates it)");
         }
-        qualified_type x = analysis.entity_table[r.entity].alias_expansion;
+        qualified_type x =
+            analysis.entity_table[r.entity].details().alias_expansion;
         return type(qualified_type::make(x.unqualified(), x.cv() | t.cv()),
                     member_class);
     }

@@ -572,7 +572,7 @@ entity_index semantic_analysis::plain_class_nominated(SyntaxRef nested)
         return 0;
     if (!scope.entity ||
         entity_table[scope.entity].kind != entity_kind::class_type ||
-        !entity_table[scope.entity].size)
+        !entity_table[scope.entity].details().size)
         return 0;
     return scope.entity;
 }
@@ -604,11 +604,12 @@ semantic_analysis::defined_special_member(entity_index specialization,
 {
     if (tokens.identifier(name) != entity_table[specialization].name)
         return 0;
-    entity_index d = entity_table[specialization].destructor;
+    entity_index d = entity_table[specialization].details().destructor;
     if (d && (declared_by(d, o.definition) || declared_by(d, o.declaration)))
         return d;
-    for (entity_index k = entity_table[specialization].first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k =
+             entity_table[specialization].details().first_constructor;
+         k; k = entity_table[k].details().next_constructor)
         if (declared_by(k, o.definition) || declared_by(k, o.declaration))
             return k;
     return 0;
@@ -720,7 +721,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         defer_next_body_needs = true;
         bool defer_unneeded =
             recorded && x.specialization &&
-            entity_table[x.specialization].explicitly_instantiated !=
+            entity_table[x.specialization].details().explicitly_instantiated !=
                 instantiation_kind::definition;
         skip_unneeded_member_body = defer_unneeded;
         skipped_member_body = 0;
@@ -789,7 +790,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
                 first2 = entity_table.find(owner, lookup_id);
             for (entity_index f = first2;
                  f && !defined && entity_table[f].kind == entity_kind::function;
-                 f = entity_table[f].next_overload)
+                 f = entity_table[f].details().next_overload)
                 if (declared_by(f, o.definition) ||
                     declared_by(f, o.declaration))
                     defined = f;
@@ -953,8 +954,9 @@ semantic_analysis::record_template_member(const template_member_definition &m)
         bool special = name && tokens.identifier(name) ==
                                    entity_table[y.specialization].name;
         analysis_result one;
-        if (special || entity_table[y.specialization].explicitly_instantiated !=
-                           instantiation_kind::none)
+        if (special ||
+            entity_table[y.specialization].details().explicitly_instantiated !=
+                instantiation_kind::none)
             one = define_template_member(member, k, false);
         else
             one = defer_or_define_member(member, k, false);
@@ -1173,7 +1175,7 @@ analysis_result semantic_analysis::define_member_template_of(
                         declares_special_member(c, definition[lead + 1]));
     entity_index held = 0;
     if (r == analysis_result::well_formed && constructor) {
-        held = entity_table[c].constructor_templates;
+        held = entity_table[c].details().constructor_templates;
     } else if (r == analysis_result::well_formed && m.has_id) {
         held = entity_table.find(c, tokens.identifier(m.id));
         if (held)

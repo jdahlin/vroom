@@ -364,7 +364,9 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
         operand = e.type;
         if (e.category != value_category::prvalue &&
             type_table[operand.unqualified()].kind == type_kind::class_type &&
-            entity_table[type_table[operand.unqualified()].entity].dynamic)
+            entity_table[type_table[operand.unqualified()].entity]
+                .details()
+                .dynamic)
             return not_supported_because(
                 n, "expr.typeid",
                 "typeid of a glvalue of polymorphic class type");
@@ -378,7 +380,8 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
         operand = record.operand;
     const struct type shape = type_table[operand.unqualified()];
     require_complete(shape.entity);
-    if (shape.kind == type_kind::class_type && !entity_table[shape.entity].size)
+    if (shape.kind == type_kind::class_type &&
+        !entity_table[shape.entity].details().size)
         return not_supported_because(n, "expr.typeid",
                                      "typeid of an incomplete class");
     entity_index std_ =
@@ -417,12 +420,12 @@ entity_index semantic_analysis::typeid_object(qualified_type type,
 {
     type_index named = type.unqualified();
     for (entity_index e : typeid_objects)
-        if (entity_table[e].typeinfo_of == named)
+        if (entity_table[e].details().typeinfo_of == named)
             return e;
     entity_index e = entity_table.make(entity_kind::variable, 0, 0);
     entity_table[e].type =
         qualified_type::make(entity_table[info].type.unqualified(), cv_const);
-    entity_table[e].typeinfo_of = named;
+    entity_table[e].set(&entity_details::typeinfo_of, named);
     entity_table[e].linkage_of_name = linkage::external;
     typeid_objects.append(e);
     return e;
@@ -1559,8 +1562,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             !qscope.global && !qscope.dependent && qscope.entity &&
             entity_table[qscope.entity].kind == entity_kind::class_type &&
             entity_table[qscope.entity].member_count == 0 &&
-            entity_table[qscope.entity].base_count == 0 &&
-            !entity_table[qscope.entity].dynamic &&
+            entity_table[qscope.entity].details().base_count == 0 &&
+            !entity_table[qscope.entity].details().dynamic &&
             !entity_table.find(
                 qscope.entity,
                 operator_name(preprocessing_op_or_punc::EQUAL))) {
@@ -1750,7 +1753,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             owned_array<entity_index> earlier;
             for (entity_index d : declared) {
                 bool late = false, before = false;
-                for (entity_index o = d; o; o = entity_table[o].next_overload) {
+                for (entity_index o = d; o;
+                     o = entity_table[o].details().next_overload) {
                     uint32_t at = entity_table[o].first_declaration;
                     if (at && entity_table.declaration(at).node.first_token() >
                                   lookup_horizon)
@@ -1871,7 +1875,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                     hiding_late = true;
                 }
                 for (entity_index o = x.entity; o && !first_early;
-                     o = entity_table[o].next_overload)
+                     o = entity_table[o].details().next_overload)
                     if (!declared_past_horizon(o, x.found_in))
                         first_early = o;
             }
@@ -1973,8 +1977,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         return r;
     /* [ext:clang_builtin_functions] __builtin_invoke is the call of its
        first argument with the others (builtin-invoke.cpp) */
-    if (f.entity && entity_table[f.entity].gnu_builtin_row &&
-        gnu_builtin_at(entity_table[f.entity].gnu_builtin_row).form ==
+    if (f.entity && entity_table[f.entity].details().gnu_builtin_row &&
+        gnu_builtin_at(entity_table[f.entity].details().gnu_builtin_row).form ==
             builtin_form::invoke) {
         owned_array<expression_meaning> ops;
         if (early.size() == arguments.size()) {
@@ -2246,7 +2250,7 @@ analysis_result semantic_analysis::member_callee(
         member_function_template_of(x.unknown_entity))
         held = x.unknown_entity;
     else if (x.entity && !x.ambiguous &&
-             entity_table[x.entity].member_templates)
+             entity_table[x.entity].details().member_templates)
         held = x.entity;
     if (!held) {
         named_in = 0;
@@ -2744,7 +2748,7 @@ analysis_result semantic_analysis::template_call(
         /* (a function's name whose other declarations analysis did not
            follow may be such a set too) */
         if (e.entity && entity_table[e.entity].kind == entity_kind::function &&
-            entity_table[e.entity].next_overload) {
+            entity_table[e.entity].details().next_overload) {
             name_uses.resize(uses_before);
             return not_supported_because(
                 n, "temp.deduct.call", "an overloaded function as an argument");
@@ -2843,7 +2847,8 @@ analysis_result semantic_analysis::template_call(
        found */
     if (!template_id)
         for (entity_index d : directed)
-            for (entity_index o = d; o; o = entity_table[o].next_overload)
+            for (entity_index o = d; o;
+                 o = entity_table[o].details().next_overload)
                 others.append(o);
     /* [basic.lookup.argdep]/3: the non-template functions argument-dependent
        lookup found are candidates too, every overload of each */
@@ -2997,7 +3002,7 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
         called = f.entity;
     size_t defaults = 0;
     if (called)
-        defaults = entity_table[called].default_arguments;
+        defaults = entity_table[called].details().default_arguments;
     if (called && entity_table[called].unknown_defaults &&
         arguments.size() < count)
         return not_supported_because(
@@ -3104,8 +3109,8 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
        argument for the parameter is used." ([dcl.fct.default]/9: evaluated
        at each call) */
     for (size_t i = arguments.size(); i < count; i++) {
-        uint32_t used =
-            default_argument_nodes[entity_table[called].first_default + i];
+        uint32_t used = default_argument_nodes
+            [entity_table[called].details().first_default + i];
         default_argument_used(used);
         argument_nodes.append(bind_call_site(used, n.first_token()));
     }
@@ -3119,8 +3124,8 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
     m = expression_meaning();
     qualified_type result_type = function.operand;
     /* [ext:gnu_library_builtins] the call's type is by its arguments */
-    if (called && entity_table[called].gnu_builtin_row &&
-        gnu_builtin_untyped(entity_table[called].gnu_builtin_row))
+    if (called && entity_table[called].details().gnu_builtin_row &&
+        gnu_builtin_untyped(entity_table[called].details().gnu_builtin_row))
         VTRY_SET(r,
                  atomic_builtin_result(n, called, argument_nodes, result_type));
     call_result(result_type, m);
@@ -3133,9 +3138,9 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
        specifier: [expr.prim.lambda.closure]/4, evaluate_invocation) */
     if (called && !entity_table[called].constexpr_ &&
         !(entity_table[called].enclosing &&
-          entity_table[entity_table[called].enclosing].lambda) &&
-        !(entity_table[called].gnu_builtin_row &&
-          gnu_builtin_at(entity_table[called].gnu_builtin_row).fold !=
+          entity_table[entity_table[called].enclosing].details().lambda) &&
+        !(entity_table[called].details().gnu_builtin_row &&
+          gnu_builtin_at(entity_table[called].details().gnu_builtin_row).fold !=
               builtin_fold::none) &&
         /* (the evaluator answers __builtin_is_constant_evaluated) */
         !(entity_table[called].gnu_flags & gnu_is_constant_evaluated))
@@ -3232,7 +3237,7 @@ analysis_result semantic_analysis::immediate_invocation(SyntaxRef n,
            analysed */
         entity_index owner = function_state.function;
         if (owner && entity_table[owner].enclosing &&
-            entity_table[entity_table[owner].enclosing].lambda)
+            entity_table[entity_table[owner].enclosing].details().lambda)
             return not_supported_because(
                 n, "expr.const",
                 "an immediate function call in a lambda's member function");

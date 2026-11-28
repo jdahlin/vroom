@@ -89,7 +89,8 @@ analysis_result semantic_analysis::variable_partial_specialization(
     /* [temp.class.spec]/9.2: a parameter used only in an expression of
        an argument (<I + 5, I * 2>) is not deducible: not judged */
     for (const template_argument &a : arguments) {
-        if (a.template_entity && entity_table[a.template_entity].expression)
+        if (a.template_entity &&
+            entity_table[a.template_entity].details().expression)
             return not_supported_because(
                 n, "temp.class.spec",
                 "a partial specialization argument that is an expression");
@@ -97,7 +98,7 @@ analysis_result semantic_analysis::variable_partial_specialization(
             continue;
         for (uint32_t k = 0; k < a.count; k++) {
             entity_index d = pack_arguments[a.value + k].template_entity;
-            if (d && entity_table[d].expression)
+            if (d && entity_table[d].details().expression)
                 return not_supported_because(
                     n, "temp.class.spec",
                     "a partial specialization pack argument containing an "
@@ -509,7 +510,8 @@ analysis_result semantic_analysis::class_specialization_definition(
     {
         bool expressions2 = false, deduces = false;
         for (const template_argument &a : arguments) {
-            if (a.template_entity && entity_table[a.template_entity].expression)
+            if (a.template_entity &&
+                entity_table[a.template_entity].details().expression)
                 expressions2 = true;
             else if (a.template_entity || depends_on_template_parameter(a.type))
                 deduces = true;

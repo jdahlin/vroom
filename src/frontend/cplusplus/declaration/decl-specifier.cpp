@@ -1537,7 +1537,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 k.alone++;
             named = entity_table[e].type.unqualified();
             cv |= entity_table[e].type.cv();
-            s.typedef_aligned = entity_table[e].alignment;
+            s.typedef_aligned = entity_table[e].details().alignment;
             named_at = t;
             continue;
         }
@@ -2091,7 +2091,7 @@ analysis_result semantic_analysis::named_member_type(
                                    "class.access");
     /* [ext:gnu_attributes] a qualified typedef-name's aligned */
     if (entity_table[e].kind == entity_kind::typedef_name &&
-        entity_table[e].alignment)
+        entity_table[e].details().alignment)
         return not_supported_because(
             n, "ext.gnu", "a qualified typedef-name with an aligned attribute");
     used(t, e);

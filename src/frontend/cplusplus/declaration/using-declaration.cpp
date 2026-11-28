@@ -239,7 +239,7 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
     auto plain = [&](entity_index f) {
         const entity &x = entity_table[f];
         return x.kind == entity_kind::function && !x.virtual_ &&
-               !x.member_templates && !x.conversion_function &&
+               !x.details().member_templates && !x.conversion_function &&
                x.special == special_member::none;
     };
     auto same_signature = [&](entity_index a, entity_index b) {
@@ -250,15 +250,15 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
     /* the class's own functions, which come first in the chain, and the
        copies at its end if it has any */
     owned_array<entity_index> chain;
-    for (entity_index o = head; o; o = entity_table[o].next_overload)
+    for (entity_index o = head; o; o = entity_table[o].details().next_overload)
         chain.append(o);
     size_t own_count = 0;
     while (own_count < chain.size() &&
            entity_table[chain[own_count]].enclosing == c &&
-           !entity_table[chain[own_count]].using_shadow_of)
+           !entity_table[chain[own_count]].details().using_shadow_of)
         own_count++;
     bool copies = own_count < chain.size() &&
-                  entity_table[chain[own_count]].using_shadow_of;
+                  entity_table[chain[own_count]].details().using_shadow_of;
     owned_array<entity_index> visible;
     overload_set(head, visible);
     owned_array<entity_index> present; /* what the base's functions are */
@@ -307,8 +307,8 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
     }
     auto shadow = [&](entity_index f) {
         entity copy = entity_table[f];
-        copy.next_overload = 0;
-        copy.using_shadow_of = f;
+        copy.set(&entity_details::next_overload, 0);
+        copy.set(&entity_details::using_shadow_of, f);
         entity_index s =
             entity_table.make(entity_kind::function, name, copy.enclosing);
         entity_table[s] = copy;
@@ -324,7 +324,7 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
         for (entity_index f : present) {
             entity_index s = shadow(f);
             if (last)
-                entity_table[last].next_overload = s;
+                entity_table[last].set(&entity_details::next_overload, s);
             else
                 entity_table.bind(c, name, s, true);
             last = s;
@@ -332,7 +332,7 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
     }
     for (entity_index f : introduced) {
         entity_index s = shadow(f);
-        entity_table[last].next_overload = s;
+        entity_table[last].set(&entity_details::next_overload, s);
         last = s;
     }
     used(t, e);
@@ -528,7 +528,7 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         name == operator_name(preprocessing_op_or_punc::EQUAL) &&
         !is_namespace(q.entity) &&
         entity_table[q.entity].kind == entity_kind::class_type &&
-        entity_table[q.entity].defined && entity_table[q.entity].size)
+        entity_table[q.entity].defined && entity_table[q.entity].details().size)
         return analysis_result::well_formed;
     /* [namespace.udecl]/1: "If the using-declarator names ... a set of
        declarations, the using-declarator introduces the declarator's name
@@ -701,7 +701,8 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         if (kind == entity_kind::none)
             return not_supported_because(n, "namespace.udecl",
                                          "a using of a held name");
-        for (entity_index o = e; o; o = entity_table[o].next_overload) {
+        for (entity_index o = e; o;
+             o = entity_table[o].details().next_overload) {
             if (!accessible(o, c))
                 return ill_formed_at_token(
                     t, "a using-declaration shall name an accessible member",
@@ -728,21 +729,21 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                 /* the name is a base's already (another using-declaration) */
                 return using_join_chains(n, t, c, name, own, e);
             entity_index last = own;
-            while (entity_table[last].next_overload &&
-                   entity_table[entity_table[last].next_overload].enclosing ==
-                       c)
-                last = entity_table[last].next_overload;
-            if (entity_table[last].next_overload == e) {
+            while (entity_table[last].details().next_overload &&
+                   entity_table[entity_table[last].details().next_overload]
+                           .enclosing == c)
+                last = entity_table[last].details().next_overload;
+            if (entity_table[last].details().next_overload == e) {
                 /* [namespace.udecl]/9: again */
                 used(t, e);
                 return analysis_result::well_formed;
             }
-            if (entity_table[last].next_overload)
+            if (entity_table[last].details().next_overload)
                 return using_join_chains(n, t, c, name, own, e);
-            entity_table[last].next_overload = e;
-            if (entity_table[e].member_templates)
-                introduce_member_templates(c, own,
-                                           entity_table[e].member_templates);
+            entity_table[last].set(&entity_details::next_overload, e);
+            if (entity_table[e].details().member_templates)
+                introduce_member_templates(
+                    c, own, entity_table[e].details().member_templates);
             used(t, e);
             return analysis_result::well_formed;
         }
@@ -825,17 +826,17 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
             if (entity_table[prior].enclosing != scope)
                 return using_join_chains(n, t, scope, name, prior, e);
             entity_index last = prior;
-            while (entity_table[last].next_overload &&
-                   entity_table[entity_table[last].next_overload].enclosing ==
-                       scope)
-                last = entity_table[last].next_overload;
-            if (entity_table[last].next_overload == e) {
+            while (entity_table[last].details().next_overload &&
+                   entity_table[entity_table[last].details().next_overload]
+                           .enclosing == scope)
+                last = entity_table[last].details().next_overload;
+            if (entity_table[last].details().next_overload == e) {
                 used(t, e);
                 return analysis_result::well_formed;
             }
-            if (entity_table[last].next_overload)
+            if (entity_table[last].details().next_overload)
                 return using_join_chains(n, t, scope, name, prior, e);
-            entity_table[last].next_overload = e;
+            entity_table[last].set(&entity_details::next_overload, e);
             used(t, e);
             return analysis_result::well_formed;
         }
@@ -847,8 +848,8 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         (kind == entity_kind::variable || kind == entity_kind::function) &&
         (prior_kind == entity_kind::variable ||
          prior_kind == entity_kind::function);
-    if (!plain || entity_table[e].hidden_type ||
-        entity_table[prior].hidden_type)
+    if (!plain || entity_table[e].details().hidden_type ||
+        entity_table[prior].details().hidden_type)
         return not_supported_because(
             n, "namespace.udecl",
             "a using that conflicts with a declaration of the name");

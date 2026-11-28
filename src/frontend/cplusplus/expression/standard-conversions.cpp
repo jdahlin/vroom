@@ -298,7 +298,8 @@ entity_index semantic_analysis::enumeration_of(qualified_type t) const
 {
     const struct type record = type_table[t.unqualified()];
     if (record.kind != type_kind::enumeration ||
-        entity_table[record.entity].underlying == fundamental_type::none)
+        entity_table[record.entity].details().underlying ==
+            fundamental_type::none)
         return 0;
     return record.entity;
 }
@@ -311,7 +312,7 @@ bool semantic_analysis::enumeration_as_underlying(expression_meaning &m)
     if (!e)
         return false;
     m.type = qualified_type::make(
-        type_table.fundamental(entity_table[e].underlying), cv_none);
+        type_table.fundamental(entity_table[e].details().underlying), cv_none);
     m.zero_literal = false;
     converted(m, conversion_kind::integral);
     return true;
@@ -339,7 +340,7 @@ bool semantic_analysis::promote_enumeration(expression_meaning &m)
     if (entity_table[e].fixed_underlying)
         promote(m);
     else
-        convert_arithmetic(m, entity_table[e].promoted);
+        convert_arithmetic(m, entity_table[e].details().promoted);
     return true;
 }
 
@@ -703,7 +704,7 @@ bool semantic_analysis::destroyed_temporary(const expression_meaning &m) const
     return m.category == value_category::prvalue &&
            t.kind == type_kind::class_type &&
            entity_table[t.entity].kind == entity_kind::class_type &&
-           entity_table[t.entity].destructor;
+           entity_table[t.entity].details().destructor;
 }
 
 bool semantic_analysis::differ_in_exceptions(qualified_type a,
@@ -1006,7 +1007,7 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
             require_complete(fp.entity);
             if (fp.kind == type_kind::class_type &&
                 tp.kind == type_kind::class_type &&
-                entity_table[fp.entity].size &&
+                entity_table[fp.entity].details().size &&
                 !(pointee.cv() & ~target_pointee.cv()) &&
                 base_step(fp.entity, tp.entity, ambiguous))
                 return pointer_to_base(at.first_token(), fp.entity, tp.entity,
@@ -1021,7 +1022,7 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                 tp.kind == type_kind::class_type &&
                 entity_table[fp.entity].kind == entity_kind::class_type &&
                 entity_table[tp.entity].kind == entity_kind::class_type &&
-                entity_table[fp.entity].size &&
+                entity_table[fp.entity].details().size &&
                 !base_step(fp.entity, tp.entity, ambiguous))
                 return ill_formed(at, rule, "dcl.init");
             /* a function pointer conversion, or between classes one of
@@ -1064,10 +1065,10 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
            function */
         const struct type source = type_table[m.type.unqualified()];
         if (source.kind == type_kind::class_type && source.entity &&
-            entity_table[source.entity].lambda &&
-            entity_table[source.entity].call_operator &&
-            entity_table[entity_table[source.entity].call_operator].kind ==
-                entity_kind::template_entity)
+            entity_table[source.entity].details().lambda &&
+            entity_table[source.entity].details().call_operator &&
+            entity_table[entity_table[source.entity].details().call_operator]
+                    .kind == entity_kind::template_entity)
             return generic_closure_conversion(source.entity, to, at, m);
         /* [conv]/1: no standard conversion takes another class type to a
            pointer; a class with conversion functions is not analysed here, and

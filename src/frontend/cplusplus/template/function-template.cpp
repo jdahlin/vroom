@@ -440,7 +440,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     /* [over.oper]: an operator function template's specializations are
        operator functions (named by the operator: [abi:mangling-operator]) */
     entity_table[t].operator_function = m.operator_function;
-    entity_table[t].implemented = m.implemented;
+    entity_table[t].set(&entity_details::implemented, m.implemented);
     /* [basic.link]/3.1: a function template declared static has internal
        linkage */
     if (s.static_)
@@ -505,7 +505,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     owned_array<template_ref> local;
     for (template_ref g : group) {
         bool held_here = false;
-        for (entity_index h = prior; h; h = entity_table[h].using_shadow_of)
+        for (entity_index h = prior; h;
+             h = entity_table[h].details().using_shadow_of)
             if (function_templates[g].name == h)
                 held_here = true;
         if (held_here)

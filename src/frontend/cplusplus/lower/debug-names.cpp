@@ -40,7 +40,7 @@ void c_lowering::debug_class_name(entity_index e, vbuffer *out)
     }
     uint32_t name = x.name;
     if (!name)
-        name = x.linkage_name;
+        name = x.details().linkage_name;
     if (!name)
         return;
     size_t length = 0;
@@ -133,6 +133,73 @@ void c_lowering::debug_type_name(qualified_type t, vbuffer *out)
         vbuffer_string_append(out, "?");
         break;
     }
+}
+
+/* the enumeration e as -g describes it (made once) */
+ast_qualified_type c_lowering::debug_enum_type(entity_index e, token_index at)
+{
+    for (size_t i = 0; i < debug_enums.size(); i++)
+        if (debug_enums[i] == e)
+            return debug_enum_types[i];
+    const entity x = analysis.entity_table[e];
+    ast_qualified_type underlying = fundamental(x.details().underlying, at);
+    owned_array<uint32_t> enumerators;
+    for (uint32_t i = 1; i < analysis.entity_table.size(); i++) {
+        const entity &y = analysis.entity_table[entity_index(i)];
+        if (y.kind != entity_kind::enumerator ||
+            record(y.type).kind != type_kind::enumeration ||
+            record(y.type).entity != e)
+            continue;
+        size_t length = 0;
+        const char *text = analysis.identifier_text(y.name, &length);
+        enumerators.append(ast_builder_debug_enumerator(
+            c, text, length, static_cast<int64_t>(y.value)));
+    }
+    owned_buffer name, scope;
+    debug_class_name(e, name.get());
+    debug_scope(e, scope.get());
+    ast_qualified_type made = ast_builder_type_debug_enum(
+        c, name.data(), name.size(), scope.data(), scope.size(), underlying,
+        enumerators.data(), static_cast<uint32_t>(enumerators.size()),
+        x.scoped);
+    debug_enums.append(e);
+    debug_enum_types.append(made);
+    return made;
+}
+
+/* the type -g says for t where C's lost an enumeration: of one, or a
+   pointer, reference or array of one; 0 where C's says it all */
+ast_qualified_type c_lowering::debug_type(qualified_type t, token_index at)
+{
+    if (!ast_builder_debugging(c))
+        return 0;
+    const struct type r = record(t);
+    ast_qualified_type made = 0;
+    switch (r.kind) {
+    case type_kind::enumeration:
+        if (analysis.entity_table[r.entity].details().underlying ==
+            fundamental_type::none)
+            return 0;
+        made = debug_enum_type(r.entity, at);
+        break;
+    case type_kind::pointer:
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+        made = debug_type(r.operand, at);
+        if (made)
+            made = ast_builder_type_pointer(c, made);
+        break;
+    case type_kind::array:
+        made = debug_type(r.operand, at);
+        if (made)
+            made = ast_builder_type_array(c, made, r.bound, r.bound_known);
+        break;
+    default:
+        break;
+    }
+    if (made && static_cast<int>(t.cv()) != 0)
+        made = ast_builder_type_qualified(c, made, static_cast<int>(t.cv()));
+    return made;
 }
 
 } // namespace cplusplus::lowering

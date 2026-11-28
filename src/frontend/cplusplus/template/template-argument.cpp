@@ -5,6 +5,7 @@
  * template-arguments, and the parameters' names bound to the arguments.
  */
 #include "../cplusplus-internal.h"
+#include "common/hash.h"
 #include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
@@ -200,6 +201,100 @@ void semantic_analysis::bind_template_argument(entity_index scope,
     entity_table.bind(scope, name, e);
 }
 
+size_t semantic_analysis::argument_scope_slot(uint32_t hash,
+                                              uint32_t first_word,
+                                              uint32_t words) const
+{
+    size_t mask = argument_scope_slots.size() - 1;
+    size_t i = hash & mask;
+    for (; argument_scope_slots[i]; i = (i + 1) & mask) {
+        const argument_scope_record &r =
+            argument_scopes[argument_scope_slots[i] - 1];
+        if (r.hash == hash && r.words == words &&
+            memcmp(argument_scope_keys.data() + r.first_word,
+                   argument_scope_keys.data() + first_word,
+                   words * sizeof(uint64_t)) == 0)
+            break;
+    }
+    return i;
+}
+
+void semantic_analysis::grow_argument_scopes()
+{
+    size_t size = 64;
+    if (!argument_scope_slots.empty())
+        size = argument_scope_slots.size() * 2;
+    argument_scope_slots.resize(size);
+    for (uint32_t &slot : argument_scope_slots)
+        slot = 0;
+    for (uint32_t n = 0; n < argument_scopes.size(); n++) {
+        size_t i = argument_scopes[n].hash & (size - 1);
+        while (argument_scope_slots[i])
+            i = (i + 1) & (size - 1);
+        argument_scope_slots[i] = n + 1;
+    }
+}
+
+entity_index semantic_analysis::argument_scope(
+    uint32_t first, uint32_t count, const template_argument *arguments,
+    entity_index outer, const entity_index *forwarded)
+{
+    uint32_t first_word = static_cast<uint32_t>(argument_scope_keys.size());
+    argument_scope_keys.append(static_cast<uint64_t>(first) << 32 | count);
+    argument_scope_keys.append(outer.index());
+    /* a template template-argument's binding is recorded each time it is
+       made (bound_template_templates): its scope is not shared */
+    bool shared = true;
+    for (uint32_t i = 0; i < count; i++) {
+        const template_argument &a = arguments[i];
+        uint64_t instead = 0;
+        if (forwarded)
+            instead = forwarded[i].index();
+        if (a.kind == template_argument::kind_t::template_name)
+            shared = false;
+        argument_scope_keys.append(static_cast<uint64_t>(a.kind) |
+                                   static_cast<uint64_t>(a.count) << 8);
+        argument_scope_keys.append(static_cast<uint64_t>(a.type.cv()) << 32 |
+                                   a.type.unqualified().index());
+        argument_scope_keys.append(a.value);
+        argument_scope_keys.append(a.template_entity.index() | instead << 32);
+    }
+    uint32_t words =
+        static_cast<uint32_t>(argument_scope_keys.size()) - first_word;
+    uint32_t hash = vhash_bytes(
+        reinterpret_cast<const char *>(argument_scope_keys.data() + first_word),
+        words * sizeof(uint64_t));
+    if (shared) {
+        if (argument_scopes.size() * 2 >= argument_scope_slots.size())
+            grow_argument_scopes();
+        if (uint32_t found = argument_scope_slots[argument_scope_slot(
+                hash, first_word, words)]) {
+            argument_scope_keys.resize(first_word);
+            return argument_scopes[found - 1].scope;
+        }
+    }
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
+    for (uint32_t i = 0; i < count; i++) {
+        entity_index parameter = template_parameter_entities[first + i];
+        if (forwarded && forwarded[i]) {
+            entity_table.bind(scope, entity_table[parameter].name,
+                              forwarded[i]);
+            continue;
+        }
+        bind_template_argument(scope, parameter, arguments[i]);
+    }
+    if (shared) {
+        /* (found again: binding the arguments may have grown the table) */
+        size_t slot = argument_scope_slot(hash, first_word, words);
+        argument_scopes.append({first_word, words, hash, scope});
+        argument_scope_slots[slot] =
+            static_cast<uint32_t>(argument_scopes.size());
+    } else {
+        argument_scope_keys.resize(first_word);
+    }
+    return scope;
+}
+
 /* a dependent_value's code for a relational or equality operator
    (dependent_value_entity, dependent_value_operators); 0 for another */
 static uint64_t dependent_comparison_value(SyntaxElement op)
@@ -245,13 +340,13 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
     /* [temp.over.link]/5: an expression naming a non-type template
        parameter that has no structure above (I + 1) is equivalent to
        another of the same structure (expression_structure): one entity */
-    if (entity_table[e].value || entity_table[e].expression ||
+    if (entity_table[e].value || entity_table[e].details().expression ||
         written.is_token() || !value_parameter_in(written))
         return e;
     uint32_t structure = expression_structure(written);
     if (entity_index d = expression_nodes[structure].dependent_value)
         return d;
-    entity_table[e].expression = structure;
+    entity_table[e].set(&entity_details::expression, structure);
     expression_nodes[structure].dependent_value = e;
     dependent_values.append(e);
     return e;
@@ -863,12 +958,8 @@ analysis_result semantic_analysis::substituted_parameter_type(
         return not_supported_because(
             node, "temp.param",
             "a non-type template parameter of an unhandled form");
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                           template_lexical_outer(ft));
-    for (uint32_t k = 0; k < position; k++)
-        bind_template_argument(
-            scope, template_parameter_entities[ft.first_parameter + k],
-            before[k]);
+    entity_index scope = argument_scope(ft.first_parameter, position, before,
+                                        template_lexical_outer(ft));
     entity_index saved = current_scope;
     token_index saved_horizon = lookup_horizon;
     current_scope = scope;
@@ -1218,10 +1309,10 @@ analysis_result semantic_analysis::template_argument_for(
     if (type_table[m.type.unqualified()].kind == type_kind::enumeration) {
         const entity &en =
             entity_table[type_table[m.type.unqualified()].entity];
-        if (!en.scoped && en.underlying != fundamental_type::none) {
-            fundamental_type promoted = en.promoted;
+        if (!en.scoped && en.details().underlying != fundamental_type::none) {
+            fundamental_type promoted = en.details().promoted;
             if (en.fixed_underlying)
-                promoted = promotion_of(en.underlying);
+                promoted = promotion_of(en.details().underlying);
             if (promoted != fundamental_type::none)
                 m.type = qualified_type::make(type_table.fundamental(promoted),
                                               cv_none);
@@ -1327,12 +1418,12 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
     /* [temp.spec]/6 checks the base-clause of a specialization, which is
        analysed only once the specialization is instantiated: one whose
        head selects from an overload set is not accepted unchecked */
-    if (selected && x.next_overload && explicit_declaration_names)
+    if (selected && x.details().next_overload && explicit_declaration_names)
         return not_supported_because(
             at, "temp.spec",
             "an overloaded function's address as a specialization's argument");
     /* /3: "... the result of a typeid expression" */
-    if (x.typeinfo_of)
+    if (x.details().typeinfo_of)
         return ill_formed(at,
                           "the reference or pointer value shall not refer to "
                           "or be the address of the result of a typeid "
@@ -1349,7 +1440,7 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
         static_member = !x.nonstatic_member && !x.member_body_deferred;
     if ((x.kind != entity_kind::variable && x.kind != entity_kind::function) ||
         (x.instantiation && x.kind != entity_kind::function) ||
-        (x.next_overload && !selected) ||
+        (x.details().next_overload && !selected) ||
         (!is_namespace(x.enclosing) && !static_member) || x.c11_thread_local)
         /* (an object of thread storage duration has no address that is
            the same in each thread: [temp.arg.nontype]/2's constant
@@ -1408,8 +1499,8 @@ semantic_analysis::member_pointer_argument(SyntaxRef at, qualified_type to,
     if (!e ||
         (entity_table[e].kind != entity_kind::variable &&
          entity_table[e].kind != entity_kind::function) ||
-        entity_table[e].instantiation || entity_table[e].next_overload ||
-        entity_table[e].immediate ||
+        entity_table[e].instantiation ||
+        entity_table[e].details().next_overload || entity_table[e].immediate ||
         (entity_table[e].kind == entity_kind::function &&
          entity_table[e].constexpr_))
         /* (a consteval member function is not recorded: a constexpr one is
@@ -1657,16 +1748,13 @@ analysis_result semantic_analysis::default_template_arguments(
             return not_supported_because(
                 at, "temp.arg", "a parameter with no argument and no default");
         }
-        entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                               template_lexical_outer(ft));
         /* the names of the declaration that gave the default
            ([temp.param]/12, merged: they may differ from the
            definition's) */
         uint32_t names =
             template_parameter_default_names[ft.first_parameter + i];
-        for (uint32_t k = 0; k < i; k++)
-            bind_template_argument(
-                scope, template_parameter_entities[names + k], arguments[k]);
+        entity_index scope = argument_scope(names, i, arguments.data(),
+                                            template_lexical_outer(ft));
         current_scope = scope;
         lookup_horizon = ft.declaration.first_token();
         template_argument a;

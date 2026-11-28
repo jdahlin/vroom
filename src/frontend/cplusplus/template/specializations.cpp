@@ -305,7 +305,8 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                 if (m.conversion_function) {
                     qualified_type ret = type_table[type.unqualified()].operand;
                     for (entity_index o = own_conversion_functions(m.qualifier);
-                         o && !match; o = entity_table[o].next_overload)
+                         o && !match;
+                         o = entity_table[o].details().next_overload)
                         if (entity_table[o].conversion_function &&
                             entity_table[o].member_cv == cv &&
                             type_table[entity_table[o].type.unqualified()]
@@ -315,7 +316,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                     entity_index e =
                         entity_table.find(m.qualifier, tokens.identifier(m.id));
                     if (e && entity_table[e].kind == entity_kind::function &&
-                        !entity_table[e].next_overload)
+                        !entity_table[e].details().next_overload)
                         define_waiting_members(m.qualifier, m.id, false);
                     match = overload_of_type(e, type, cv);
                 }
@@ -324,10 +325,11 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                    to compare) */
                 if (!has_spec && !match) {
                     entity_index o =
-                        entity_table[m.qualifier].first_constructor;
+                        entity_table[m.qualifier].details().first_constructor;
                     if (m.destructor)
-                        o = entity_table[m.qualifier].destructor;
-                    for (; o && !match; o = entity_table[o].next_constructor)
+                        o = entity_table[m.qualifier].details().destructor;
+                    for (; o && !match;
+                         o = entity_table[o].details().next_constructor)
                         if (entity_table[o].kind == entity_kind::function &&
                             same_parameters(type_table,
                                             entity_table[o].type.unqualified(),
@@ -892,7 +894,8 @@ analysis_result semantic_analysis::variable_explicit_instantiation(
             if (sp.is(standard_keyword::static_))
                 internal = true;
     if (!(entity_table[e].type == s.type) || internal ||
-        entity_table[e].explicitly_instantiated != instantiation_kind::none ||
+        entity_table[e].details().explicitly_instantiated !=
+            instantiation_kind::none ||
         !namespace_encloses(current_scope,
                             entity_table[primary.entity].enclosing))
         return not_supported_because(n, "temp.explicit",
@@ -1100,7 +1103,7 @@ analysis_result semantic_analysis::named_specialization(
         owner_scope = member_of;
         entity_index held = 0;
         if (constructor) {
-            held = entity_table[member_of].constructor_templates;
+            held = entity_table[member_of].details().constructor_templates;
         } else {
             held = entity_table.find(member_of, tokens.identifier(m.id));
             if (held)
@@ -1316,7 +1319,7 @@ analysis_result semantic_analysis::named_specialization(
         /* [temp.explicit]/7, /11: after an explicit specialization, a
            second definition, or a declaration after the definition */
         if (x.explicit_specialization ||
-            entity_table[e].explicitly_instantiated ==
+            entity_table[e].details().explicitly_instantiated ==
                 instantiation_kind::definition ||
             (extern_ && x.defined))
             return not_supported_because(
@@ -1326,8 +1329,8 @@ analysis_result semantic_analysis::named_specialization(
         if (extern_) {
             instantiations[instantiation_ref::from_number(prior)].pending =
                 false;
-            entity_table[e].explicitly_instantiated =
-                instantiation_kind::declaration;
+            entity_table[e].set(&entity_details::explicitly_instantiated,
+                                instantiation_kind::declaration);
             entity_table.add_declaration(e, declaration);
             index = prior - 1;
             return analysis_result::well_formed;
@@ -1541,7 +1544,7 @@ analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
                                          "the enclosing namespaces");
         require_complete(outer);
         if (!entity_table[outer].defined || entity_table[outer].union_ ||
-            entity_table[outer].explicitly_instantiated !=
+            entity_table[outer].details().explicitly_instantiated !=
                 instantiation_kind::none)
             return not_supported_because(n, "temp.explicit",
                                          "an instantiation of a member class "
@@ -1588,7 +1591,7 @@ analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
                 }
         }
     }
-    instantiation_kind was = entity_table[c].explicitly_instantiated;
+    instantiation_kind was = entity_table[c].details().explicitly_instantiated;
     if (was == instantiation_kind::definition)
         return not_supported_because(
             n, "temp.explicit",
@@ -1685,7 +1688,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
             c, m, type, cv, has_specifiers, false);
         entity_index held = 0;
         if (!has_specifiers && !m.destructor) {
-            held = c.constructor_templates;
+            held = c.details().constructor_templates;
         } else if (!m.destructor && !m.operator_function) {
             held = entity_table.find(m.qualifier, tokens.identifier(m.id));
             if (held)
@@ -1736,7 +1739,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
         /* an explicit instantiation declaration: the member is defined
            where the definition is instantiated, which a use asks for */
         if (extern_) {
-            if (entity_table[f].explicitly_instantiated ==
+            if (entity_table[f].details().explicitly_instantiated ==
                 instantiation_kind::definition)
                 return not_supported_because(
                     n, "temp.explicit",
@@ -1786,11 +1789,11 @@ void semantic_analysis::mark_explicit_instantiation(entity_index e,
                                                     bool extern_)
 {
     if (extern_)
-        entity_table[e].explicitly_instantiated =
-            instantiation_kind::declaration;
+        entity_table[e].set(&entity_details::explicitly_instantiated,
+                            instantiation_kind::declaration);
     else
-        entity_table[e].explicitly_instantiated =
-            instantiation_kind::definition;
+        entity_table[e].set(&entity_details::explicitly_instantiated,
+                            instantiation_kind::definition);
 }
 
 entity_index
@@ -1801,7 +1804,7 @@ semantic_analysis::overload_of_type(entity_index first, qualified_type type,
     const struct type &wanted = type_table[type.unqualified()];
     for (entity_index o = first;
          o && entity_table[o].kind == entity_kind::function;
-         o = entity_table[o].next_overload) {
+         o = entity_table[o].details().next_overload) {
         if (entity_table[o].member_cv != cv)
             continue;
         if (entity_table[o].type == type)
@@ -1828,11 +1831,11 @@ entity_index semantic_analysis::explicit_instantiation_target(
 {
     entity_index f = 0;
     if (m.destructor)
-        return c.destructor;
+        return c.details().destructor;
     if (!has_specifiers) {
         /* a constructor */
-        for (entity_index k = c.first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = c.details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (entity_table[k].type == type && entity_table[k].member_cv == cv)
                 f = k;
         return f;
@@ -1858,15 +1861,15 @@ semantic_analysis::explicitly_instantiated(entity_index f) const
 {
     const entity &x = entity_table[f];
     if (x.kind == entity_kind::variable)
-        return x.explicitly_instantiated;
+        return x.details().explicitly_instantiated;
     if (x.kind != entity_kind::function)
         return instantiation_kind::none;
     /* [ext:gnu_attributes] exclude_from_explicit_instantiation: a member
        an explicit instantiation of its class leaves implicit */
     if (x.gnu_flags & gnu_exclude_from_explicit_instantiation)
         return instantiation_kind::none;
-    if (x.explicitly_instantiated != instantiation_kind::none)
-        return x.explicitly_instantiated;
+    if (x.details().explicitly_instantiated != instantiation_kind::none)
+        return x.details().explicitly_instantiated;
     /* /10: a class's member functions, the special members it declares
        among them (an implicitly-declared one is defined where used,
        [class.default.ctor]/4) */
@@ -1875,8 +1878,9 @@ semantic_analysis::explicitly_instantiated(entity_index f) const
     for (entity_index c = x.enclosing;
          c && entity_table[c].kind == entity_kind::class_type;
          c = entity_table[c].enclosing)
-        if (entity_table[c].explicitly_instantiated != instantiation_kind::none)
-            return entity_table[c].explicitly_instantiated;
+        if (entity_table[c].details().explicitly_instantiated !=
+            instantiation_kind::none)
+            return entity_table[c].details().explicitly_instantiated;
     return instantiation_kind::none;
 }
 

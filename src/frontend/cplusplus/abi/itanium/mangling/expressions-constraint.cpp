@@ -404,7 +404,7 @@ uint64_t itanium_mangler::constraint_level(entity_index t) const
 {
     const entities &table = analysis.entity_table;
     uint64_t level = 0;
-    bool lambda = static_cast<bool>(table[table[t].enclosing].lambda);
+    bool lambda = static_cast<bool>(table[table[t].enclosing].details().lambda);
     for (entity_index s = table[t].enclosing; s; s = table[s].enclosing) {
         if (table[s].instantiation && table[s].kind == entity_kind::class_type)
             level++;

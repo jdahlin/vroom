@@ -132,12 +132,14 @@ void semantic_analysis::require_destructor_definition(qualified_type type)
     const auto &object = type_table[type.unqualified()];
     if (object.kind != type_kind::class_type)
         return;
-    entity_index destructor = entity_table[object.entity].destructor;
+    entity_index destructor = entity_table[object.entity].details().destructor;
     if (destructor) {
         /* (a postponed destructor body ill-formed for these arguments is
            this declaration's error, instantiate_pending) */
-        if (!instantiation_depth && !entity_table[destructor].member_needed_by)
-            entity_table[destructor].member_needed_by = current_declaration;
+        if (!instantiation_depth &&
+            !entity_table[destructor].details().member_needed_by)
+            entity_table[destructor].set(&entity_details::member_needed_by,
+                                         current_declaration);
         mark_needed(destructor);
     }
 }
@@ -186,8 +188,8 @@ void semantic_analysis::default_argument_used(uint32_t node)
    the translation unit that defines it) */
 bool semantic_analysis::virtual_table_needed(entity_index c) const
 {
-    for (entity_index k = entity_table[c].first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    for (entity_index k = entity_table[c].details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
         const entity &x = entity_table[k];
         if (x.member_definition_needed && (x.defined || x.implicit))
             return true;
@@ -231,15 +233,16 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
            resolution is no use of its first function; the call's node
            of the one chosen is) */
         else if (kind == semantic_kind::bound_member_function && b &&
-                 !entity_table[entity_index_in(b)].next_overload)
+                 !entity_table[entity_index_in(b)].details().next_overload)
             function = entity_index_in(b);
         else if ((kind == semantic_kind::entity) && a &&
                  entity_table[entity_index_in(a)].kind == entity_kind::variable)
             function = entity_index_in(a);
         if (function) {
             if (!instantiation_depth &&
-                !entity_table[function].member_needed_by)
-                entity_table[function].member_needed_by = current_declaration;
+                !entity_table[function].details().member_needed_by)
+                entity_table[function].set(&entity_details::member_needed_by,
+                                           current_declaration);
             mark_needed(function);
         }
         require_complete(m.type);
@@ -269,9 +272,9 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
                 object = type_table[object.unqualified()].operand;
             const struct type &record = type_table[object.unqualified()];
             if (record.kind == type_kind::class_type &&
-                entity_table[record.entity].destructor)
+                entity_table[record.entity].details().destructor)
                 default_argument_needed.append(
-                    entity_table[record.entity].destructor);
+                    entity_table[record.entity].details().destructor);
         }
     }
     semantic_node n;
