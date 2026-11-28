@@ -631,6 +631,12 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
         X->wsave = x64w_area(wsaves);
         seh = CODEGEN_IS_WIN64(c) && !X->frame_free && !c->o->no_seh;
     }
+    /* -g: the locals' offsets as x64_memory_operand_append writes them (DWARF registers r12 of a
+       realigned frame, else rbp) */
+    if (!X->stack_pointer_frame && A > 16)
+        codegen_debug_frame_store(e, s, 12, 0);
+    else if (!X->stack_pointer_frame)
+        codegen_debug_frame_store(e, s, 6, -(int64_t)X->wsave);
     if (seh) {
         vtext_string_append(b, ".seh_proc ");
         codegen_symbol_name_append(c, b, s);

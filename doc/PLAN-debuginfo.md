@@ -30,9 +30,13 @@ registers; D3 changes that and measures run time and compile time.
   instructions 3.85 G -> 2.96 G, text 1457 kB -> 1187 kB; speedtest1
   (`--size 20 :memory:`) instructions executed +2.5 % (task clock too noisy
   to say).
-- **D3b, variables**: globals, formal parameters and locals in lexical blocks
-  (`DW_OP_fbreg`, `DW_AT_frame_base`), with a debugger test that prints
-  values.
+- **D3b, variables** (done for C): globals, parameters and locals of C
+  functions at `-O0` (`codegen/debug-frame.cpp`, `DW_OP_fbreg`);
+  `bench/debug-values.py` prints them.  Left: lexical blocks (locals are the
+  function's, so a shadowed name is ambiguous); no location for VLAs, arm64
+  locals aligned over 16, parameters passed by reference (arm64) or left in
+  the caller's frame, and x86-64 frames without a frame pointer; thread-local
+  and function-local static variables; C++ (D4).
 - **D4, C++ types**: classes, members, bases, references, namespaces,
   templates.
 - **D5, optimized code**: location lists at `-O1` and up; until then a

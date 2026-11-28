@@ -2183,6 +2183,7 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
     codegen_function_prepass_request(e, s);
     W->generation++;
     W->frame_offset = 0;
+    e->debug_local_count = 0;
     W->frame_alignment = 16;
     W->temporary_slot_in_use_count = W->temporary_slot_free_count =
         W->statement_depth = W->local_slot_count = W->inline_local_depth = 0;
@@ -2264,6 +2265,15 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
 
         W->symbol_generations[p] = W->generation;
         W->symbol_offsets[p] = pa[i].slot;
+        /* (-g: a slot holding the address of the caller's copy is not
+		   described yet) */
+        if (pa[i].slot && !WALK_LOWER(byref)(e, p)) {
+#ifdef WALK_PREFIX
+            codegen_debug_local_add(e, p, pa[i].slot, false);
+#else
+            codegen_debug_local_add(e, p, pa[i].slot, true);
+#endif
+        }
         if ((ft->flags & AST_TYPE_FLAG_NO_PROTOTYPE) &&
             KIND(c, c->syms[p].ty) == AST_TYPE_FLOAT) {
             /* the double narrowed to the float the parameter is, in place */
