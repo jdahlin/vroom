@@ -1120,4 +1120,80 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     return r;
 }
 
+/*
+ * [temp.names]/7: "When the template-name of a simple-template-id names a
+ * constrained non-function template or a constrained template
+ * template-parameter ... and all template-arguments in the simple-template-id
+ * are non-dependent, the associated constraints of the constrained template
+ * shall be satisfied"; in deduction's substitution an invalid type fails it
+ * ([temp.deduct]/8).  Checked: a parameter type that is TT<U> or a reference
+ * to one, U one of the first `specified` template-parameters (explicitly
+ * specified), against a type-constraint of TT's own parameter.  Deduced U,
+ * TT<...> nested in another type and a non-dependent argument written in the
+ * declaration are not checked.
+ */
+analysis_result semantic_analysis::template_template_constraints_satisfied(
+    uint32_t function_template, const owned_array<template_argument> &values,
+    uint32_t specified, bool &satisfied)
+{
+    satisfied = true;
+    const struct function_template ft =
+        function_templates[function_template - 1];
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
+                                           entity_table[ft.entity].enclosing);
+    for (uint32_t i = 0; i < ft.parameter_count; i++)
+        bind_template_argument(
+            scope, template_parameter_entities[ft.first_parameter + i],
+            values[i]);
+    const struct type function =
+        type_table[entity_table[ft.entity].type.unqualified()];
+    if (function.kind != type_kind::function)
+        return analysis_result::well_formed;
+    for (uint32_t i = 0; i < function.parameter_count && satisfied; i++) {
+        qualified_type p = type_table.parameters(
+            entity_table[ft.entity].type.unqualified())[i];
+        type_kind kind = type_table[p.unqualified()].kind;
+        if (kind == type_kind::lvalue_reference ||
+            kind == type_kind::rvalue_reference)
+            p = type_table[p.unqualified()].operand;
+        const struct type &r = type_table[p.unqualified()];
+        if (r.kind != type_kind::dependent ||
+            !entity_table[r.entity].instantiation)
+            continue;
+        entity_index tt = specialized_template(r.entity);
+        if (!template_template_parameter(tt))
+            continue;
+        const struct function_template head =
+            function_templates[entity_table[tt].template_record - 1];
+        uint32_t count = specialization_argument_count(r.entity);
+        for (uint32_t j = 0; j < head.parameter_count && j < count && satisfied;
+             j++) {
+            uint32_t at = head.first_parameter + j;
+            template_parameter_parts form;
+            if (!template_parameter_form(template_parameter_nodes[at], form) ||
+                !form.constraint || form.pack)
+                continue;
+            const template_argument &written =
+                specialization_template_argument(r.entity, j);
+            if (written.kind != template_argument::kind_t::type)
+                continue;
+            const struct type &w = type_table[written.type.unqualified()];
+            if (w.kind != type_kind::template_parameter)
+                continue;
+            uint64_t k = entity_table[w.entity].value;
+            if (k >= specified ||
+                template_parameter_entities[ft.first_parameter + k] != w.entity)
+                continue;
+            const template_argument &a = values[static_cast<uint32_t>(k)];
+            if (a.kind != template_argument::kind_t::type ||
+                depends_on_template_parameter(a.type))
+                continue;
+            scoped_value<entity_index> saved_scope(current_scope, scope);
+            VTRY(checked,
+                 type_constraint_satisfied(form.constraint, a.type, satisfied));
+        }
+    }
+    return analysis_result::well_formed;
+}
+
 } // namespace cplusplus
