@@ -196,9 +196,8 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
     bad = (uint8_t *)(fof + np0);
     memset(sf, 0, (size_t)V->slot_count * sizeof *sf);
     for (uint32_t s = 0; s < V->slot_count; s++)
-        bad[s] =
-            V->slots[s]
-                .is_promoted; /* (an earlier run's: its stores are dead, its loads gone) */
+        /* (promoted by an earlier run: its stores are dead, its loads gone) */
+        bad[s] = V->slots[s].is_promoted || V->slots[s].is_pinned;
     /* a slot escapes when its address is anything but the address of a load or store (the
 	 * walker's exposed flag is set by any address taken, *(T *)&x too) */
     for (uint32_t i = 0; i < np0; i++) {

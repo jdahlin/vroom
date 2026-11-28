@@ -932,11 +932,11 @@ analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
         entity_index e = x.entity;
         if (!e)
             e = x.unknown_entity;
-        uint32_t t = class_template_of(e);
+        template_ref t = class_template_of(e);
         if (!t)
             t = alias_template_of(e);
-        if (!t || function_templates[t - 1].is_parameter ||
-            function_templates[t - 1].primary)
+        if (!t || function_templates[t].is_parameter ||
+            function_templates[t].primary)
             return not_supported_because(
                 id, "ext.clang",
                 "__builtin_common_type with a name that is no usable class or "
@@ -1073,7 +1073,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     entity_index b = x.entity;
     if (!b)
         b = x.unknown_entity;
-    uint32_t t = class_template_of(b);
+    template_ref t = class_template_of(b);
     if (!t)
         t = alias_template_of(b);
     if (!t)
@@ -1092,7 +1092,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     token_index end = first_token(n) + 1;
     if (!n.is_token())
         end = n.end_token();
-    if (function_templates[t - 1].is_parameter ||
+    if (function_templates[t].is_parameter ||
         depends_on_template_parameter(element) ||
         names_dependent_entity(first_token(n), end)) {
         /* [temp.dep.type]/9: a template-id of dependent arguments.  For
@@ -1109,14 +1109,14 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
                 length = named.unknown_entity;
         }
         owned_array<written_binding> parts;
-        if (!function_templates[t - 1].is_parameter &&
+        if (!function_templates[t].is_parameter &&
             !depends_on_template_parameter(element) && length &&
             entity_table[length].kind == entity_kind::none) {
             written_binding part;
             SyntaxRef whole = id;
             part.cast = whole.index().index();
             part.element = 0;
-            part.specialization = function_templates[t - 1].entity;
+            part.specialization = function_templates[t].entity;
             parts.append(part);
             part.specialization = 0;
             part.element = 1;
@@ -1150,7 +1150,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
         return ill_formed(id,
                           "the length of __make_integer_seq is not negative",
                           "ext.clang");
-    const function_template ft = function_templates[t - 1];
+    const function_template ft = function_templates[t];
     if (ft.parameter_count != 2 ||
         !template_parameter_is_pack(ft.first_parameter + 1))
         return not_supported_because(id, "ext.clang",
@@ -1360,13 +1360,13 @@ semantic_analysis::template_with_types(SyntaxRef id, entity_index named,
                                        const qualified_type *types,
                                        uint32_t count, type_index &type)
 {
-    uint32_t t = class_template_of(named);
+    template_ref t = class_template_of(named);
     bool alias = false;
     if (!t) {
         t = alias_template_of(named);
         alias = true;
     }
-    const function_template ft = function_templates[t - 1];
+    const function_template ft = function_templates[t];
     uint32_t parameters = ft.parameter_count;
     bool pack = parameters &&
                 template_parameter_is_pack(ft.first_parameter + parameters - 1);

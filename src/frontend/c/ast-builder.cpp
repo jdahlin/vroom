@@ -321,6 +321,43 @@ void ast_builder_symbol_debug_name(cc *c, uint32_t s, const char *name,
             ast_builder_attribute_string(c, name, length);
 }
 
+void ast_builder_symbol_debug_kind(cc *c, uint32_t s, int kind)
+{
+    if (c->describe_location) /* (-g) */
+        ast_builder_attributes(c, s)->debug_kind = (uint8_t)kind;
+}
+
+void ast_builder_type_record_debug_kind(cc *c, ast_qualified_type record,
+                                        uint32_t field, int kind,
+                                        ast_qualified_type base)
+{
+    c->tags[AST_TYPE(c, record)->aux].f[field].debug_kind = (uint8_t)kind;
+    c->tags[AST_TYPE(c, record)->aux].f[field].debug_base = base;
+}
+
+void ast_builder_symbol_debug_scope(cc *c, uint32_t s, const char *scope,
+                                    size_t length)
+{
+    if (c->describe_location && length) /* (-g) */
+        ast_builder_attributes(c, s)->debug_scope =
+            ast_builder_attribute_string(c, scope, length);
+}
+
+void ast_builder_type_record_debug_name(cc *c, ast_qualified_type record,
+                                        const char *name, size_t length,
+                                        const char *scope, size_t scope_length)
+{
+    tag *r;
+
+    if (!c->describe_location) /* (-g) */
+        return;
+    r = &c->tags[AST_TYPE(c, record)->aux];
+    if (length)
+        r->debug_name = ast_builder_attribute_string(c, name, length);
+    if (scope_length)
+        r->debug_scope = ast_builder_attribute_string(c, scope, scope_length);
+}
+
 void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,
                                 size_t length)
 {

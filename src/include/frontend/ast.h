@@ -92,6 +92,8 @@ typedef struct attrs { /* the attributes of one declaration */
     uint8_t tlsmodel; /* tls_model(): VCC_TLS_*, 0: none */
     uint32_t
         debug_name; /* string index: C++'s source identifier, for -g (0: none) */
+    uint8_t debug_kind;   /* AST_DEBUG_*: a reference, for -g */
+    uint32_t debug_scope; /* string index: the namespaces around it, for -g */
 } attrs;
 
 typedef struct ast_asm_operand {

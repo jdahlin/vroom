@@ -6,7 +6,9 @@
  * stable_array reserves its address space once (STABLE_ARRAY_BYTES) and
  * appends into it: a reference or pointer to an element, and a pointer into
  * a run of them, is good for as long as the array is.  Indexing costs what
- * a plain array's does.
+ * a plain array's does.  The tokens (the parser looks ahead) and the
+ * semantic tree's lists (constant evaluation adds nodes) are read the same
+ * way.
  *
  * The reservations are kept from one translation unit to the next
  * (port/job-regions.h); under ASan the bytes past the last element are
@@ -66,13 +68,26 @@ template <typename T, typename Index = size_t> class stable_array
         count++;
         return *new (owned_placement{}, at) T(value);
     }
+    /* shorter: the first n elements kept */
+    void truncate(size_t n)
+    {
+        count = n;
+        vregion_truncate(&region, n * sizeof(T));
+    }
+    T &back()
+    {
+        check_element(count);
+        return elements[count - 1];
+    }
 
     T &operator[](Index i)
     {
+        check_element(table_slot(i) < count);
         return elements[table_slot(i)];
     }
     const T &operator[](Index i) const
     {
+        check_element(table_slot(i) < count);
         return elements[table_slot(i)];
     }
     const T *data() const

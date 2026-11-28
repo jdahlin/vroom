@@ -251,6 +251,19 @@ typedef struct virbuild_pass_switch {
         active; /* skip, verify or time: virbuild_function_emit takes the instrumented path */
 } virbuild_pass_switch;
 
+/* -g -O0: where a function's named locals and parameters are: offsets from the value of the
+   DWARF register frame_register (debug-unit.cpp's DW_AT_frame_base) */
+typedef struct codegen_debug_local {
+    uint32_t symbol;
+    bool is_placed; /* offset is the lowering's, not yet the VIR walker's */
+    int64_t offset;
+} codegen_debug_local;
+typedef struct codegen_debug_frame {
+    uint8_t frame_register;
+    uint32_t count;
+    codegen_debug_local locals[];
+} codegen_debug_frame;
+
 typedef struct codegen_unit {
     cc *compile_context;
     const cc_options *options;
@@ -349,6 +362,8 @@ typedef struct codegen_unit {
     pthread_mutex_t diagnostic_mutex; /* diagnostics */
     uint32_t errcall[256]; /* error() call sites already reported (under emu) */
     uint32_t nerrcall_loc;
+    codegen_debug_frame *
+        *debug_frames; /* per function symbol; NULL: not described */
 } codegen_unit;
 
 typedef struct codegen_value {
@@ -534,6 +549,8 @@ typedef struct codegen_context {
         reuse_to; /* temporary substitution within one pure expression */
     struct codegen_debug_row *debug_rows; /* -g: a row at record k */
     uint32_t debug_row_count, debug_row_capacity;
+    codegen_debug_local *debug_locals; /* -g -O0: the function's so far */
+    uint32_t debug_local_count, debug_local_capacity;
     const char
         *debug_last_file_name; /* the last file looked up, and its number */
     uint32_t debug_last_file_name_length, debug_last_file_number;
@@ -1528,10 +1545,21 @@ VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want);
 VPRIV codegen_value vla_bytes(codegen_context *e, ast_qualified_type t);
 VPRIV void vla_fix(codegen_context *e, ast_qualified_type t, bool pure);
 VPRIV void gen_stmt(codegen_context *e, uint32_t n);
+/* codegen/vir/lower-memory.cpp: the locals moved to the VIR slots' offsets */
+VPRIV void virbuild_debug_locals_place(codegen_context *e,
+                                       const int64_t *offsets);
+/* debug-frame.cpp: -g -O0, the locals of the function being emitted: one given the walker's
+   frame offset; the lowering's offset of record index (-1: none); and the finished frame, each
+   local at its offset + delta from frame_register */
+VPRIV void codegen_debug_local_add(codegen_context *e, uint32_t s,
+                                   int64_t offset, bool is_placed);
+VPRIV void codegen_debug_frame_store(codegen_context *e, uint32_t function,
+                                     int frame_register, int64_t delta);
 /* debug-unit.cpp: -g's compile unit, after the code */
 VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
                                      const codegen_chunk *chunks,
-                                     uint32_t chunk_count);
+                                     uint32_t chunk_count,
+                                     codegen_debug_frame *const *frames);
 VPRIV void codegen_string_quote_append(tbuf *b, const char *s);
 VPRIV bool codegen_debug_location_get(codegen_context *e, uint32_t loc,
                                       uint32_t *file, uint32_t *line,

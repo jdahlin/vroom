@@ -162,6 +162,10 @@ generic)
 	step cxx-include-guard env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-include-guard.py --bin-dir "$BUILD"
 	# -g line tables of C++ against clang's (src/test/cxx/debug-lines)
 	step cxx-debug-lines env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-debug-lines.py --bin-dir "$BUILD"
+	# -g's function signatures and types against clang's (src/test/debug-info)
+	step debug-info env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/debug-info.py --bin-dir "$BUILD"
+	# ... and the values gdb or lldb reads at -O0 (skipped without a debugger)
+	step debug-values env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/debug-values.py --bin-dir "$BUILD"
 	step cxx-depfile env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-depfile.py --bin-dir "$BUILD"
 	step cxx-prefix   python3 bench/cxx-prefix.py -j "$J" --bin-dir "$BUILD"
 	# semantic analysis vs clang on clang's own C++ tests (CXX, SemaCXX, SemaTemplate; fetched, pinned):
