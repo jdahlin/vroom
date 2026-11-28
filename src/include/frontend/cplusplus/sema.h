@@ -6492,6 +6492,13 @@ class semantic_analysis
     bool dependent_arguments(const owned_array<template_argument> &a) const;
     bool same_token_spelling(token_index a, token_index b);
     bool same_tokens(SyntaxRef a, SyntaxRef b);
+    /* [temp.names]/7: whether the arguments deduced for U in each parameter
+       type TT<U> satisfy the constraints of the template template-parameter
+       TT's own parameters */
+    analysis_result template_template_constraints_satisfied(
+        template_ref function_template,
+        const owned_array<template_argument> &values, uint32_t specified,
+        bool &satisfied);
     /* [temp.deduct]/5: whether the function template's constraints are
        satisfied by the arguments deduced */
     analysis_result

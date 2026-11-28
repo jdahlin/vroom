@@ -400,7 +400,7 @@ node_index parser::noptr_declarator(declarator_form form,
  * ([dcl.init]/1): not when what follows is a decl-specifier that no
  * expression starts with: a storage-class or function specifier, typedef,
  * a cv-qualifier, or a type keyword or type-name not followed by ( or {
- * ([expr.type.conv]: int(1), T{}).
+ * ([expr.type.conv]/1: int(1), T{}, T<int>(a.b)).
  */
 bool parser::parenthesis_could_be_initializer()
 {
@@ -445,9 +445,13 @@ bool parser::parenthesis_could_be_initializer()
     default:
         break;
     }
-    if (type_name_follows(1) && !nested_name_specifier_follows(1))
-        return at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 2) ||
-               at(preprocessing_op_or_punc::LEFT_BRACE, 2);
+    /* the type-name's tokens: one for an identifier, more for a
+       simple-template-id ([temp.names]/1), whose ( or { follows its > */
+    unsigned length = 0;
+    if (classify_name(1, &length) == name_class::type &&
+        !nested_name_specifier_follows(1))
+        return at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1 + length) ||
+               at(preprocessing_op_or_punc::LEFT_BRACE, 1 + length);
     return true;
 }
 

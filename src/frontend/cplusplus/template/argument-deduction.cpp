@@ -1272,6 +1272,9 @@ analysis_result semantic_analysis::deduce_from_call(
     bool satisfied = true;
     VTRY_SET(r, template_constraints_satisfied(function_template, values,
                                                satisfied));
+    if (satisfied && first_deducible)
+        VTRY_SET(r, template_template_constraints_satisfied(
+                        function_template, values, first_deducible, satisfied));
     if (!satisfied) {
         if (!failed)
             return not_supported_because(at, "temp.deduct",

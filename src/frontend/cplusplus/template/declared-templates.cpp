@@ -1112,6 +1112,12 @@ bool semantic_analysis::depends_on_parameter_from(qualified_type t,
         entity_table[r.entity].instantiation) {
         const instantiation_record &x =
             instantiations[entity_table[r.entity].instantiation];
+        /* [temp.deduct.type]/8's TT<int>: the template-name TT is a
+           template-parameter that participates in deduction, whatever
+           its arguments are */
+        if (template_template_parameter(x.template_entity) &&
+            entity_table[x.template_entity].value >= from)
+            return true;
         auto depends_on = [&](const template_argument &a) {
             if (a.kind == template_argument::kind_t::type)
                 return depends_on_parameter_from(a.type, from);
