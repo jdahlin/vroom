@@ -27,6 +27,10 @@ BUILTIN_FOLD("__builtin_align_up", align, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_align_down", align, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_is_aligned", align, VFOLD_CXX)
 
+/* no value: the C front end has no constant expression it could be part of,
+   which clang's __has_constexpr_builtin does not tell apart */
+BUILTIN_FOLD("__builtin_assume", assume, VFOLD_CXX)
+
 /* the type-generic counts */
 BUILTIN_FOLD("__builtin_clzg", clz_generic, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_ctzg", ctz_generic, VFOLD_BOTH)
