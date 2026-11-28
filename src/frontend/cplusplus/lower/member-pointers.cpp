@@ -66,7 +66,7 @@ bool c_lowering::member_pointer_value(uint32_t n, entity_index &member,
     for (;;) {
         const semantic_node &x = node(n);
         if (x.kind == semantic_kind::member_pointer) {
-            member = entity_index_in(x.a);
+            member = x.entity_a();
             return true;
         }
         if (x.kind != semantic_kind::conversion)

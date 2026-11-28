@@ -796,7 +796,7 @@ analysis_result semantic_analysis::musttail_return(Statement n, uint32_t built)
     while (semantics[named].kind == semantic_kind::conversion)
         named = semantics[named].a;
     if (member && semantics[named].kind == semantic_kind::entity &&
-        entity_table[entity_index_in(semantics[named].a)].enclosing !=
+        entity_table[semantics[named].entity_a()].enclosing !=
             entity_table[function_state.function].enclosing)
         return ill_formed(n,
                           "member function cannot perform a tail call to a "
@@ -805,8 +805,7 @@ analysis_result semantic_analysis::musttail_return(Statement n, uint32_t built)
     /* clang refuses a [[noreturn]] callee, not a GNU noreturn one; the
        entity keeps one flag for both */
     if (semantics[named].kind == semantic_kind::entity &&
-        (entity_table[entity_index_in(semantics[named].a)].gnu_flags &
-         gnu_noreturn))
+        (entity_table[semantics[named].entity_a()].gnu_flags & gnu_noreturn))
         return not_supported_because(n, "dcl.attr",
                                      "a musttail call of a noreturn function");
     if (!musttail_similar(x.operand, y.operand))

@@ -317,7 +317,7 @@ bool semantic_analysis::calls_non_constexpr(uint32_t node) const
             callee = semantics[callee].a;
         if (semantics[callee].kind != semantic_kind::entity)
             return false;
-        const entity &f = entity_table[entity_index_in(semantics[callee].a)];
+        const entity &f = entity_table[semantics[callee].entity_a()];
         return f.kind == entity_kind::function && !f.constexpr_ &&
                !f.instantiation;
     }

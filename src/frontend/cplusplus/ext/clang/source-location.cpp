@@ -208,7 +208,7 @@ uint32_t semantic_analysis::bind_call_site(uint32_t node, token_index call)
         call_site_nodes++;
     semantic_node bound = semantics[node];
     bound.at = call;
-    bound.b = function_state.function.index();
+    bound.set_entity_b(function_state.function);
     return semantics.add(bound);
 }
 

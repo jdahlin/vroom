@@ -3434,7 +3434,7 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         if (bound && semantics[bound].kind == semantic_kind::bind_reference)
             bound = semantics[bound].a;
         if (bound && semantics[bound].kind == semantic_kind::entity) {
-            entity_index referent = entity_index_in(semantics[bound].a);
+            entity_index referent = semantics[bound].entity_a();
             const entity &r2 = entity_table[referent];
             if (((r2.kind == entity_kind::variable && !r2.automatic &&
                   !r2.c11_thread_local) ||

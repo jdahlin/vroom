@@ -2047,7 +2047,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
     if (f.node &&
         semantics[f.node].kind == semantic_kind::bound_member_function) {
         object = semantics[f.node].a;
-        member = entity_index_in(semantics[f.node].b);
+        member = semantics[f.node].entity_b();
     } else if (f.node &&
                semantics[f.node].kind == semantic_kind::member_pointer_access &&
                type_table[f.type.unqualified()].kind == type_kind::function) {
@@ -2107,12 +2107,12 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             semantics[f.node].kind == semantic_kind::bound_member_function) {
             /* (resolve_call's implied (*this)) */
             object = semantics[f.node].a;
-            member = entity_index_in(semantics[f.node].b);
+            member = semantics[f.node].entity_b();
         }
         if (member) {
             if (semantics[f.node].kind ==
                 semantic_kind::bound_member_function) {
-                member = entity_index_in(semantics[f.node].b);
+                member = semantics[f.node].entity_b();
             } else {
                 object = 0;
                 member = 0;

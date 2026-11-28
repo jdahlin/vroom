@@ -2086,8 +2086,7 @@ analysis_result semantic_analysis::class_list_initialization(
             analysis_result r = construct(list, type, none, 0, result);
             if (r == analysis_result::well_formed && !direct &&
                 semantics[result.node].kind == semantic_kind::construct &&
-                entity_table[entity_index_in(semantics[result.node].b)]
-                    .explicit_)
+                entity_table[semantics[result.node].entity_b()].explicit_)
                 /* [over.match.list]/1 */
                 return ill_formed(list,
                                   "In copy-list-initialization, if an explicit "
@@ -2296,7 +2295,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
         return not_supported_because(list, "over.match.list",
                                      "no constructor chosen for the list");
     }
-    entity_index chosen = entity_index_in(semantics[result.node].b);
+    entity_index chosen = semantics[result.node].entity_b();
     if (!chosen)
         return not_supported_because(list, "over.match.list",
                                      "no constructor chosen for the list");
@@ -2566,7 +2565,7 @@ analysis_result semantic_analysis::aggregate_elements(
     }
     aggregate_value(list, type, all, elements, result);
     if (union_default)
-        semantics[result.node].a = members[union_default].member.index();
+        semantics[result.node].set_entity_a(members[union_default].member);
     return analysis_result::well_formed;
 }
 
@@ -2808,7 +2807,7 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     for (uint32_t n = nodes_before;
          n < static_cast<uint32_t>(semantics.size()) && !uses_this; n++)
         uses_this = semantics[n].kind == semantic_kind::entity &&
-                    entity_index_in(semantics[n].a) == this_object_entity;
+                    semantics[n].entity_a() == this_object_entity;
     if (!uses_this)
         return analysis_result::well_formed;
     if (this_unsupported)
@@ -2823,7 +2822,7 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     uint32_t node = expression_node(semantic_kind::default_member_initializer,
                                     wrapped, list.first_token());
     semantics[node].a = one.node;
-    semantics[node].b = this_object_entity.index();
+    semantics[node].set_entity_b(this_object_entity);
     one.node = node;
     one.evaluation = constness::unknown;
     return analysis_result::well_formed;
@@ -3409,7 +3408,7 @@ analysis_result semantic_analysis::designated_elements(
         type = qualified_type::make(type_table.array_of(target.operand, extent),
                                     type.cv());
     aggregate_value(list, type, all, elements, result);
-    semantics[result.node].a = active_member.index();
+    semantics[result.node].set_entity_a(active_member);
     return analysis_result::well_formed;
 }
 

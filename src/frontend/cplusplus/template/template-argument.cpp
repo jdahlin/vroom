@@ -1403,7 +1403,7 @@ semantic_analysis::member_pointer_argument(SyntaxRef at, qualified_type to,
                                      "another type than the parameter");
     entity_index e = 0;
     if (m.node && semantics[m.node].kind == semantic_kind::member_pointer)
-        e = entity_index_in(semantics[m.node].a);
+        e = semantics[m.node].entity_a();
     if (!e ||
         (entity_table[e].kind != entity_kind::variable &&
          entity_table[e].kind != entity_kind::function) ||
