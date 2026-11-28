@@ -111,6 +111,21 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                p == a;
     }
     if (pr.kind == type_kind::dependent) {
+        /* [temp.alias]/2: an alias template-id not formed yet (a pack
+           expansion among its arguments) is the associated type; one
+           written as a typename-specifier names a member by a
+           qualified-id, a non-deduced context
+           ([temp.deduct.type]/5.1) */
+        if (uint32_t alias = template_record(specialized_template(pr.entity))) {
+            const function_template &f = function_templates[alias - 1];
+            if (f.is_alias && f.definition) {
+                for (token_index t = f.definition.first_token();
+                     t < f.definition.end_token(); t++)
+                    if (SyntaxElement::from_token(t).is(
+                            standard_keyword::typename_))
+                        return true;
+            }
+        }
         /* [temp.deduct.type]/8's TT<T>: a class template's specialization,
            whose arguments are deduced from those of A's, a
            specialization of the same template */
@@ -484,8 +499,11 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         }
         if (!deduce_type(pr.operand, ar.operand, deduced, set, exact))
             return false;
+        /* (a parameter that is no pack takes no expansion of A) */
         for (uint32_t i = 0; i < fixed; i++)
-            if (!deduce_type(pp[i], ap[i], deduced, set, exact))
+            if (type_table[ap[i].unqualified()].kind ==
+                    type_kind::pack_expansion ||
+                !deduce_type(pp[i], ap[i], deduced, set, exact))
                 return false;
         if (fixed != pr.parameter_count) {
             owned_array<template_argument> rest;
@@ -658,6 +676,45 @@ static void copy_deduction(const owned_array<T> &from,
         to.append(from[k]);
         to_set.append(from_set[k]);
     }
+}
+
+/* [temp.deduct.call]/4.2, [conv.qual]/3: the pointer type A with the
+   cv-qualifiers P has below its top level added, where each level above
+   an added one (but the top) is const in the result; none when A is no
+   such pointer or nothing is added */
+qualified_type semantic_analysis::qualified_argument(qualified_type p,
+                                                     qualified_type a)
+{
+    owned_array<qualified_type> levels;
+    owned_array<uint32_t> cvs;
+    bool added = false, constant = true;
+    qualified_type x = p, y = a;
+    while (type_table[x.unqualified()].kind == type_kind::pointer &&
+           type_table[y.unqualified()].kind == type_kind::pointer) {
+        x = type_table[x.unqualified()].operand;
+        y = type_table[y.unqualified()].operand;
+        uint32_t cv = y.cv() | x.cv();
+        if (cv != y.cv()) {
+            if (!constant)
+                return qualified_type();
+            added = true;
+        }
+        constant = constant && (cv & cv_const);
+        cvs.append(cv);
+    }
+    /* (pointers to functions, whose type takes no cv-qualifiers, are not
+       ordered after it yet: left refused) */
+    if (!added || cvs.size() < 2 ||
+        type_table[y.unqualified()].kind == type_kind::function)
+        return qualified_type();
+    qualified_type t = qualified_type::make(y.unqualified(), cvs.back());
+    for (size_t i = cvs.size(); i-- > 0;) {
+        uint32_t cv = a.cv();
+        if (i)
+            cv = cvs[i - 1];
+        t = qualified_type::make(type_table.pointer_to(t), cv);
+    }
+    return t;
 }
 
 /* [temp.deduct.call]/4.3: "If P is a class and P has the form
@@ -1098,6 +1155,10 @@ analysis_result semantic_analysis::deduce_from_call(
                     "a call argument whose deduction against the parameter is "
                     "unknown");
             copy_deduction(before, before_set, values, set);
+            if (qualified_argument(p, a).bits &&
+                deduce_type(p, qualified_argument(p, a), values, set))
+                continue;
+            copy_deduction(before, before_set, values, set);
             int base = deduce_from_base(p, a, values, set);
             if (base > 0)
                 continue;
@@ -1151,12 +1212,29 @@ analysis_result semantic_analysis::deduce_from_call(
     /* [temp.arg.explicit]/4: "A trailing template parameter pack not
        otherwise deduced will be deduced as an empty sequence of template
        arguments."  One deduced from another parameter (tuple<Ts...>&)
-       keeps its arguments, which a function parameter pack's would have
-       to agree with (not analysed) */
-    if (pack < ft.parameter_count && set[pack] && !elements.empty())
-        return not_supported_because(
-            at, "temp.deduct.call",
-            "a pack deduced both by another parameter and a function pack");
+       as well as from a function parameter pack's elements has to be the
+       same from both ([temp.deduct.type]/2) */
+    if (pack < ft.parameter_count && set[pack] && !elements.empty()) {
+        /* (an element deduced for the pack's own pattern, A&&, is a pack
+           of that one) */
+        owned_array<template_argument> flat;
+        for (const template_argument &x : elements) {
+            template_argument element = x;
+            if (x.kind == template_argument::kind_t::pack && x.count == 1)
+                element = pack_arguments[x.value];
+            flat.append(element);
+        }
+        if (!(make_pack(flat.data(), static_cast<uint32_t>(flat.size())) ==
+              values[pack])) {
+            if (!failed)
+                return not_supported_because(
+                    at, "temp.deduct.call",
+                    "a pack deduced differently by another parameter and a "
+                    "function pack");
+            *failed = true;
+            return analysis_result::well_formed;
+        }
+    }
     if (pack < ft.parameter_count && !set[pack]) {
         values[pack] =
             make_pack(elements.data(), static_cast<uint32_t>(elements.size()));
@@ -1277,6 +1355,56 @@ analysis_result semantic_analysis::deduce_from_function_type(
     deduced.clear();
     for (const template_argument &x : values)
         deduced.append(x);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.arg.explicit]/4: the arguments of a template-id naming a function
+ * with no call and no target type: those written, then the default
+ * template-arguments ([temp.deduct]/5); nothing is left to deduce them
+ * from, so one without either, or a pack written, is not analysed.
+ */
+analysis_result semantic_analysis::arguments_without_deduction(
+    SyntaxRef at, uint32_t function_template,
+    owned_array<template_argument> &arguments, bool &failed)
+{
+    const struct function_template ft =
+        function_templates[function_template - 1];
+    uint32_t written = static_cast<uint32_t>(arguments.size());
+    owned_array<template_argument> values;
+    owned_array<bool> set;
+    for (uint32_t i = 0; i < ft.parameter_count; i++) {
+        uint32_t p = ft.first_parameter + i;
+        template_argument v;
+        if (i < written) {
+            if (template_parameter_is_pack(p))
+                return not_supported_because(
+                    at, "over.over",
+                    "a template-id with a pack argument in a value use");
+            v = arguments[i];
+        } else {
+            template_parameter_parts form;
+            if (!template_parameter_form(template_parameter_nodes[p], form) ||
+                !(form.has_default || form.pack))
+                return not_supported_because(
+                    at, "over.over",
+                    "a template-id with not all template arguments in a value "
+                    "use");
+        }
+        values.append(v);
+        set.append(i < written);
+    }
+    VTRY(r, default_template_arguments(at, function_template, values, set));
+    bool satisfied = true;
+    VTRY_SET(r, template_constraints_satisfied(function_template, values,
+                                               satisfied));
+    if (!satisfied) {
+        failed = true;
+        return analysis_result::well_formed;
+    }
+    arguments.clear();
+    for (const template_argument &x : values)
+        arguments.append(x);
     return analysis_result::well_formed;
 }
 

@@ -879,10 +879,13 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         fundamental_type f = fundamental_of(pointee);
         bool pointer = is_pointer(pointee);
         /* an unscoped enumeration is its underlying integer ([dcl.enum]/5:
-           clang rejects a scoped one) */
+           clang rejects a scoped one, but for the __c11_atomic forms that
+           only move values) */
         entity_index enumeration = enumeration_of(pointee);
         if (enumeration) {
-            if (entity_table[enumeration].scoped)
+            bool moves =
+                c11 && !spelled_with(spelling, length, "__c11_atomic_fetch_");
+            if (entity_table[enumeration].scoped && !moves)
                 return ill_formed(n,
                                   "address argument to atomic operation must "
                                   "be a pointer to integer, pointer or "

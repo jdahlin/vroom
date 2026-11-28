@@ -487,14 +487,12 @@ analysis_result semantic_analysis::declare(
                                      entity_table[e].type.unqualified(),
                                      type.unqualified()))) {
                     /* [dcl.array]/8: a bound given in the block is not
-                       this scope's */
+                       this scope's: the entity has this declaration's type
+                       (a definition's initializer then completes it) */
                     if (!(entity_table[e].type == type) &&
                         differ_in_major_bound(type_table, entity_table[e].type,
                                               type))
-                        return not_supported_because(
-                            declaration, "dcl.array",
-                            "a redeclaration of a block's extern array with "
-                            "another bound");
+                        entity_table[e].type = type;
                     prior = e;
                     entity_table.bind(scope, name, e);
                 }

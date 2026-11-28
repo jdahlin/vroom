@@ -42,6 +42,8 @@ void semantic_analysis::function_candidates(
         c.function = f;
         c.type = entity_table[f].type;
         c.member = member;
+        c.late =
+            late_candidates_in && declared_past_horizon(f, late_candidates_in);
         candidates.append(c);
         if (first_arguments)
             first_arguments->append(0);

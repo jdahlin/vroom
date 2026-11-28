@@ -358,9 +358,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         bool first_defaults = defaults && defines && f.friend_declaration &&
                               !f.hidden_friend && !f.default_arguments &&
                               !f.definition && !s.friend_;
-        bool refused = (defaults && !first_defaults) ||
-                       (f.default_arguments &&
-                        (defines || f.hidden_friend || f.friend_declaration));
+        bool refused =
+            (defaults && !first_defaults) ||
+            (f.default_arguments && (f.hidden_friend || f.friend_declaration));
         if (refused)
             return not_supported_because(
                 n, "dcl.fct.default",
@@ -397,6 +397,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             entity_table[f.entity].inline_ = true;
         entity_table.add_declaration(f.entity, n);
         last_function_template = earlier;
+        if (first_defaults)
+            function_templates[earlier - 1].default_arguments =
+                hold_template_defaults(earlier);
         if (!s.friend_) {
             function_templates[earlier - 1].hidden_friend = false;
             function_templates[earlier - 1].friend_declaration = false;
@@ -411,8 +414,6 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             record.declaration = n;
             record.definition = definition;
             record.declarator = definition;
-            if (first_defaults)
-                record.default_arguments = true;
             if (renamed) {
                 record.first_parameter = first;
                 entity_table[f.entity].type = type;
@@ -555,6 +556,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     }
     function_templates.append(record);
     last_function_template = static_cast<uint32_t>(function_templates.size());
+    if (defaults)
+        hold_template_defaults(last_function_template);
     return analysis_result::well_formed;
 }
 
@@ -586,26 +589,64 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
         name_uses.resize(uses_before);
         return named;
     }
-    if (found != ft || overloaded_written_at) {
-        /* (the written arguments template_callee_parts kept for a call's
-           template_call: no call follows) */
-        overloaded_written.clear();
-        overloaded_written_expansion.clear();
-        overloaded_written_at = 0;
-        return not_supported_because(
-            n, "over.over",
-            "a function template-id naming no single specialization here");
-    }
-    if (specified.size() != function_templates[ft - 1].parameter_count)
-        return not_supported_because(
-            n, "over.over",
-            "a template-id with not all template arguments in a value use");
     for (const template_argument &a : specified)
         if (made_of_template_parameter(type_table, a.type) ||
             a.template_entity || a.kind == template_argument::kind_t::pack)
             return not_supported_because(
                 n, "temp.dep",
                 "a function template-id with dependent or pack arguments");
+    if (found != ft || overloaded_written_at ||
+        specified.size() != function_templates[ft - 1].parameter_count) {
+        /* [over.over]: the templates of the name whose arguments are all
+           written or defaulted, less those substitution rejects
+           ([temp.deduct]/8): one specialization left is the one named */
+        owned_array<SyntaxElement> written;
+        owned_array<bool> expansion;
+        SyntaxRef written_at = overloaded_written_at;
+        for (SyntaxElement a : overloaded_written)
+            written.append(a);
+        for (bool x : overloaded_written_expansion)
+            expansion.append(x);
+        /* (the written arguments template_callee_parts kept for a call's
+           template_call: no call follows) */
+        overloaded_written.clear();
+        overloaded_written_expansion.clear();
+        overloaded_written_at = 0;
+        const char *none = "a function template-id naming no single "
+                           "specialization here";
+        if (!found)
+            return not_supported_because(n, "over.over", none);
+        owned_array<uint32_t> group;
+        function_template_overloads(function_templates[found - 1].name, group);
+        for (uint32_t g : group)
+            if (entity_table[function_templates[g - 1].entity].nonstatic_member)
+                return not_supported_because(n, "over.over", none);
+        owned_array<overload_candidate> candidates;
+        owned_array<uint32_t> first;
+        owned_array<template_argument> all;
+        qualified_type no_target;
+        if (written_at) {
+            VTRY(made, template_candidates(n, group, nullptr, 0, candidates,
+                                           &first, &all, &written, written_at,
+                                           nullptr, &expansion, &no_target));
+        } else {
+            VTRY(made, template_candidates(n, group, nullptr, 0, candidates,
+                                           &first, &all, nullptr, 0, &specified,
+                                           nullptr, &no_target));
+        }
+        if (candidates.size() != 1)
+            return not_supported_because(n, "over.over", none);
+        entity_index chosen = 0;
+        VTRY(made,
+             instantiate(
+                 n, function_templates[candidates[0].template_index - 1].entity,
+                 all.data() + first[0],
+                 static_cast<uint32_t>(all.size()) - first[0], chosen));
+        size_t uses_before = name_uses.size();
+        analysis_result named = named_entity(name, chosen, m);
+        name_uses.resize(uses_before);
+        return named;
+    }
     entity_index e = 0;
     VTRY(r, instantiate(n, function_templates[ft - 1].entity, specified.data(),
                         static_cast<uint32_t>(specified.size()), e));
@@ -613,6 +654,22 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
     analysis_result named = named_entity(name, e, m);
     name_uses.resize(uses_before);
     return named;
+}
+
+uint32_t semantic_analysis::hold_template_defaults(uint32_t template_index)
+{
+    uint32_t i = 0;
+    for (const parameter_meaning &p : function_parameters) {
+        if (p.default_argument)
+            template_default_arguments.append(
+                {template_index, i, p.default_argument});
+        i++;
+    }
+    uint32_t count = 0;
+    for (const template_default_argument &d : template_default_arguments)
+        if (d.template_index == template_index)
+            count++;
+    return count;
 }
 
 } // namespace cplusplus

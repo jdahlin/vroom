@@ -1342,10 +1342,6 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             /* [temp.expl.spec]/1: a variable template's specialization
                named by a qualified template-id */
             VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
-            if (!m.qualified_namespace)
-                return not_supported_because(
-                    n, "dcl.meaning",
-                    "a template-id not qualified by a namespace");
             declarator_template_id = false;
             m.template_id = q[1];
             m.has_id = true;

@@ -294,19 +294,28 @@ uint32_t c_lowering::member_pointer_object(const semantic_node &n)
     uint32_t offset = expression(n.b);
     if (!object || !offset)
         return 0;
-    if (!side_effect_free(object) && !side_effect_free(offset))
-        /* C's operands are unsequenced */
-        return fail("a pointer to data member applied with effects in both "
-                    "operands",
-                    n.at);
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     ast_qualified_type bytes = pointer_to(byte);
     ast_qualified_type t = type(n.type, n.at);
-    uint32_t at = make(AST_NODE_INDEX, byte,
-                       cast(object, bytes, AST_CAST_POINTER_TO_POINTER),
-                       to_ptrdiff(offset), 0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t base = cast(object, bytes, AST_CAST_POINTER_TO_POINTER);
+    /* C's operands are unsequenced: with effects in both, the object's
+       address is held in a temporary first */
+    uint32_t sequenced = 0;
+    if (!side_effect_free(object) && !side_effect_free(offset)) {
+        if (!collecting)
+            return fail("a pointer to data member applied with effects in "
+                        "both operands outside a statement",
+                        n.at);
+        uint32_t held = full_expression_temporary(bytes);
+        sequenced = assign(bytes, c_variable(c, held, bytes), base);
+        base = c_variable(c, held, bytes);
+    }
+    uint32_t at = make(AST_NODE_INDEX, byte, base, to_ptrdiff(offset), 0, 0,
+                       AST_NODE_FLAG_LVALUE);
     uint32_t address = cast(make(AST_NODE_ADDRESS, bytes, at, 0, 0, 0, 0),
                             pointer_to(t), AST_CAST_POINTER_TO_POINTER);
+    if (sequenced)
+        address = comma(pointer_to(t), sequenced, address);
     return dereference(address, t);
 }
 

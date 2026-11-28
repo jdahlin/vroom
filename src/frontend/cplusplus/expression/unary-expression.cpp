@@ -1065,7 +1065,7 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
             current_declaration, "expr.unary.op",
             "a pointer to a member that is neither a variable nor a function");
     if (!c || entity_table[c].kind != entity_kind::class_type ||
-        !entity_table[c].name)
+        (!entity_table[c].name && !entity_table[c].lambda))
         /* a variant member of an anonymous union: its offset is the
            union's plus its own */
         return not_supported_because(

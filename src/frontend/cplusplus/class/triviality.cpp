@@ -30,7 +30,8 @@ bool semantic_analysis::trivial_defaulted_default_constructor(
         return false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (!type_table[entity_table[k].type.unqualified()].parameter_count)
+        if (!type_table[entity_table[k].type.unqualified()].parameter_count &&
+            !entity_table[k].constraint_unsatisfied)
             return false;
     return true;
 }
@@ -62,7 +63,11 @@ bool semantic_analysis::trivial_default_constructor(entity_index c,
     bool deleted_default = false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor) {
-        if (entity_table[k].implicit)
+        /* [special]/6: one whose constraint is not satisfied is none
+           beside X() = default */
+        if (entity_table[k].implicit ||
+            (entity_table[k].constraint_unsatisfied &&
+             x.defaulted_default_constructor))
             continue;
         const struct type &f = type_table[entity_table[k].type.unqualified()];
         /* [ext:clang_type_traits] X() = delete is not user-provided

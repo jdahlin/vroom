@@ -416,7 +416,8 @@ node_index parser::id_expression(bool member)
                                  syntax_kind::simple_template_id);
                 if (failed())
                     return 0;
-            } else if ((member || (!known && !dependent_qualifier)) &&
+            } else if ((member || !known ||
+                        (qualifier && kind == name_kind::not_declared)) &&
                        !dependent_qualifier &&
                        (!member || member_name_may_be_template(
                                        name, qualifier != 0, known, scope))) {
@@ -424,8 +425,9 @@ node_index parser::id_expression(bool member)
                     member && names.declared_as_member_variable_template(name);
                 if (angle_group_follows_call() ||
                     (maybe_var && angle_group_end(0))) {
-                    /* a member's name and a name of a class the parser does not
-                       know may be a template's: the tokens are a template-id
+                    /* a member's name, a name of a class the parser does not
+                       know and one a known class does not declare (a partial
+                       specialization may) may be a template's: the tokens are a template-id
                        when they parse as one and a call, a '::', or (for a
                        member variable template) an operator/punctuator follows.
                        The token scan first: a speculative parse per '<' of

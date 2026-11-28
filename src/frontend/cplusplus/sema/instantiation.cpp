@@ -211,16 +211,44 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             /* (nor are its diagnostics the program's: a map's
                `= key_compare()` of a comparison without a default
                constructor) */
-            substitution_mark default_mark = mark_substitution();
-            substituting++;
-            analysis_result checked = default_arguments(
-                ft.declarator, e, entity_kind::function, true);
-            substituting--;
-            if (checked != analysis_result::well_formed) {
-                undo_substitution(default_mark);
-                unsupported.resize(unsupported_before);
-                entity_table[e].unknown_defaults = true;
+            /* (those another declaration than ft.declarator gave) */
+            for (const template_default_argument &d :
+                 template_default_arguments)
+                if (d.template_index == t.template_record &&
+                    d.parameter < function_parameters.size() &&
+                    !function_parameters[d.parameter].default_argument)
+                    function_parameters[d.parameter].default_argument =
+                        d.argument;
+            /* one default that is ill-formed for these arguments (a
+               lambda's `Compare comp = {}`) leaves the ones after it: a
+               call that passes that argument takes them */
+            analysis_result checked = analysis_result::ill_formed;
+            for (size_t skip = 0; checked != analysis_result::well_formed &&
+                                  skip < function_parameters.size();
+                 skip++) {
+                if (skip) {
+                    if (!function_parameters[skip - 1].default_argument)
+                        continue;
+                    function_parameters[skip - 1].default_argument = {};
+                    bool left = false;
+                    for (const parameter_meaning &p : function_parameters)
+                        if (p.default_argument)
+                            left = true;
+                    if (!left)
+                        break;
+                }
+                substitution_mark default_mark = mark_substitution();
+                substituting++;
+                checked = default_arguments(ft.declarator, e,
+                                            entity_kind::function, true);
+                substituting--;
+                if (checked != analysis_result::well_formed) {
+                    undo_substitution(default_mark);
+                    unsupported.resize(unsupported_before);
+                }
             }
+            if (checked != analysis_result::well_formed)
+                entity_table[e].unknown_defaults = true;
         }
         current_scope = saved_scope;
         lookup_horizon = saved_horizon;
@@ -444,6 +472,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     scoped_value<unsigned> outside(substituting, 0);
     uint32_t dependent_before = dependent_errors;
     uint32_t independent_before = independent_errors;
+    uint32_t deleted_before = deleted_references;
     enter_instantiation(context, instantiations[index].scope, ft.declaration);
     expanding = false;
     instantiating = index + 1;
@@ -560,6 +589,14 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     if (r == analysis_result::ill_formed && dependent &&
         instantiations[index].wanted_by)
         use_ill_formed(instantiations[index].wanted_by);
+    /* [impl.clang] a deleted function referred to by another template's
+       declaration (a non-type parameter's type, substituted here) is
+       reported there: not this pattern's error */
+    if (r == analysis_result::ill_formed &&
+        deleted_references > deleted_before &&
+        (deleted_reference_at < ft.declaration.first_token() ||
+         deleted_reference_at >= ft.declaration.end_token()))
+        return r;
     for (analysed_declaration &d : declarations) {
         if (d.node != ft.declaration || d.result == analysis_result::ill_formed)
             continue;
@@ -583,6 +620,14 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         r == analysis_result::unsupported &&
         unsupported.size() > unsupported_before &&
         !strcmp(unsupported[unsupported_before].detail, "if consteval");
+    /* ... an explicit instantiation's too, whose errors are its own: one
+       that fails is not known to be well-formed */
+    SyntaxRef requester = instantiations[index].requested_by;
+    if (r != analysis_result::well_formed &&
+        unsupported.size() > unsupported_before && requester &&
+        requester != ft.declaration &&
+        requester.is(syntax_kind::explicit_instantiation))
+        charge_requester(requester, unsupported_before);
     if (r == analysis_result::unsupported &&
         unsupported.size() > unsupported_before &&
         (horizon_hidden != hidden_before || undecided_body) &&
@@ -739,7 +784,8 @@ analysis_result semantic_analysis::instantiate_class(
         /* a specialization named before its template was defined
            ([temp.inst]/2's "declared specialization" is not one): defined
            now that the template is */
-        if (entity_table[c].defined || x.defining)
+        if (entity_table[c].defined || x.defining ||
+            naming_friend == entity_table[ft.entity].name)
             return analysis_result::well_formed;
         /* the pattern again: a specialization declared since it was
            named ([temp.class.spec.match]) */
@@ -751,6 +797,7 @@ analysis_result semantic_analysis::instantiate_class(
                                             arguments, count);
         VTRY(matched, matching_specialization(at, class_template, arguments,
                                               count, pattern, deduced));
+        instantiations[k].unmatched = false;
         if (pattern != x.pattern) {
             instantiation_record &y = instantiations[k];
             y.pattern = pattern;
@@ -805,8 +852,15 @@ analysis_result semantic_analysis::instantiate_class(
        primary's or a specialization's */
     uint32_t pattern = 0;
     owned_array<template_argument> deduced;
-    VTRY(matched, matching_specialization(at, class_template, arguments, count,
-                                          pattern, deduced));
+    /* [temp.friend]/1, [temp.inst]/2: a specialization only named (a
+       friend) chooses no pattern, which may be ambiguous by the time one
+       is declared; the use that defines it matches then */
+    /* (the friend's own specialization, not one its arguments need) */
+    record.unmatched = naming_friend == entity_table[ft.entity].name;
+    if (!record.unmatched) {
+        VTRY(matched, matching_specialization(at, class_template, arguments,
+                                              count, pattern, deduced));
+    }
     record.pattern = pattern;
     record.first_argument = static_cast<uint32_t>(template_arguments.size());
     record.argument_count = count;
@@ -869,11 +923,14 @@ void semantic_analysis::complete_instantiation(entity_index c)
            was made an incomplete class: the use that needs it complete
            names it again, where the template defines it now */
         const instantiation_record record = instantiations[index];
-        if (!record.named_before_definition || record.has_failure ||
-            !record.specialization ||
-            !function_templates
-                 [entity_table[record.template_entity].template_record - 1]
-                     .definition)
+        /* (a friend's, with no pattern chosen: a partial specialization
+           may define it) */
+        if (record.has_failure || !record.specialization ||
+            (!record.unmatched &&
+             (!record.named_before_definition ||
+              !function_templates
+                   [entity_table[record.template_entity].template_record - 1]
+                       .definition)))
             return;
         owned_array<template_argument> again;
         for (uint32_t i = 0; i < record.argument_count; i++) {
@@ -938,6 +995,28 @@ analysis_result semantic_analysis::define_class_outside(SyntaxRef at,
     return r;
 }
 
+/* [temp.class.spec.match]: the pattern of a class specialization that a
+   friend declaration only named, chosen when it is defined */
+analysis_result semantic_analysis::choose_pattern(SyntaxRef at, uint32_t index)
+{
+    const instantiation_record x = instantiations[index];
+    uint32_t class_template = class_template_of(x.template_entity);
+    owned_array<template_argument> arguments;
+    for (uint32_t i = 0; i < x.argument_count; i++)
+        arguments.append(template_arguments[x.first_argument + i]);
+    uint32_t pattern = 0;
+    owned_array<template_argument> deduced;
+    VTRY(matched, matching_specialization(at, class_template, arguments.data(),
+                                          x.argument_count, pattern, deduced));
+    instantiation_record &y = instantiations[index];
+    y.unmatched = false;
+    y.pattern = pattern;
+    y.first_deduced = static_cast<uint32_t>(template_arguments.size());
+    for (const template_argument &a : deduced)
+        template_arguments.append(a);
+    return analysis_result::well_formed;
+}
+
 /*
  * The class of instantiations[index], defined: its template's (or partial
  * specialization's) class-specifier analysed again, then the member
@@ -963,6 +1042,9 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
         return not_supported_because(at, "temp.inst",
                                      "class instantiations nested 64 deep or "
                                      "more (defining a specialization)");
+    if (instantiations[index].unmatched) {
+        VTRY(chosen, choose_pattern(at, index));
+    }
     const instantiation_record record = instantiations[index];
     const function_template ft = function_templates
         [entity_table[record.template_entity].template_record - 1];
@@ -1315,6 +1397,39 @@ bool semantic_analysis::explicit_instantiation_takes_verdict(
            !strncmp(rule, "dcl.fct.def.coroutine", 21);
 }
 
+/* [class.dtor]/15: a static data member defined here is destroyed at the
+   program's end.  Asked for here, not at its declaration: its class may be
+   completed only later (a specialization over the class that has the
+   member).  Whether its destructor became needed */
+bool semantic_analysis::static_member_destructor_needed(qualified_type type)
+{
+    while (type_table[type.unqualified()].kind == type_kind::array)
+        type = type_table[type.unqualified()].operand;
+    const auto &object = type_table[type.unqualified()];
+    if (object.kind != type_kind::class_type)
+        return false;
+    entity_index destructor = entity_table[object.entity].destructor;
+    if (!destructor || entity_table[destructor].member_definition_needed)
+        return false;
+    entity_table[destructor].member_definition_needed = true;
+    return true;
+}
+
+/* [class.dtor]/12, [basic.def.odr]/8: the deallocation function a virtual
+   destructor's class chose is odr-used where the destructor is defined:
+   here by the deleting destructor, which the class's virtual table names.
+   Whether it became needed */
+bool semantic_analysis::deleting_destructor_needs(entity_index c)
+{
+    const dynamic_class *d = dynamic_of(c);
+    if (!d || !d->deallocation ||
+        entity_table[d->deallocation].member_definition_needed ||
+        !virtual_table_needed(c))
+        return false;
+    entity_table[d->deallocation].member_definition_needed = true;
+    return true;
+}
+
 /* [basic.def.odr]/11, [temp.inst]/4: a function whose definition the
    translation unit emits (one defined, its body analysed, and not an
    explicit instantiation declaration's specialization, [temp.explicit]/11;
@@ -1332,6 +1447,15 @@ bool semantic_analysis::emitted_functions_needed()
         if (f.index() + 16 < entity_table.size())
             __builtin_prefetch(&entity_table[f + 16]);
         entity &x = entity_table[f];
+        if (x.kind == entity_kind::variable && x.defined &&
+            !x.nonstatic_member && !x.automatic && x.enclosing &&
+            entity_table[x.enclosing].kind == entity_kind::class_type) {
+            marked = static_member_destructor_needed(x.type) || marked;
+            continue;
+        }
+        if (x.kind == entity_kind::function && x.virtual_ &&
+            x.special == special_member::destructor)
+            marked = deleting_destructor_needs(x.enclosing) || marked;
         if (x.kind != entity_kind::function || !x.defined ||
             x.member_definition_needed || x.member_body_deferred ||
             x.unsupported_body || x.deleted || x.implicit ||
@@ -1461,6 +1585,21 @@ void semantic_analysis::instantiate_pending(bool at_end)
     pending_definitions.clear();
 }
 
+/* the template parameters of function template record bound to the arguments
+   of instantiation index in specialization e's scope: a definition may rename
+   a declaration's */
+void semantic_analysis::bind_specialization_parameters(entity_index e,
+                                                       uint32_t record,
+                                                       uint32_t index)
+{
+    const function_template ft = function_templates[record - 1];
+    const instantiation_record x = instantiations[index];
+    for (uint32_t i = 0; i < ft.parameter_count && i < x.argument_count; i++)
+        bind_template_argument(
+            e, template_parameter_entities[ft.first_parameter + i],
+            template_arguments[x.first_argument + i]);
+}
+
 /*
  * declare()'s part when the declarator is a specialization's
  * (instantiate): a function of the template's scope, with the template's
@@ -1482,6 +1621,9 @@ analysis_result semantic_analysis::declare_specialization(
         /* the definition of a specialization whose declaration was
            instantiated before */
         declared_entity = record.specialization;
+        bind_specialization_parameters(
+            declared_entity,
+            entity_table[record.template_entity].template_record, index);
         return analysis_result::well_formed;
     }
     /* (a copy: making the entity can move the table) */

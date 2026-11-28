@@ -2242,6 +2242,7 @@ class semantic_analysis
     bool destructor_deleted(entity_index c) const;
     bool copy_constructor_deleted_by_move(entity_index c) const;
     bool declares_move_assignment(entity_index c);
+    bool mutable_member_assigns_by_template(entity_index c);
     bool copy_assignment_deleted(entity_index c);
     bool bytewise_const_member(entity_index c) const;
     bool trivial_special_members(entity_index c) const;
@@ -2437,11 +2438,14 @@ class semantic_analysis
     analysis_result template_simple_declaration(TemplateDeclaration t,
                                                 SimpleDeclaration s);
     /* [temp.fct]: a function template defined at namespace scope */
+    void bind_specialization_parameters(entity_index e, uint32_t record,
+                                        uint32_t index);
     analysis_result function_template_definition(SyntaxRef n,
                                                  SyntaxRef definition);
     analysis_result explicit_specialization(ExplicitSpecialization n);
     bool extraneous_template_headers(SyntaxElement n) const;
     analysis_result explicit_instantiation(ExplicitInstantiation n);
+    void explicitly_instantiated_data_members(SyntaxRef n, entity_index c);
     analysis_result explicitly_instantiate_class(SyntaxRef n, entity_index c,
                                                  bool extern_, uint32_t prior);
     analysis_result class_explicit_instantiation(SyntaxRef n, SyntaxRef id,
@@ -2449,10 +2453,18 @@ class semantic_analysis
                                                  entity_index qualifier = 0);
     analysis_result member_explicit_instantiation(SyntaxRef n,
                                                   SyntaxRef declaration,
-                                                  uint32_t lead, bool extern_);
+                                                  uint32_t lead, bool extern_,
+                                                  bool &of_template);
+    analysis_result function_explicit_instantiation(SyntaxRef n,
+                                                    SyntaxRef declaration,
+                                                    uint32_t lead,
+                                                    bool extern_);
     /* whether the declarator may have a simple-template-id as its
        declarator-id */
     bool declarator_template_id = false;
+    /* the declarator is an explicit specialization's or instantiation's,
+       whose placeholder return type is its template's ([temp.expl.spec]) */
+    bool specialization_declarator = false;
     /* [temp.expl.spec]/16: the explicit specialization being analysed is
        the inner one of template<> template<> ... */
     bool nested_explicit_specialization = false;
@@ -2938,6 +2950,9 @@ class semantic_analysis
     bool redeclares_member_class(SyntaxElement elaborated, entity_index s);
     entity_index redeclared_member_function(SyntaxElement inner,
                                             entity_index s);
+    analysis_result friend_member_template(entity_index c,
+                                           TemplateDeclaration n,
+                                           SyntaxElement elaborated);
     analysis_result qualified_friend_class_template(entity_index c,
                                                     TemplateDeclaration n,
                                                     SyntaxElement elaborated);
@@ -3060,6 +3075,8 @@ class semantic_analysis
     /* the declarator being declared has require_constant_initialization
        (gnu_require_constant_initialization) */
     bool declarator_constinit = false;
+    /* the declarator being declared is constexpr or constinit */
+    bool declarator_constant = false;
     entity_index qualified_scope = 0;
     /* whether the type is, or is made of, a class or enumeration whose
        name has no external linkage; with arguments, a class template
@@ -3173,7 +3190,11 @@ class semantic_analysis
         /* a callee template-id with no arguments of its own call, f<A>():
            the specialization it names (cast: the template-id's node); of a
            name bound to a pointer or reference parameter (identifier), the
-           object or function its argument names */
+           object or function its argument names.  Of a name bound to a
+           pack of values (a class template's index pack) the element's
+           enumerator, or the empty pack itself; of a call none of whose
+           operands depends (cast: the call's node, element: of the
+           enclosing expansion) the specialization called */
         entity_index specialization = 0;
     };
     owned_array<written_binding> written_bindings;
@@ -3218,6 +3239,23 @@ class semantic_analysis
     void collect_written_casts(SyntaxElement x,
                                owned_array<written_binding> &found);
     bool ends_in_ellipsis(SyntaxElement a) const;
+    bool value_pack(entity_index pack) const;
+
+  public:
+    /* an enclosing template's parameter in a constraint's type
+       (constraint_type): the stand-in for it, apart from the member
+       template's own parameter of the same position */
+    struct outer_parameter {
+        entity_index parameter = 0;
+        entity_index stand_in = 0;
+        type_index type = 0;
+    };
+    owned_array<outer_parameter> outer_parameters;
+    bool outer_parameter_clashes(entity_index t, entity_index outer) const;
+
+  private:
+    void collect_written_calls(SyntaxElement x, uint32_t element,
+                               owned_array<written_binding> &found);
     bool collect_written_expansion(SyntaxElement a,
                                    owned_array<written_binding> &found);
     /* a block scope in the current one, made current */
@@ -3320,6 +3358,7 @@ class semantic_analysis
     bool attributes_without_effect(SyntaxElement n) const;
     /* ... or [[noreturn]], whose GCC flag goes into flags */
     bool attributes_as_gnu(SyntaxElement n, uint32_t &flags) const;
+    bool scoped_gnu_function_hint(SyntaxElement n) const;
     token_index scoped_gnu_abi_tag(SyntaxElement n) const;
     bool gnu_attributes_without_effect(SyntaxElement n) const;
     bool attribute_argument_present(SyntaxElement c) const;
@@ -3367,6 +3406,17 @@ class semantic_analysis
            (argument_named) */
         bool argument_dependent = false;
     };
+    /* [dcl.fct.default]/4: a function template's default arguments, which
+       any of its declarations may give; its specializations are made from
+       one declarator (function_templates' index plus one) */
+    struct template_default_argument {
+        uint32_t template_index = 0, parameter = 0;
+        SyntaxElement argument;
+    };
+    owned_array<template_default_argument> template_default_arguments;
+    /* function_parameters' default arguments kept as the template's, and
+       how many parameters of the template have one then */
+    uint32_t hold_template_defaults(uint32_t template_index);
     /* [dcl.fct.default]: the default arguments of function_parameters,
        which the declaration n of the function f gives it (specialization:
        f a function template's specialization, its template's) */
@@ -3611,6 +3661,7 @@ class semantic_analysis
        ([basic.type.qualifier]/3), none to a reference or a function type
        ([dcl.ref]/1, [dcl.fct]/7) */
     qualified_type add_cv(qualified_type t, uint32_t cv);
+    qualified_type qualified_argument(qualified_type p, qualified_type a);
     analysis_result pointer_qualifier(SyntaxRef op, token_index t,
                                       qualified_type &type);
 
@@ -4040,6 +4091,7 @@ class semantic_analysis
        when it cannot be told */
     bool implicit_constructor_throws(entity_index f, bool &known);
     bool default_initializer_throws(entity_index e, bool &throws);
+    bool default_through_other_form(entity_index k) const;
     bool subobject_constructor_throws(entity_index k, bool copy, bool &known,
                                       bool move = false);
     /* declval<T>() as an expression */
@@ -4193,6 +4245,8 @@ class semantic_analysis
     void mark_needed(entity_index function);
     bool pass_deferred_needs();
     bool emitted_functions_needed();
+    bool static_member_destructor_needed(qualified_type type);
+    bool deleting_destructor_needs(entity_index c);
     /* set by a default member initializer that is ill-formed: an error of
        the class itself ([class.mem]/6), not a reason a defaulted
        constructor is deleted */
@@ -4460,6 +4514,16 @@ class semantic_analysis
         SyntaxRef specifier = 0;
     };
     owned_array<pending_noexcept> pending_noexcepts;
+    /* [special]/6: the classes with a defaulted assignment operator whose
+       requires-clause is satisfied, and which of the two it is */
+    struct constrained_default {
+        entity_index class_ = 0;
+        bool move = false;
+    };
+    owned_array<constrained_default> constrained_defaults;
+    bool templated_class(entity_index c) const;
+    bool shadow_assignment(entity_index c, entity_index f);
+    bool implicit_assignment_signature(entity_index f, bool move) const;
     bool noexcept_needs_complete_class(SyntaxRef n);
     /* whether a noexcept-specifier in the tokens [first, end) of class
        template C (name) asks noexcept of the template specialized with
@@ -4981,6 +5045,11 @@ class semantic_analysis
     aggregate_elements(SyntaxRef list,
                        const owned_array<SyntaxElement> &clauses, size_t &next,
                        qualified_type type, initialized_value &result);
+    analysis_result
+    parenthesized_values(SyntaxRef n, qualified_type type,
+                         owned_array<expression_meaning> &arguments,
+                         const owned_array<SyntaxElement> &written,
+                         initialized_value &result);
     analysis_result parenthesized_aggregate_initialization(
         SyntaxRef at, qualified_type type,
         owned_array<expression_meaning> &arguments, initialized_value &result);
@@ -5354,6 +5423,14 @@ class semantic_analysis
         token_index at = 0;
     };
     owned_array<inheriting_declaration> inheriting;
+    /* the inheriting constructors made for the specializations of inherited
+       constructor templates (inherit_specialization) */
+    struct inherited_specialization {
+        entity_index c = 0, inner = 0, constructor = 0;
+    };
+    owned_array<inherited_specialization> inherited_specializations;
+    analysis_result inherit_specialization(SyntaxRef at, entity_index c,
+                                           entity_index &chosen);
     /* the constraints being checked, template and arguments as a key
        (template_constraints_satisfied): one that needs its own
        satisfaction is the program's error ([temp.constr.constr]; clang's
@@ -5733,7 +5810,18 @@ class semantic_analysis
         bool named_before_definition = false;
         /* ... and where it was named, for what its definition reports */
         SyntaxRef lazy_at = 0;
+        /* a class only named by a friend declaration: no pattern chosen */
+        bool unmatched = false;
     };
+    /* the template's name while a friend declaration names its
+       specialization, else 0 */
+    uint32_t naming_friend = 0;
+    analysis_result choose_pattern(SyntaxRef at, uint32_t index);
+    bool aggregate_deduction(uint32_t ct,
+                             const owned_array<expression_meaning> &arguments,
+                             const owned_array<bool> &braced,
+                             owned_array<template_argument> &values,
+                             owned_array<bool> &set);
     /* [temp.fct]/1: a function template: its entity (template_entity,
        whose type is the function type with the type parameters' types,
        type_kind::template_parameter), the name hold_names bound for it,
@@ -5972,6 +6060,9 @@ class semantic_analysis
        ([class.dtor]/1), not a constructor name ([class.qual]/2) */
     bool in_destructor_name = false;
     uint32_t dependent_errors = 0, independent_errors = 0;
+    /* the references to deleted functions diagnosed, and the last one's */
+    uint32_t deleted_references = 0;
+    token_index deleted_reference_at = 0;
     void count_error();
     /* [temp.inst]/4, [temp.point]: the use at declaration d instantiated a
        definition whose argument-dependent error makes it ill-formed */
@@ -6614,6 +6705,22 @@ class semantic_analysis
                                 bool &unknown, bool f_reversed = false,
                                 bool g_reversed = false);
     int constraint_subsumption_order(uint32_t f, uint32_t g) const;
+    struct constraint_binding {
+        uint32_t name = 0;
+        uint64_t value = 0;
+    };
+    void constraint_atoms(SyntaxElement e, entity_index scope,
+                          const owned_array<constraint_binding> &env,
+                          owned_array<uint64_t> &atoms, unsigned depth);
+    void concept_atoms(uint32_t ct, const owned_array<uint64_t> &arguments,
+                       owned_array<uint64_t> &atoms, unsigned depth);
+    uint64_t
+    constraint_mapping(SyntaxElement a,
+                       const owned_array<constraint_binding> &env) const;
+    entity_index constraint_qualifier(entity_index scope, SyntaxElement q);
+    entity_index constraint_member_concept(entity_index scope, token_index i);
+    void specialization_atoms(uint32_t s, owned_array<uint64_t> &atoms);
+    bool more_constrained_specialization(uint32_t s, uint32_t t);
     bool template_parameter_alone(uint32_t t, uint32_t i) const;
     bool non_deduced(qualified_type t) const;
     bool member_of_unknown_specialization(qualified_type t) const;
@@ -6861,6 +6968,7 @@ class semantic_analysis
     analysis_result selection_statement(SelectionStatement n, uint32_t &built);
     analysis_result iteration_statement(IterationStatement n, uint32_t &built);
     /* [except.pre]: a try-block, and one of its handlers */
+    bool entry_label(SyntaxElement n, bool switched) const;
     analysis_result try_block(TryBlock n, uint32_t &built);
     analysis_result handler(Handler n, uint32_t &built);
     /* [stmt.ranged]: the range-based for statement n, whose
@@ -6976,6 +7084,7 @@ class semantic_analysis
        switch, the condition's value promoted: m) */
     analysis_result condition(SyntaxElement c, bool for_switch,
                               expression_meaning &m);
+    analysis_result switch_class_condition(SyntaxRef at, expression_meaning &m);
     analysis_result switch_condition(SyntaxRef at, expression_meaning &m);
     /* [stmt.dcl]/3: a jump from from to to bypasses no initialization */
     bool jump_bypasses(jump_point from, jump_point to) const;
@@ -7112,12 +7221,27 @@ class semantic_analysis
     bool template_argument_declaration(entity_index t, uint32_t i,
                                        entity_index named,
                                        entity_index &declared) const;
+    /* a local parameter of a requires-expression, as the mangler names it:
+       its name and declared cv-qualifiers */
+    struct requirement_parameter {
+        uint32_t name = 0;
+        uint32_t cv = 0;
+    };
     /* the type a type-id written in t's requires-clause names, analysed in
        t's template-parameter scope (what [abi:mangle.template-args] spells) */
     bool constraint_type(entity_index t, SyntaxElement written,
                          qualified_type &type) const;
     bool constraint_type_in(entity_index t, SyntaxElement written,
                             qualified_type &type);
+    bool constraint_requirement_parameters_in(
+        entity_index t, SyntaxElement list, qualified_type &function_type,
+        owned_array<requirement_parameter> &names);
+    /* the local parameters of a requires-expression written in t's
+       requires-clause ([expr.prim.req]/3): the function type of their
+       types, and each of them */
+    bool constraint_requirement_parameters(
+        entity_index t, SyntaxElement list, qualified_type &function_type,
+        owned_array<requirement_parameter> &names) const;
     /* what token i names, looked up from scope outward (0: none) */
     entity_index constraint_name(entity_index scope, token_index i) const;
     /* the concept token i names, looked up from scope outward (0: none) */
@@ -7135,6 +7259,7 @@ class semantic_analysis
     /* the concept or variable template token i names in namespace ns, as
        ns::v<args> in a requires-clause ([basic.lookup.qual], its inline
        namespaces too; 0: none) */
+    entity_index constraint_member(entity_index ns, token_index i) const;
     entity_index constraint_namespace_template(entity_index ns,
                                                token_index i) const;
     /* [abi:mangle.function-param]: the position plus one of function
@@ -7334,6 +7459,10 @@ class semantic_analysis
            (function_templates' index plus one), for [over.match.best]/2.4
            and 2.5 */
         uint32_t template_index = 0;
+        /* an operator declared after the template, which only
+           argument-dependent lookup for a dependent expression finds
+           ([temp.dep.candidate]/1) */
+        bool late = false;
     };
 
   private:
@@ -7582,6 +7711,9 @@ class semantic_analysis
     /* [temp.dep.candidate]/1: e, a function of space, declared first after
        the template instantiated */
     bool declared_past_horizon(entity_index e, entity_index space) const;
+    /* the namespace whose functions declared after the template are late
+       candidates (overload_candidate::late) of the call being resolved */
+    entity_index late_candidates_in = 0;
     /* [over.call.func]: the token of the name a call's postfix-expression
        is, and the call's callee f made the best viable function of the
        set (its implied object argument's address object, 0 if none) */
@@ -7719,6 +7851,10 @@ class semantic_analysis
         SyntaxRef at, uint32_t function_template, qualified_type target,
         owned_array<template_argument> &deduced, bool &failed,
         const owned_array<template_argument> *explicit_arguments = nullptr);
+    analysis_result
+    arguments_without_deduction(SyntaxRef at, uint32_t function_template,
+                                owned_array<template_argument> &arguments,
+                                bool &failed);
     /* ... the token of that name and the function chosen, which
        named_entity takes it for (0 elsewhere) */
     token_index overload_target_token = 0;

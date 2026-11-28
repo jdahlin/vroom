@@ -107,25 +107,47 @@ parser::reading parser::reading_at(unsigned ahead)
 
 /*
  * [basic.lookup.argdep]: a call of a hidden friend's name, which only
- * argument-dependent lookup finds.  As a declaration, T(x); would need
- * T declared and would declare x anew, hiding the object x: not read so.
+ * argument-dependent lookup finds; in a template, of a name declared
+ * nowhere ([temp.res]: found at the instantiation by the dependent
+ * arguments).  As a declaration, T(x); would need T declared and would
+ * declare x anew, hiding the object x: not read so.
  */
 bool parser::call_of_undeclared_name(unsigned ahead)
 {
-    /* (not in a template: a call that depends on nothing is bound at its
-       definition, which analysis does not check) */
-    if (names.within_template() || !at_identifier(ahead) ||
+    if (!at_identifier(ahead) ||
         !at(preprocessing_op_or_punc::LEFT_PARENTHESIS, ahead + 1))
         return false;
     uint32_t name = tokens.identifier(position + ahead);
-    bool befriended = false;
-    for (uint32_t declared : friend_names)
-        befriended = befriended || declared == name;
     scope_index found = 0;
     bool dependent = false;
-    if (!befriended || names.lookup_unqualified(name, &found, &dependent) !=
-                           name_kind::not_declared)
+    if (names.lookup_unqualified(name, &found, &dependent) !=
+        name_kind::not_declared)
         return false;
+    if (names.within_template()) {
+        /* (a dependent base class may declare it).  Only where the
+           function's trailing return type already names the call,
+           decltype(name(...)) (fmt's flockfile): a template with another
+           is not parsed, as analysis would not diagnose all of what
+           [temp.res] rejects in it */
+        bool named = false;
+        for (unsigned back = 3; back < 12 && back <= (position + ahead).index();
+             back++) {
+            token_index t{(position + ahead).index() - back};
+            named =
+                named || (tokens.identifier(t + 2) == name &&
+                          keyword_of(tokens[t]) == standard_keyword::decltype_);
+        }
+        if (dependent || !named)
+            return false;
+    } else {
+        /* (not in a template: a call that depends on nothing is bound at
+           its definition, which analysis does not check) */
+        bool befriended = false;
+        for (uint32_t declared : friend_names)
+            befriended = befriended || declared == name;
+        if (!befriended)
+            return false;
+    }
     for (unsigned i = ahead + 2;; i += 2) {
         unsigned length = 0;
         if (!at_identifier(i) ||

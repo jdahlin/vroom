@@ -290,11 +290,14 @@ lower SemaCXX/noreturn-vars.cpp -std=gnu++17: vpp -S defines ['_ZL10const_fptr',
 lower SemaCXX/unique_object_duplication.cpp -std=gnu++17 -Wunique-object-duplication -Wno-unused-value: vpp -S defines ['_ZGVZN15StaticLocalTest12_GLOBAL__N_122has_static_locals_anonEvE14allowedStatic2', '_ZGVZN15StaticLocalTest12_GLOBAL__N_122has_static_locals_anonEvE14allowedStatic3', '_ZGVZN15StaticLocalTest26has_static_locals_externalEvE17disallowedStatic2'] clang -O0 does not, not []
 lower SemaCXX/warn-float-conversion.cpp -std=gnu++17 -Wno-conversion -Wfloat-overflow-conversion -DOVERFLOW: vpp -S defines ['_ZN5CheckIcE4SafeEv', '_ZN5CheckIfE4SafeEv'] clang -O0 does not, not []
 lower SemaCXX/warn-float-conversion.cpp -std=gnu++17 -Wno-literal-conversion -Wfloat-conversion -DFLOAT_CONVERSION -DZERO -DBOOL -DCONSTANT_BOOL -DOVERFLOW: vpp -S defines ['_ZN5CheckIcE4SafeEv', '_ZN5CheckIfE4SafeEv'] clang -O0 does not, not []
+lower SemaCXX/warn-global-constructors.cpp -std=c++11 -Wglobal-constructors: vpp -S defines ['_ZN9bitfields18HasUnnamedBitfieldC2Ejj', '_ZN9bitfields18HasUnnamedBitfieldC2Ev', '_ZN9bitfieldsL13explicitConstE'] clang -O0 does not, not []
+lower SemaCXX/warn-global-constructors.cpp -std=c++20 -Wglobal-constructors: vpp -S defines ['_ZN5test71SD2Ev', '_ZN9bitfields18HasUnnamedBitfieldC2Ejj', '_ZN9bitfields18HasUnnamedBitfieldC2Ev'] clang -O0 does not, not []
 lower SemaCXX/warn-large-by-value-copy.cpp -std=gnu++17: vpp -S defines ['_ZN11rdar85480506NonPODC2ERKS0_'] clang -O0 does not, not ['_ZN11rdar85480506NonPODC2EOS0_']
 lower SemaTemplate/GH161657.cpp -std=c++20: vpp -S defines ['_ZZ3foovENK3$_0clEv'] clang -O0 does not, not ['_ZNK1SIiE3$_0clEv']
 lower SemaTemplate/inject-templated-friend-post.cpp -std=c++98 -DINSTANTIATE: vpp -S defines [] clang -O0 does not, not ['_ZN8StreamerI3FooEC5ERKS0_']
 lower SemaTemplate/inject-templated-friend-post.cpp -std=c++98 -DPROTOTYPE -DINSTANTIATE: vpp -S defines [] clang -O0 does not, not ['_ZN8StreamerI3FooEC5ERKS0_']
 lower SemaTemplate/instantiate-deeply.cpp -std=gnu++17 -Wall: vpp -S defines [] clang -O0 does not, not ['_ZN3FooIiEC5Ev']
+lower SemaTemplate/instantiate-expr-2.cpp -std=gnu++17: vpp -S defines [] clang -O0 does not, not ['_ZN3N101AIiED5Ev']
 lower src/test/cxx/sema/gram/class.base.init-anonymous-struct-members.cpp -std=c++20: vpp -S defines ['_GLOBAL__sub_I_class.base.init_anonymous_struct_members.cpp', '_ZL1s', '_ZN1SC2Ei'] clang -O0 does not, not []
 symbols SemaCXX/PR38913.cpp -std=gnu++17: _Z1av is not a symbol clang -O0 defines
 symbols SemaCXX/PR38913.cpp -std=gnu++17: _Z1bv is not a symbol clang -O0 defines
@@ -524,7 +527,6 @@ verdict CXX/class.access/class.friend/p1.cpp -std=c++11: ill-formed for us, acce
 verdict CXX/class.access/class.friend/p1.cpp -std=c++14: ill-formed for us, accepted by clang: line 295 (2 declarations)
 verdict CXX/class.access/class.friend/p1.cpp -std=c++98: ill-formed for us, accepted by clang: line 295 (2 declarations)
 verdict CXX/class.access/class.friend/p1.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 295 (2 declarations)
-verdict CXX/class.access/class.protected/p1-cxx11.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 16 (1 declarations)
 verdict CXX/class/class.compare/class.spaceship/p2.cpp -std=c++2a: ill-formed for us, accepted by clang: line 83 (10 declarations)
 verdict CXX/class/class.init/class.copy.elision/p3.cpp -std=c++11: ill-formed for us, accepted by clang: line 432 (1 declarations)
 verdict CXX/class/class.init/class.copy.elision/p3.cpp -std=c++20: ill-formed for us, accepted by clang: line 432 (1 declarations)
@@ -585,9 +587,9 @@ verdict CXX/over/over.match/over.match.funcs/over.match.oper/p3.cpp -std=c++11: 
 verdict CXX/special/class.copy/implicit-move.cpp -std=c++11 -Wno-inaccessible-base: ill-formed for us, accepted by clang: line 211 (2 declarations)
 verdict CXX/special/class.copy/p12-0x.cpp -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 96 (7 declarations)
 verdict CXX/special/class.copy/p12-0x.cpp -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted: ill-formed for us, accepted by clang: line 96 (7 declarations)
-verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 105 (19 declarations)
-verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 105 (19 declarations)
-verdict CXX/special/class.copy/p25-0x.cpp -std=c++2b -DDEDUCING_THIS -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 105 (6 declarations)
+verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 126 (17 declarations)
+verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 126 (17 declarations)
+verdict CXX/special/class.copy/p25-0x.cpp -std=c++2b -DDEDUCING_THIS -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 208 (4 declarations)
 verdict CXX/temp/temp.fct.spec/temp.deduct/p7.cpp -std=c++11: ill-formed for us, accepted by clang: line 12 (1 declarations)
 verdict CXX/temp/temp.fct.spec/temp.deduct/p7.cpp -std=c++2a: ill-formed for us, accepted by clang: line 12 (1 declarations)
 verdict CXX/temp/temp.fct.spec/temp.deduct/temp.deduct.conv/p5.cpp -std=c++1z: ill-formed for us, accepted by clang: line 28 (1 declarations)

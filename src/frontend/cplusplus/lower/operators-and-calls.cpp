@@ -836,8 +836,34 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
     return fail("a builtin of this front end", 0);
 }
 
+bool c_lowering::unevaluated_temporaries(const semantic_node &n)
+{
+    uint32_t callee = n.a;
+    if (node(callee).kind == semantic_kind::conversion)
+        callee = node(callee).a;
+    if (n.count != 1 || node(callee).kind != semantic_kind::entity)
+        return false;
+    uint16_t row =
+        analysis.entity_table[entity_index_in(node(callee).a)].gnu_builtin_row;
+    if (!row || gnu_builtin_at(row).fold != builtin_fold::constant_p)
+        return false;
+    /* (lowered to see what it would make, then forgotten) */
+    size_t first = temporaries.size();
+    size_t first_destruction = destructions.size();
+    uint32_t operand = expression(analysis.semantics.items(n.first)[0]);
+    bool made = operand && destructions.size() > first_destruction;
+    temporaries.resize(first);
+    destructions.resize(first_destruction);
+    return made;
+}
+
 uint32_t c_lowering::call(const semantic_node &n)
 {
+    /* [ext:gnu_library_builtins] __builtin_constant_p's operand is not
+       evaluated: one that would make temporaries with destructors (Catch's
+       CHECK) answers false, nothing of it lowered into the program */
+    if (unevaluated_temporaries(n))
+        return ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0);
     qualified_type function_type = node(n.a).type;
     uint32_t callee = 0;
     uint32_t builtin = 0;

@@ -104,14 +104,35 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
         return expression_of_constraint(t, c[0]) &&
                expression_of_constraint(t, c[2]);
     }
+    case syntax_kind::fold_expression: {
+        /* [abi:expressions]: a unary fold, fl or fr, the operator, the
+           pattern: ( pattern op ... ) is a right fold */
+        if (c.size() != 5)
+            return false;
+        bool right = c[3].is(preprocessing_op_or_punc::ELLIPSIS);
+        if (!right && !c[1].is(preprocessing_op_or_punc::ELLIPSIS))
+            return false;
+        SyntaxElement pattern = c[3];
+        if (right) {
+            pattern = c[1];
+            enc.write(terminal::fr_right_fold);
+        } else {
+            enc.write(terminal::fl_left_fold);
+        }
+        itanium_operator o = operator_written(c[2], 2);
+        if (o == itanium_operator::none)
+            return false;
+        enc.write(o);
+        return expression_of_constraint(t, pattern);
+    }
     case syntax_kind::requires_expression: {
         /* [abi:expressions]: requires-expression without parameter list
            ("rq" <requirement>+ "E"), simple-requirement ("X" <expression>),
            compound-requirement ("X" <expression> ["N"]
            ["R" <type-constraint>]) */
-        if (c.size() != 2)
+        if (c.size() < 2 || c.size() > 3)
             return false;
-        SyntaxElement body = c[1];
+        SyntaxElement body = c[c.size() - 1];
         uint32_t first = 1;
         uint32_t count = 0;
         if (body.size() >= 2)
@@ -123,7 +144,38 @@ bool itanium_mangler::expression_of_constraint(entity_index t, SyntaxElement c)
         }
         if (!count)
             return false;
-        enc.write(terminal::rq_requires_expression);
+        /* [abi:expressions] <expression> ::= rQ <bare-function-type> _
+           <requirement>+ E, with local parameters, which the requirements
+           name as <function-param>s */
+        owned_array<semantic_analysis::requirement_parameter> parameters;
+        if (c.size() == 3) {
+            qualified_type signature;
+            if (!analysis.constraint_requirement_parameters(t, c[1], signature,
+                                                            parameters))
+                return false;
+            enc.write(terminal::rQ_requires_parameters);
+            scoped_value<entity_index> in_template(encoding_template, t);
+            entity_index level_of = 0;
+            if (constraint_level(t))
+                level_of = t;
+            scoped_value<entity_index> in_level(leveled_template, level_of);
+            if (!bare_function_type(signature))
+                return false;
+            enc.write(terminal::underscore);
+        } else {
+            enc.write(terminal::rq_requires_expression);
+        }
+        scoped_value<
+            const owned_array<semantic_analysis::requirement_parameter> *>
+            in_parameters(requirement_parameters, &parameters);
+        /* (names looked up in t's declaration; a member template's own
+           parameters in the requirements: TL) */
+        scoped_value<entity_index> requirement_template(encoding_template, t);
+        entity_index own_level = leveled_template;
+        if (constraint_level(t))
+            own_level = t;
+        scoped_value<entity_index> requirement_level(leveled_template,
+                                                     own_level);
         for (uint32_t i = first; i < first + count; i++) {
             SyntaxElement req = body[i];
             if (req.is(syntax_kind::simple_requirement) && req.size() >= 1) {
@@ -224,8 +276,7 @@ bool itanium_mangler::constraint_namespace(entity_index t,
             next = analysis.constraint_name(analysis.entity_table[t].enclosing,
                                             qualifier[i].token());
         else
-            next = analysis.entity_table.find(
-                scope, analysis.token_identifier(qualifier[i].token()));
+            next = analysis.constraint_member(scope, qualifier[i].token());
         if (!next ||
             analysis.entity_table[next].kind != entity_kind::namespace_entity)
             return false;
@@ -308,16 +359,7 @@ bool itanium_mangler::template_args_of_constraint(entity_index t,
             qualified_type argument;
             if (!analysis.constraint_type(t, written[wi], argument))
                 return false;
-            /* (an enclosing template's parameter there is bound to its
-               argument: clang mangles the parameter) */
             bool leveled = constraint_level(t) != 0;
-            for (token_index k = a.first_token(); leveled && k < a.end_token();
-                 k++) {
-                entity_index pe = analysis.constraint_parameter(t, k);
-                if (pe && !analysis.constraint_parameter_is_own(t, pe))
-                    return refuse("a type of a constraint that names an "
-                                  "enclosing template's parameter");
-            }
             entity_index level_of = 0;
             if (leveled)
                 level_of = t;
@@ -355,14 +397,22 @@ bool itanium_mangler::template_args_of_constraint(entity_index t,
     return true;
 }
 
-/* the number of class template specializations t is a member of */
+/* the number of class template specializations t is a member of; for a
+   generic lambda's call operator, of function template specializations
+   too */
 uint64_t itanium_mangler::constraint_level(entity_index t) const
 {
     const entities &table = analysis.entity_table;
     uint64_t level = 0;
-    for (entity_index s = table[t].enclosing; s; s = table[s].enclosing)
-        if (table[s].kind == entity_kind::class_type && table[s].instantiation)
+    bool lambda = static_cast<bool>(table[table[t].enclosing].lambda);
+    for (entity_index s = table[t].enclosing; s; s = table[s].enclosing) {
+        if (table[s].instantiation && table[s].kind == entity_kind::class_type)
             level++;
+        /* (the specialization of the function template holding the lambda) */
+        if (lambda && table[s].kind == entity_kind::function &&
+            table[s].instantiation)
+            level++;
+    }
     return level;
 }
 
@@ -376,15 +426,16 @@ bool itanium_mangler::type_constraint(entity_index t, SyntaxElement q)
         entity_index scope = 0;
         if (!constraint_namespace(t, q[0], scope))
             return false;
-        entity_index member = analysis.entity_table.find(
-            scope, analysis.token_identifier(q[1].token()));
+        entity_index member = analysis.constraint_member(scope, q[1].token());
         return member && name(member);
     }
     entity_index found = analysis.constraint_name(
         analysis.entity_table[t].enclosing, q[0].token());
     if (!found)
         return false;
-    if (q.size() == 1)
+    if (q.size() == 1 ||
+        (q.size() == 3 && punctuator(q[1], preprocessing_op_or_punc::LESS) &&
+         punctuator(q[2], preprocessing_op_or_punc::GREATER)))
         return name(found);
     if (q.size() < 3 || !punctuator(q[1], preprocessing_op_or_punc::LESS))
         return false;
@@ -440,6 +491,15 @@ bool itanium_mangler::template_param_of_constraint(entity_index t,
         if (record(table[parameter].type).kind !=
             type_kind::template_parameter) {
             template_param(table[parameter].value);
+            return true;
+        }
+        /* [impl.clang] a candidate apart from the own parameter's T_ when
+           only one of the two is a pack */
+        if (level && analysis.outer_parameter_clashes(t, parameter)) {
+            if (!substitution(parameter)) {
+                template_param(table[parameter].value);
+                add_candidate(parameter);
+            }
             return true;
         }
         return type(table[parameter].type);
