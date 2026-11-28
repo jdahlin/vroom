@@ -122,6 +122,15 @@ enum { CC_DLLIMPORT = 1, CC_DLLEXPORT = 2 };
 
 /* ---------------- records and enums ---------------- */
 
+/* -g: what a C++ construct lowered to C's was (a field's debug_kind, a symbol's attrs) */
+enum {
+    AST_DEBUG_PLAIN,
+    AST_DEBUG_BASE,             /* a base class subobject */
+    AST_DEBUG_HIDDEN,           /* padding, a virtual base's bytes */
+    AST_DEBUG_REFERENCE,        /* a pointer that is a T & */
+    AST_DEBUG_RVALUE_REFERENCE, /* ... T && */
+};
+
 typedef struct field {
     uint32_t
         name; /* identifier id, 0 for anonymous members and unnamed bit-fields */
@@ -132,6 +141,9 @@ typedef struct field {
     uint16_t width; /* bit-field width */
     uint8_t bitfield;
     uint8_t invalid; /* its type was an error: uses say nothing more (clang) */
+    uint8_t debug_kind; /* -g, C++: AST_DEBUG_*, what the field is to it */
+    ast_qualified_type debug_base; /* AST_DEBUG_BASE: the base class's struct
+                                      (ty is bytes where its tail is reused) */
     uint32_t loc;
     uint32_t counted_by; /* counted_by(member): its identifier id */
     uint32_t

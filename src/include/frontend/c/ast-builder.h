@@ -75,6 +75,10 @@ uint32_t ast_builder_location(cc *c, uint32_t location);
 void ast_builder_node_location(cc *c, uint32_t n, uint32_t location);
 /* the source's identifier of a symbol named by its linkage name, for the
    function's debug entry */
+void ast_builder_symbol_debug_kind(cc *c, uint32_t s, int kind);
+void ast_builder_type_record_debug_kind(cc *c, ast_qualified_type record,
+                                        uint32_t field, int kind,
+                                        ast_qualified_type base);
 void ast_builder_symbol_debug_name(cc *c, uint32_t s, const char *name,
                                    size_t length);
 

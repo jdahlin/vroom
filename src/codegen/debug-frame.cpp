@@ -9,7 +9,10 @@
 VPRIV void codegen_debug_local_add(codegen_context *e, uint32_t s,
                                    int64_t offset, bool is_placed)
 {
-    if (!e->unit->debug_frames || !e->compile_context->syms[s].name)
+    /* (C++'s this has no name in its symbol, only for -g) */
+    if (!e->unit->debug_frames ||
+        (!e->compile_context->syms[s].name &&
+         !codegen_symbol_attributes(e->compile_context, s)->debug_name))
         return;
     if (e->debug_local_count == e->debug_local_capacity) {
         e->debug_local_capacity = 2 * e->debug_local_capacity + 32;
