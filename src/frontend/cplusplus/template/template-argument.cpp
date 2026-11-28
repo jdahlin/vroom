@@ -929,12 +929,8 @@ analysis_result semantic_analysis::substituted_parameter_type(
         return not_supported_because(
             node, "temp.param",
             "a non-type template parameter of an unhandled form");
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                           template_lexical_outer(ft));
-    for (uint32_t k = 0; k < position; k++)
-        bind_template_argument(
-            scope, template_parameter_entities[ft.first_parameter + k],
-            before[k]);
+    entity_index scope = argument_scope(ft.first_parameter, position, before,
+                                        template_lexical_outer(ft));
     entity_index saved = current_scope;
     token_index saved_horizon = lookup_horizon;
     current_scope = scope;
