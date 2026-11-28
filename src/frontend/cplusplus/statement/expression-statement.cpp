@@ -43,6 +43,20 @@ analysis_result semantic_analysis::expression_statement(ExpressionStatement n,
             n, "stmt.expr", "an expression statement of unexpected shape");
     expression_meaning m;
     analysis_result r = expression(n[0], m);
+    /* [expr.mptr.oper]/6: "If the result of .* or ->* is a function, then
+       that result can be used only as the operand for the function call
+       operator ()" */
+    SyntaxElement operand = n[0];
+    while (operand.is(syntax_kind::primary_expression) && operand.size() == 3 &&
+           operand[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        operand = operand[1];
+    if (r == analysis_result::well_formed &&
+        operand.is(syntax_kind::pm_expression) &&
+        type_table[m.type.unqualified()].kind == type_kind::function)
+        return ill_formed(n,
+                          "a bound member function can be used only as the "
+                          "operand of a call",
+                          "expr.mptr.oper");
     if (r == analysis_result::well_formed && destroyed_temporary(m))
         return not_supported_because(
             n, "class.temporary",

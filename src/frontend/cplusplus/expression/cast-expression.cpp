@@ -542,8 +542,8 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
  * the target lacks, or where they differ and a level above, below the
  * first, lacks const in the target ([conv.qual]/3).  Levels one type has
  * more of than the other are not compared ([impl.clang]: clang's rule).
- * A pointer to member against what is not one, and an array below the
- * first level, are not decomposed: *unknown is set.
+ * A pointer to member against a pointer, and an array below the first
+ * level, are not decomposed: *unknown is set.
  */
 bool semantic_analysis::casts_away_constness(qualified_type from,
                                              qualified_type to,
@@ -579,13 +579,13 @@ bool semantic_analysis::casts_away_constness(qualified_type from,
         first = false;
         const struct type ta = type_table[a.unqualified()];
         const struct type tb = type_table[b.unqualified()];
-        bool levels = ta.kind == type_kind::pointer ||
-                      ta.kind == type_kind::pointer_to_member;
-        if (ta.kind != tb.kind || !levels) {
+        auto level = [](const struct type &t) {
+            return t.kind == type_kind::pointer ||
+                   t.kind == type_kind::pointer_to_member;
+        };
+        if (ta.kind != tb.kind || !level(ta)) {
             /* what the other side lacks is not compared */
-            if (ta.kind != tb.kind &&
-                (ta.kind == type_kind::pointer_to_member ||
-                 tb.kind == type_kind::pointer_to_member))
+            if (ta.kind != tb.kind && level(ta) && level(tb))
                 *unknown = true;
             return false;
         }
@@ -919,7 +919,10 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
     bool scalars =
         type_table[referenced.unqualified()].kind != type_kind::class_type &&
         type_table[m.type.unqualified()].kind != type_kind::class_type;
-    bool may_bind_temporary = !lvalue_reference || referenced.cv() == cv_const;
+    /* (an array's cv-qualifiers are its elements',
+       [basic.type.qualifier]/3) */
+    bool to_const = cv_of(type_table, referenced) == cv_const;
+    bool may_bind_temporary = !lvalue_reference || to_const;
     /* [expr.static.cast]/4: "T t(E); for some invented temporary variable
        t and then using the temporary variable as the result of the
        conversion": a reference to const or an rvalue reference, neither to
@@ -941,9 +944,9 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
             return not_supported_because(
                 at, "expr.cast",
                 "a prvalue cast to a reference without a temporary");
-        bool xvalue_ok = m.category == value_category::xvalue &&
-                         (!lvalue_reference || (referenced.cv() == cv_const &&
-                                                (kinds & cast_static)));
+        bool xvalue_ok =
+            m.category == value_category::xvalue &&
+            (!lvalue_reference || (to_const && (kinds & cast_static)));
         if (lvalue_reference && m.category != value_category::lvalue &&
             !xvalue_ok) {
             if (kinds == cast_static)
@@ -983,14 +986,41 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
             related = base_step(source, destination, ambiguous) ||
                       base_step(destination, source, ambiguous);
         }
-        if (!related && !same && (kinds & cast_static) &&
-            (kinds == cast_static ||
-             (may_bind_temporary &&
-              implicit_conversion_sequence(m, to, true).kind !=
-                  conversion_sequence::form::bad)))
-            /* [expr.static.cast]/4: "T t(E);" may bind the reference to a
-               temporary of the converted value; a C-style cast with no such
-               conversion is a reinterpret_cast ([expr.cast]/4) */
+        /* [expr.static.cast]/4: "T t(E);" binds the reference to a
+           temporary of the implicitly converted value */
+        /* (an array reference adding to its elements' qualifiers binds
+           the array itself) */
+        bool adds_qualifiers =
+            into.kind == type_kind::array && from.kind == type_kind::array &&
+            into.operand.unqualified() == from.operand.unqualified() &&
+            into.bound_known == from.bound_known && into.bound == from.bound &&
+            !(from.operand.cv() & ~into.operand.cv());
+        bool converted_temporary = false;
+        if (!related && !same && (kinds & cast_static) && may_bind_temporary &&
+            !adds_qualifiers &&
+            implicit_conversion_sequence(
+                m, qualified_type::make(referenced.unqualified(), cv_none),
+                true)
+                    .kind != conversion_sequence::form::bad) {
+            VTRY(bound, reference_binding(at, m, to));
+            converted_temporary = true;
+        }
+        if (!converted_temporary && !related && !same && kinds == cast_static &&
+            into.kind == type_kind::array && from.kind == type_kind::class_type)
+            /* (no array is initialized from an object of class type) */
+            return ill_formed(at, "a static_cast of a class to an array",
+                              "expr.static.cast");
+        if (!converted_temporary && !related && !same && kinds == cast_static &&
+            into.kind == type_kind::array && from.kind == type_kind::array &&
+            into.operand.unqualified() == from.operand.unqualified() &&
+            (from.operand.cv() & ~into.operand.cv()))
+            return ill_formed(at, "a static_cast that casts away constness",
+                              "expr.static.cast");
+        if (!converted_temporary && !adds_qualifiers && !related && !same &&
+            kinds == cast_static)
+            /* (an explicit conversion for the temporary: not handled; a
+               C-style cast with none is a reinterpret_cast,
+               [expr.cast]/4) */
             return not_supported_because(
                 at, "expr.static.cast",
                 "a static_cast to a reference of an unrelated type");

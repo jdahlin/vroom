@@ -577,8 +577,8 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
     }
     /* [over.match.oper]/1: operands of class or enumeration type may call
        operator functions, each step of the fold as a binary expression;
-       not for the comma, an assignment, or a comparison ([impl.clang]
-       rejects some of those by default) */
+       the comma's own step below; not for an assignment or a comparison ([impl.clang] rejects some of
+       those by default) */
     bool as_binary =
         !comma &&
         compound_assignment_operator(op) == preprocessing_op_or_punc::count &&
@@ -592,7 +592,7 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
     auto followed = [&](const expression_meaning &x) {
         type_kind k = type_table[x.type.unqualified()].kind;
         if (k == type_kind::class_type || k == type_kind::enumeration)
-            return as_binary;
+            return as_binary || comma;
         return k != type_kind::none;
     };
     for (const expression_meaning &x : operands)
@@ -641,6 +641,17 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
             return binary_of(n, at, op, pattern, lhs, pattern, rhs, out);
         if (!comma)
             return builtin_binary(n, at, op, lhs, rhs, out);
+        /* [over.match.oper]/9: an operator, with no viable function is
+           the built-in one */
+        bool handled = false;
+        VTRY(overloaded, binary_operator_function(n, at, op, pattern, lhs,
+                                                  pattern, rhs, handled, out));
+        if (handled)
+            return analysis_result::well_formed;
+        if (!unevaluated && destroyed_temporary(lhs))
+            return not_supported_because(n, "class.temporary",
+                                         "a comma whose discarded left operand "
+                                         "is a destroyed temporary");
         /* [expr.comma]/1: "the lhs expression is a discarded-value
            expression"; the result is the rhs operand's */
         out = rhs;

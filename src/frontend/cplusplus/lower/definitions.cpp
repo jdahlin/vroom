@@ -426,7 +426,9 @@ bool c_lowering::translation_unit()
                 return false;
         }
     }
-    if (!initializers.empty() && !dynamic_initialization())
+    if (!(initializers.empty() && constant_initializers.empty() &&
+          constant_member_initializers.empty()) &&
+        !dynamic_initialization())
         return false;
     /* [abi:vague-vtable]: the virtual table of each class whose key
        function this translation unit defines */

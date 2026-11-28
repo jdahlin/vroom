@@ -405,7 +405,8 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
         !function_state.active && function_state.this_class;
     if ((!function_state.active && !is_namespace(current_scope) &&
          !in_default && !in_member_default) ||
-        (substituting && !function_state.active) || n.size() < 2)
+        (substituting && !function_state.active && !in_member_default) ||
+        n.size() < 2)
         return not_supported_because(
             n, "expr.prim.lambda", "a lambda in a context that is not handled");
     /* [expr.prim.lambda]/5: a template-parameter-list makes a generic

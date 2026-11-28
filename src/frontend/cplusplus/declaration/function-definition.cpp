@@ -321,10 +321,26 @@ void semantic_analysis::record_target_features(SyntaxRef definition,
         return spelling.size() == strlen(word) &&
                !memcmp(spelling.data(), word, spelling.size());
     };
+    auto append_target = [&](token_index i) {
+        owned_buffer spelling;
+        tokens.spelling(i, spelling.get());
+        if (spelling.size() < 2 || spelling.data()[0] != '"')
+            return;
+        if (features.size())
+            vbuffer_append(features.get(), ",", 1);
+        vbuffer_append(features.get(), spelling.data() + 1,
+                       spelling.size() - 2);
+    };
     /* the parentheses open since an __attribute__ */
     int depth = 0;
     bool in_attribute = false;
     for (token_index i = first; i < body; i++) {
+        /* [[gnu::target("...")]] */
+        if (!in_attribute && i + 4 < body && is(i, "gnu") && is(i + 1, "::") &&
+            is(i + 2, "target") && is(i + 3, "(")) {
+            append_target(i + 4);
+            continue;
+        }
         if (!in_attribute) {
             in_attribute = is(i, "__attribute__") || is(i, "__attribute");
             continue;
@@ -337,14 +353,7 @@ void semantic_analysis::record_target_features(SyntaxRef definition,
                 in_attribute = false;
         } else if (depth == 2 && i + 2 < body &&
                    (is(i, "target") || is(i, "__target__")) && is(i + 1, "(")) {
-            owned_buffer spelling;
-            tokens.spelling(i + 2, spelling.get());
-            if (spelling.size() < 2 || spelling.data()[0] != '"')
-                continue;
-            if (features.size())
-                vbuffer_append(features.get(), ",", 1);
-            vbuffer_append(features.get(), spelling.data() + 1,
-                           spelling.size() - 2);
+            append_target(i + 2);
         }
     }
     if (!features.size())

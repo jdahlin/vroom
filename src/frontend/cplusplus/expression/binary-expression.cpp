@@ -818,8 +818,18 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
     }
     /* [expr.add]: pointer arithmetic */
     auto complete_object = [&](const expression_meaning &x) {
-        return is_object_pointer(x.type) &&
-               size_of_type(type_table[x.type.unqualified()].operand) != 0;
+        if (!is_object_pointer(x.type))
+            return false;
+        qualified_type pointee = type_table[x.type.unqualified()].operand;
+        qualified_type element = pointee;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        const struct type &last = type_table[element.unqualified()];
+        /* [temp.inst]/2: a specialization is completed where its size is
+           needed */
+        if (last.kind == type_kind::class_type)
+            require_complete(last.entity);
+        return size_of_type(pointee) != 0;
     };
     auto incomplete_class_pointer = [&](const expression_meaning &x) {
         if (!is_object_pointer(x.type))

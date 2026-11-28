@@ -27,6 +27,13 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
     if (x.linkage_of_name == linkage::internal &&
         !analysis.specialization_visible(e))
         storage = AST_STORAGE_STATIC;
+    /* [impl.clang] clang gives an overloadable function a mangled
+       name even with C language linkage; its definition here (glibc's
+       static fortify printf, beside the library's printf) keeps the plain
+       name, so it must be local */
+    else if (x.defined && x.c_language_linkage &&
+             (x.gnu_flags & gnu_overloadable))
+        storage = AST_STORAGE_STATIC;
     /* [impl.clang]: an entity whose type has no linkage (an unnamed
        class's) cannot be named in another translation unit, so its symbol
        is local, its name unmangled as an external one's */

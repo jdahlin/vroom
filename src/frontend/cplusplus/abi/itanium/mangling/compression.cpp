@@ -92,6 +92,7 @@ bool itanium_mangler::substitution(qualified_type t, entity_index member_class)
     for (size_t i = 0; i < enc.candidate_count(); i++)
         if (!enc.candidate_at(i).scope &&
             enc.candidate_at(i).member_class == member_class &&
+            enc.candidate_at(i).level_of == level_of_type(t) &&
             ((!enc.candidate_at(i).expansion &&
               same_candidate(enc.candidate_at(i).type, t)) ||
              (enc.candidate_at(i).expansion && !t.cv() &&
