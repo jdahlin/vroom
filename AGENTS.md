@@ -488,6 +488,7 @@ bench/stockfish/vccd-prefix.py [--bin-dir DIR]   # vccd's -fcxx-prefix= workers:
 bench/skia/prefix.py [--stride N]  # -fcxx-prefix= (Skia's standard headers) on the 529 files of work/skia-src's out/vcc: failures, instructions, CPU, defined symbols
 bench/skia/dm.py                   # ... Skia's dm rebuilt with it in build/skia-dm (needs out/vcc-test); then run its tests and GMs
 bench/stockfish/cache.py            # ... a result cache keyed on command, compiler and inputs: cold, unchanged, one header edited
+bench/v8/run.py [-j N] [--force] [-v] [PAT]   # V8 15.9.135 (work/v8-root, a clang d8 build in v8/out/clang): each of d8's TUs by vpp with clang's command line, failures grouped by first error; nothing linked yet (~2200 TUs)
 bench/highway/run.py [-O 0123] [-j N] [--bless] [-v] [PAT]   # Google Highway (work/highway, pinned commit in the file's header; x86-64 host, static SSE2 target, libc++): each TU by vpp -x c++ -c, the tests linked by clang++ (library objects vcc's where it compiles them) and run; a test lost from bench/highway/passing-O2 is an error, refusals grouped by first error (~1 min cold)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
