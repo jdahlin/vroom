@@ -14,8 +14,15 @@
 namespace cplusplus
 {
 
+entities::~entities()
+{
+    entity_details_table = outer_details;
+}
+
 entities::entities()
 {
+    outer_details = entity_details_table;
+    entity_details_table = &detail_records;
     records.append(entity());
     declarations.append(entity_declaration());
     slots.resize(64);

@@ -40,7 +40,7 @@ void c_lowering::debug_class_name(entity_index e, vbuffer *out)
     }
     uint32_t name = x.name;
     if (!name)
-        name = x.linkage_name;
+        name = x.details().linkage_name;
     if (!name)
         return;
     size_t length = 0;
@@ -161,7 +161,7 @@ ast_qualified_type c_lowering::debug_enum_type(entity_index e, token_index at)
     if (debug_enums[e])
         return debug_enums[e];
     const entity x = analysis.entity_table[e];
-    ast_qualified_type underlying = fundamental(x.underlying, at);
+    ast_qualified_type underlying = fundamental(x.details().underlying, at);
     gather_enumerators();
     owned_array<uint32_t> enumerators;
     for (entity_index i = first_enumerator[e]; i; i = next_enumerator[i]) {
@@ -192,7 +192,7 @@ ast_qualified_type c_lowering::debug_type(qualified_type t, token_index at)
     ast_qualified_type made = 0;
     switch (r.kind) {
     case type_kind::enumeration:
-        if (analysis.entity_table[r.entity].underlying ==
+        if (analysis.entity_table[r.entity].details().underlying ==
             fundamental_type::none)
             return 0;
         made = debug_enum_type(r.entity, at);
@@ -227,9 +227,10 @@ void c_lowering::debug_virtual_bases(entity_index e, ast_qualified_type made,
         return;
     const entity x = analysis.entity_table[e];
     owned_array<uint32_t> pairs;
-    for (uint32_t i = 0; i < x.base_count; i++) {
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
         const entity b =
-            analysis.entity_table[analysis.class_bases[x.first_base + i]];
+            analysis
+                .entity_table[analysis.class_bases[x.details().first_base + i]];
         if (!b.virtual_base)
             continue;
         const dynamic_class *d = analysis.dynamic_of(e);

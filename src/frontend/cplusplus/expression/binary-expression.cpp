@@ -634,7 +634,7 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
     }
     require_complete(category);
     if (!category || entity_table[category].kind != entity_kind::class_type ||
-        !entity_table[category].size)
+        !entity_table[category].details().size)
         return ill_formed(n,
                           "the header <compare> shall be included before a "
                           "use of the built-in three-way comparison",
@@ -818,8 +818,18 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
     }
     /* [expr.add]: pointer arithmetic */
     auto complete_object = [&](const expression_meaning &x) {
-        return is_object_pointer(x.type) &&
-               size_of_type(type_table[x.type.unqualified()].operand) != 0;
+        if (!is_object_pointer(x.type))
+            return false;
+        qualified_type pointee = type_table[x.type.unqualified()].operand;
+        qualified_type element = pointee;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        const struct type &last = type_table[element.unqualified()];
+        /* [temp.inst]/2: a specialization is completed where its size is
+           needed */
+        if (last.kind == type_kind::class_type)
+            require_complete(last.entity);
+        return size_of_type(pointee) != 0;
     };
     auto incomplete_class_pointer = [&](const expression_meaning &x) {
         if (!is_object_pointer(x.type))
@@ -828,7 +838,7 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
             type_table[type_table[x.type.unqualified()].operand.unqualified()];
         return p.kind == type_kind::class_type &&
                entity_table[p.entity].kind == entity_kind::class_type &&
-               !entity_table[p.entity].size;
+               !entity_table[p.entity].details().size;
     };
     const char *rule = "one operand shall be a pointer to a "
                        "completely-defined object type and the other shall "
@@ -1074,7 +1084,7 @@ analysis_result semantic_analysis::conditional_conversion(
     }
     /* what no constructor or conversion function of a class can do */
     if (!to_is_base && target_class &&
-        !entity_table[target.entity].first_constructor &&
+        !entity_table[target.entity].details().first_constructor &&
         !(source_class && has_conversion_functions(source.entity)))
         return analysis_result::well_formed;
     if (!to_is_base && source_class && !target_class &&

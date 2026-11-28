@@ -136,18 +136,14 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
            as Tn), with the concept's template arguments after the first
            (template<D<int>>: Tk1DIiE) */
         SyntaxRef q = 0;
-        if (function)
+        /* (a generic lambda's is in its closure type's lambda-sig) */
+        if (function &&
+            !analysis.entity_table[analysis.entity_table[function].enclosing]
+                 .details()
+                 .lambda)
             q = analysis.parameter_type_constraint(function, i);
         if (q) {
-            /* (the type-constraint's concept-name, then its <,
-               arguments and > when there are any) */
-            bool qualified = q.size() == 2 &&
-                             q[0].is(syntax_kind::nested_name_specifier) &&
-                             q[1].is_identifier();
-            if (pack || !q.size() || (!qualified && !q[0].is_identifier()))
-                return false;
-            enc.write(terminal::Tk_constrained_parameter_decl);
-            if (!type_constraint(function, q))
+            if (pack || !constrained_parameter_decl(function, q))
                 return false;
         }
         bool inner_pack = false;
@@ -239,6 +235,22 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
     return true;
 }
 
+/* [impl.clang] a type-parameter with a type-constraint q of template t's:
+   Tk, the concept's name and the constraint's template arguments (Tk1C for
+   C<> too) */
+bool itanium_mangler::constrained_parameter_decl(entity_index t, SyntaxRef q)
+{
+    /* (the type-constraint's concept-name, then its <, arguments and >
+       when there are any) */
+    bool qualified = q.size() == 2 &&
+                     q[0].is(syntax_kind::nested_name_specifier) &&
+                     q[1].is_identifier();
+    if (!q.size() || (!qualified && !q[0].is_identifier()))
+        return false;
+    enc.write(terminal::Tk_constrained_parameter_decl);
+    return type_constraint(t, q);
+}
+
 /*
  * [abi:mangle.function-type]'s <type> ::= Dp <type> of a template's own
  * pack, a candidate after its pattern ([abi:mangling-compression])
@@ -305,6 +317,26 @@ bool itanium_mangler::template_template_arg(entity_index t, uint32_t parameter)
     }
     enc.add_candidate(x);
     return true;
+}
+
+/* the <expression> of a dependent value an alias template's parameter is
+   bound to: its structure, or the expression as written with the names
+   bound in it */
+bool itanium_mangler::expression_of_bound_value(entity_index d)
+{
+    if (analysis.entity_table[d].value)
+        return expression_of_dependent_value(d);
+    const struct type &w = record(analysis.entity_table[d].type);
+    if (w.kind != type_kind::dependent ||
+        analysis.entity_table[w.entity].kind != entity_kind::dependent_written)
+        return false;
+    SyntaxRef n = SyntaxRef(node_index(
+        static_cast<uint32_t>(analysis.entity_table[w.entity].value)));
+    scoped_value<uint32_t> first(written_first,
+                                 analysis.entity_table[w.entity].first_member);
+    scoped_value<uint32_t> count(written_count,
+                                 analysis.entity_table[w.entity].member_count);
+    return expression_of_written(n);
 }
 
 bool itanium_mangler::template_arg_of_dependent_value(entity_index d)

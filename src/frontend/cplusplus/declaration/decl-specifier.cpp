@@ -185,13 +185,16 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
             } else if (kind == name_kind::type_name ||
                        kind == name_kind::template_name) {
                 class_name = name;
+                /* [temp.dep.type]/1: a typedef-name of the current
+                   instantiation is dependent, but its members are known */
                 class_known =
-                    !found_dependent && found &&
+                    found &&
                     (p.names.kind_of(found) == scope_kind::class_ ||
-                     p.names.kind_of(found) == scope_kind::enumeration);
+                     p.names.kind_of(found) == scope_kind::enumeration) &&
+                    (!found_dependent || p.names.encloses_current(found));
                 if (class_known)
                     scope = found;
-                dependent = dependent || found_dependent;
+                dependent = dependent || (found_dependent && !class_known);
             } else if (kind == name_kind::not_declared && template_keyword) {
                 class_name = name;
                 class_known = false;
@@ -611,9 +614,11 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                    !at(preprocessing_op_or_punc::ELLIPSIS, 1)) {
             if (facts.has_defining_type_specifier)
                 break;
+            last_type_region = 0;
             typename_specifier();
             if (failed())
                 return 0;
+            facts.type_region = last_type_region;
             facts.has_defining_type_specifier = true;
         } else if (at(extension_keyword::type_transformation)) {
             /* [ext.clang] a simple-type-specifier */
@@ -709,8 +714,15 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                             placeholder_mark, placeholder_first);
                 facts.has_defining_type_specifier = true;
                 k = standard_keyword::auto_;
-            } else if (c == name_class::type || (c == name_class::dependent &&
-                                                 facts.implicit_typename)) {
+            } else if (c == name_class::type ||
+                       (c == name_class::dependent &&
+                        facts.implicit_typename) ||
+                       (c == name_class::unknown &&
+                        (facts.alias_type_id ||
+                         (facts.implicit_typename && length > 1)) &&
+                        !facts.has_defining_type_specifier &&
+                        !at(preprocessing_op_or_punc::LESS, length) &&
+                        !at(preprocessing_op_or_punc::COLON_COLON, length))) {
                 last_type_region = 0;
                 simple_type_specifier_with_name();
                 if (failed())
@@ -1397,7 +1409,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                             named_concept =
                                 constraint_concept(current_scope, q[0].token());
                         if (!named_concept ||
-                            function_templates[concept_of(named_concept) - 1]
+                            function_templates[concept_of(named_concept)]
                                     .parameter_count != 1)
                             return not_supported_because(
                                 c[0].index(), "temp.param",
@@ -1525,7 +1537,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 k.alone++;
             named = entity_table[e].type.unqualified();
             cv |= entity_table[e].type.cv();
-            s.typedef_aligned = entity_table[e].alignment;
+            s.typedef_aligned = entity_table[e].details().alignment;
             named_at = t;
             continue;
         }
@@ -2079,7 +2091,7 @@ analysis_result semantic_analysis::named_member_type(
                                    "class.access");
     /* [ext:gnu_attributes] a qualified typedef-name's aligned */
     if (entity_table[e].kind == entity_kind::typedef_name &&
-        entity_table[e].alignment)
+        entity_table[e].details().alignment)
         return not_supported_because(
             n, "ext.gnu", "a qualified typedef-name with an aligned attribute");
     used(t, e);

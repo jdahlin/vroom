@@ -26,7 +26,7 @@ bool itanium_mangler::name(entity_index e)
     const entities &table = analysis.entity_table;
     entity_index scope = table[e].enclosing;
     /* (a closure type with a <data-member-prefix> is a <nested-name>) */
-    if ((scope == 0 || is_std(scope)) && !table[e].closure_variable)
+    if ((scope == 0 || is_std(scope)) && !table[e].details().closure_variable)
         return unscoped_name(e);
     entity_index local_class = 0;
     entity_index local = local_function(e, &local_class);
@@ -38,7 +38,7 @@ bool itanium_mangler::name(entity_index e)
         /* [abi:mangling-scope] a default argument's scope:
            d [<number>] _ */
         if (uint32_t parameter =
-                table[local_class].default_argument_parameter) {
+                table[local_class].details().default_argument_parameter) {
             enc.write(terminal::d_default_argument);
             if (parameter > 1)
                 enc.number(parameter - 2);
@@ -287,14 +287,14 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
         enc.source_name("_GLOBAL__N_1");
         return true;
     }
-    if (x.kind == entity_kind::variable && x.binding_count) {
+    if (x.kind == entity_kind::variable && x.details().binding_count) {
         /* [abi:mangle.name] "<unqualified-name> ::= DC <source-name>+ E":
            a structured binding declaration's variable e ([dcl.struct.bind]/1),
            by its structured bindings' names; [impl.clang] without L for
            internal linkage */
         enc.write(terminal::DC_structured_binding);
-        for (uint32_t k = 0; k < x.binding_count; k++)
-            if (!source_name(table[x.first_binding + k].name))
+        for (uint32_t k = 0; k < x.details().binding_count; k++)
+            if (!source_name(table[x.details().first_binding + k].name))
                 return false;
         enc.write(terminal::E_end);
         return true;
@@ -315,7 +315,7 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
     if (x.special != special_member::none) {
         /* [impl.clang] an inherited default constructor is named as
            the class's own */
-        entity_index inherited = x.inherited_constructor;
+        entity_index inherited = x.details().inherited_constructor;
         if (!analysis.type_table[x.type.unqualified()].parameter_count)
             inherited = 0;
         return ctor_dtor_name(x.special, inherited);
@@ -346,9 +346,9 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
             return true;
         }
     }
-    if (x.kind == entity_kind::class_type && x.lambda)
+    if (x.kind == entity_kind::class_type && x.details().lambda)
         return closure_type_name(e);
-    bool unnamed = !x.name && !x.linkage_name &&
+    bool unnamed = !x.name && !x.details().linkage_name &&
                    (x.kind == entity_kind::class_type ||
                     x.kind == entity_kind::enumeration);
     if (unnamed) {
@@ -374,8 +374,8 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
         uint64_t before = 0;
         for (entity_index other{1}; other < e; other++) {
             const entity &k = table[other];
-            if (k.enclosing == x.enclosing && !k.name && !k.linkage_name &&
-                !k.lambda &&
+            if (k.enclosing == x.enclosing && !k.name &&
+                !k.details().linkage_name && !k.details().lambda &&
                 (k.kind == entity_kind::class_type ||
                  k.kind == entity_kind::enumeration))
                 before++;
@@ -394,8 +394,8 @@ bool itanium_mangler::unqualified_name_without_tags(entity_index e,
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
                     x.kind == entity_kind::enumeration)) {
-        if (x.linkage_name)
-            return source_name(x.linkage_name);
+        if (x.details().linkage_name)
+            return source_name(x.details().linkage_name);
         return false;
     }
     return source_name(x.name);
@@ -444,8 +444,8 @@ bool itanium_mangler::ctor_dtor_name(special_member which,
            constructors is named by the class that declares the original;
            the class is no substitution candidate here */
         const entities &table = analysis.entity_table;
-        while (table[inherited].inherited_constructor)
-            inherited = table[inherited].inherited_constructor;
+        while (table[inherited].details().inherited_constructor)
+            inherited = table[inherited].details().inherited_constructor;
         return class_enum_type(qualified_type::make(
             table[table[inherited].enclosing].type.unqualified(), cv_none));
     }
@@ -523,7 +523,7 @@ bool itanium_mangler::source_name(uint32_t identifier)
  */
 bool itanium_mangler::operator_name(const entity &x)
 {
-    switch (x.allocation) {
+    switch (x.details().allocation) {
     case allocation_function::new_:
         enc.write(itanium_operator::nw_new_);
         return true;
@@ -546,9 +546,9 @@ bool itanium_mangler::operator_name(const entity &x)
     unsigned arity = 2;
     if (operands == 1)
         arity = 1;
-    itanium_operator o = operator_written(x.implemented, arity);
+    itanium_operator o = operator_written(x.details().implemented, arity);
     for (unsigned other = 0; o == itanium_operator::none && other < 4; other++)
-        o = operator_written(x.implemented, other);
+        o = operator_written(x.details().implemented, other);
     if (o == itanium_operator::none)
         return false;
     enc.write(o);

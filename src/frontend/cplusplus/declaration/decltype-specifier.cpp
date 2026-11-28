@@ -51,11 +51,11 @@ bool semantic_analysis::decltype_of(const expression_meaning &m, bool named,
         }
         const semantic_node &n = semantics[m.node];
         if (n.kind == semantic_kind::entity && n.a) {
-            type = entity_table[entity_index_in(n.a)].type;
+            type = entity_table[n.entity_a()].type;
             return true;
         }
         if (n.kind == semantic_kind::member && n.b) {
-            type = entity_table[entity_index_in(n.b)].type;
+            type = entity_table[n.entity_b()].type;
             return true;
         }
         /* an enumerator: a prvalue of its enumeration's type */
@@ -220,7 +220,7 @@ bool semantic_analysis::names_dependent_entity(token_index first,
             !depends_on_template_parameter(entity_table[e].type))
             continue;
         if ((k == entity_kind::none &&
-             (entity_table[e].instantiation ||
+             (entity_table[e].template_record ||
               (entity_table[e].argument_bound &&
                depends_on_template_parameter(entity_table[e].type)))) ||
             is_template_template_parameter(e))
@@ -253,6 +253,88 @@ bool semantic_analysis::ends_in_ellipsis(SyntaxElement a) const
 {
     return a.is_node() && is_operator(tokens[a.end_token() - 1],
                                       preprocessing_op_or_punc::ELLIPSIS);
+}
+
+/* a pack of values an instantiation bound (empty: any bound pack that
+   does not depend, whose expansion is nothing either way) */
+bool semantic_analysis::value_pack(entity_index pack) const
+{
+    for (uint32_t i = 0; i < entity_table[pack].member_count; i++) {
+        entity_index a = pack_elements[entity_table[pack].value + i];
+        if (!a || entity_table[a].kind != entity_kind::enumerator)
+            return false;
+    }
+    return true;
+}
+
+/* [impl.clang] a call of a function named by a qualified-id none of whose
+   operands depends on a template parameter (libc++'s
+   std::get<_Idx>(__bound_args_) in a call wrapper's member): the
+   specialization it calls, which clang names (L _Z <encoding> E); in an
+   expansion over an index pack of the class, one for each element */
+void semantic_analysis::collect_written_calls(
+    SyntaxElement x, uint32_t element, owned_array<written_binding> &found)
+{
+    if (!x.is_node())
+        return;
+    if (x.is(syntax_kind::initializer_list)) {
+        owned_array<SyntaxElement> items;
+        for (auto item : x.items(syntax_kind::initializer_list))
+            items.append(item);
+        for (size_t i = 0; i < items.size(); i++) {
+            if (items[i].is(preprocessing_op_or_punc::ELLIPSIS))
+                continue;
+            bool expanded = i + 1 < items.size() &&
+                            items[i + 1].is(preprocessing_op_or_punc::ELLIPSIS);
+            if (!expanded) {
+                collect_written_calls(items[i], element, found);
+                continue;
+            }
+            if (!items[i].is_node())
+                continue;
+            uint32_t count = 0;
+            bool own = false;
+            if (!expansion_count(items[i].first_token(), items[i].end_token(),
+                                 count, &own) ||
+                own)
+                continue;
+            for (uint32_t k = 0; k < count; k++)
+                collect_written_calls(items[i], k, found);
+        }
+        return;
+    }
+    if (x.is(syntax_kind::postfix_expression) &&
+        (x.size() == 3 || x.size() == 4) &&
+        x[0].is(syntax_kind::qualified_id) &&
+        x[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        !names_dependent_entity(x.first_token(), x.end_token())) {
+        size_t unsupported_before = unsupported.size();
+        expression_meaning m;
+        analysis_result r = analysis_result::well_formed;
+        {
+            expansion_scope expanding_pattern(*this, element != UINT32_MAX,
+                                              element);
+            unevaluated++;
+            r = expression(x, m);
+            unevaluated--;
+        }
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed && m.node &&
+            semantics[m.node].kind == semantic_kind::call) {
+            uint32_t callee = semantics[m.node].a;
+            if (callee && semantics[callee].kind == semantic_kind::entity) {
+                written_binding b;
+                SyntaxRef whole = x;
+                b.cast = whole.index().index();
+                b.element = element;
+                b.specialization = entity_index_in(semantics[callee].a);
+                b.type = m.type;
+                found.append(b);
+            }
+        }
+    }
+    for (SyntaxElement c : x.elements())
+        collect_written_calls(c, element, found);
 }
 
 /* [impl.clang] a pack expansion among a template-id's written arguments whose pattern
@@ -381,7 +463,7 @@ void semantic_analysis::collect_written_casts(
                 written_binding b;
                 SyntaxRef named = x[0];
                 b.cast = named.index().index();
-                b.specialization = entity_index_in(semantics[callee].a);
+                b.specialization = semantics[callee].entity_a();
                 b.type = m.type;
                 found.append(b);
             }
@@ -613,12 +695,13 @@ void semantic_analysis::collect_written_casts(
         if (!ok)
             found.resize(before);
     }
-    /* A<args>(), A an alias template: the type it names, for cv <type> _ E
-       (cast the template-id's node) */
-    if (x.is(syntax_kind::postfix_expression) && x.size() == 3 &&
+    /* A<args>() and A<args>(e...), A a class or alias template: the type it
+       names, for cv <type> (cast the template-id's node) */
+    if (x.is(syntax_kind::postfix_expression) &&
+        (x.size() == 3 || x.size() == 4) &&
         x[0].is(syntax_kind::simple_template_id) &&
         x[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
-        x[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS) &&
+        x[x.size() - 1].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS) &&
         x[0][0].is_identifier()) {
         lookup_result named = lookup_unqualified(
             tokens.identifier(x[0][0].token()), lookup_filter::any);
@@ -738,6 +821,7 @@ void semantic_analysis::collect_written_bindings(
         }
     }
     collect_written_casts(n, found);
+    collect_written_calls(n, UINT32_MAX, found);
     for (token_index t = n.first_token(); t < n.end_token(); t++) {
         if (tokens[t].kind != token_kind::identifier)
             continue;
@@ -749,6 +833,18 @@ void semantic_analysis::collect_written_bindings(
             continue;
         lookup_result x = lookup_unqualified(id, lookup_filter::any);
         entity_index e = x.entity;
+        /* a non-type parameter an alias template bound to a value-dependent
+           argument, which mangling spells in its place */
+        entity_index value = e;
+        if (!value)
+            value = x.unknown_entity;
+        if (value && entity_table[value].kind == entity_kind::dependent_value) {
+            written_binding b;
+            b.identifier = id;
+            b.specialization = value;
+            found.append(b);
+            continue;
+        }
         if (e) {
             /* (a template parameter's own name is no binding) */
             const struct type &r =
@@ -782,6 +878,28 @@ void semantic_analysis::collect_written_bindings(
             }
         }
         entity_index pack = find_pack(id);
+        /* [impl.clang] a class template's index pack: each element's value,
+           which the mangler expands */
+        if (pack && value_pack(pack)) {
+            for (uint32_t i = 0; i < entity_table[pack].member_count; i++) {
+                written_binding b;
+                b.identifier = id;
+                b.element = i;
+                b.pack_position = entity_table[pack].first_member;
+                b.specialization = pack_elements[entity_table[pack].value + i];
+                b.type = entity_table[b.specialization].type;
+                found.append(b);
+            }
+            if (!entity_table[pack].member_count) {
+                written_binding b;
+                b.identifier = id;
+                b.element = UINT32_MAX - 1;
+                b.pack_position = entity_table[pack].first_member;
+                b.specialization = pack;
+                found.append(b);
+            }
+            continue;
+        }
         /* (sizeof...(P) is mangled by P's position whatever P is) */
         bool measured =
             t.index() >= 2 &&

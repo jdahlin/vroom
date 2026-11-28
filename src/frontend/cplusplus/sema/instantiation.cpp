@@ -46,11 +46,11 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
     scoped_value<bool> nested(collecting_candidates, false);
     specialization = 0;
     const entity t = entity_table[template_entity];
-    if (t.kind != entity_kind::template_entity || !t.instantiation)
+    if (t.kind != entity_kind::template_entity || !t.template_record)
         return not_supported_because(at, "temp.inst",
                                      "an instantiation of an entity that is no "
                                      "template with a recorded pattern");
-    const function_template ft = function_templates[t.instantiation - 1];
+    const function_template ft = function_templates[t.template_record];
     if (count != ft.parameter_count)
         return not_supported_because(at, "temp.inst",
                                      "an instantiation with a different number "
@@ -211,16 +211,44 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             /* (nor are its diagnostics the program's: a map's
                `= key_compare()` of a comparison without a default
                constructor) */
-            substitution_mark default_mark = mark_substitution();
-            substituting++;
-            analysis_result checked = default_arguments(
-                ft.declarator, e, entity_kind::function, true);
-            substituting--;
-            if (checked != analysis_result::well_formed) {
-                undo_substitution(default_mark);
-                unsupported.resize(unsupported_before);
-                entity_table[e].unknown_defaults = true;
+            /* (those another declaration than ft.declarator gave) */
+            for (const template_default_argument &d :
+                 template_default_arguments)
+                if (d.template_index == t.template_record.number() &&
+                    d.parameter < function_parameters.size() &&
+                    !function_parameters[d.parameter].default_argument)
+                    function_parameters[d.parameter].default_argument =
+                        d.argument;
+            /* one default that is ill-formed for these arguments (a
+               lambda's `Compare comp = {}`) leaves the ones after it: a
+               call that passes that argument takes them */
+            analysis_result checked = analysis_result::ill_formed;
+            for (size_t skip = 0; checked != analysis_result::well_formed &&
+                                  skip < function_parameters.size();
+                 skip++) {
+                if (skip) {
+                    if (!function_parameters[skip - 1].default_argument)
+                        continue;
+                    function_parameters[skip - 1].default_argument = {};
+                    bool left = false;
+                    for (const parameter_meaning &p : function_parameters)
+                        if (p.default_argument)
+                            left = true;
+                    if (!left)
+                        break;
+                }
+                substitution_mark default_mark = mark_substitution();
+                substituting++;
+                checked = default_arguments(ft.declarator, e,
+                                            entity_kind::function, true);
+                substituting--;
+                if (checked != analysis_result::well_formed) {
+                    undo_substitution(default_mark);
+                    unsupported.resize(unsupported_before);
+                }
             }
+            if (checked != analysis_result::well_formed)
+                entity_table[e].unknown_defaults = true;
         }
         current_scope = saved_scope;
         lookup_horizon = saved_horizon;
@@ -306,10 +334,10 @@ semantic_analysis::need_specialization_definition(SyntaxRef at, entity_index f)
 {
     if (!entity_table[f].instantiation || unevaluated)
         return analysis_result::well_formed;
-    uint32_t idx = entity_table[f].instantiation - 1;
+    uint32_t idx = entity_table[f].instantiation.index();
     instantiation_record &rec = instantiations[idx];
     const entity tmpl = entity_table[rec.template_entity];
-    const function_template ft = function_templates[tmpl.instantiation - 1];
+    const function_template ft = function_templates[tmpl.template_record];
     if (rec.pending && !quiet_member_bodies)
         rec.quiet = false;
     if (rec.defined || rec.defining || rec.pending)
@@ -384,8 +412,9 @@ semantic_analysis::quiet_definition_failed(SyntaxRef at, uint32_t index,
         not_supported_because(at, "temp.inst", what);
     body_failures.append(unsupported[before]);
     unsupported.resize(before);
-    entity_table[x.specialization].unsupported_body =
-        static_cast<uint32_t>(body_failures.size());
+    entity_table[x.specialization].set(
+        &entity_details::unsupported_body,
+        static_cast<uint32_t>(body_failures.size()));
     /* (the quiet body that wanted it fails too, and is left undefined:
        no code calls a specialization that has none) */
     return r;
@@ -415,7 +444,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
             "function or variable instantiations nested 64 deep or more");
     entity_index template_entity = instantiations[index].template_entity;
     const function_template ft =
-        function_templates[entity_table[template_entity].instantiation - 1];
+        function_templates[entity_table[template_entity].template_record];
     size_t unsupported_before = unsupported.size();
     uint32_t hidden_before = horizon_hidden;
     bool quiet = instantiations[index].quiet;
@@ -444,6 +473,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     scoped_value<unsigned> outside(substituting, 0);
     uint32_t dependent_before = dependent_errors;
     uint32_t independent_before = independent_errors;
+    uint32_t deleted_before = deleted_references;
     enter_instantiation(context, instantiations[index].scope, ft.declaration);
     expanding = false;
     instantiating = index + 1;
@@ -544,12 +574,14 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
            in an unevaluated operand is as well-formed as before.) */
         entity_index f = instantiations[index].specialization;
         body_failures.append(unsupported[unsupported_before]);
-        entity_table[f].unsupported_body =
-            static_cast<uint32_t>(body_failures.size());
+        entity_table[f].set(&entity_details::unsupported_body,
+                            static_cast<uint32_t>(body_failures.size()));
     }
     explicit_instantiation_verdict(
         instantiations[index].specialization, r,
-        entity_table[instantiations[index].specialization].unsupported_body,
+        entity_table[instantiations[index].specialization]
+            .details()
+            .unsupported_body,
         dependent);
     /* a generic lambda's specialization is no declaration of its own: an
        ill-formed body is the enclosing declaration's error (its use there
@@ -560,6 +592,14 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     if (r == analysis_result::ill_formed && dependent &&
         instantiations[index].wanted_by)
         use_ill_formed(instantiations[index].wanted_by);
+    /* [impl.clang] a deleted function referred to by another template's
+       declaration (a non-type parameter's type, substituted here) is
+       reported there: not this pattern's error */
+    if (r == analysis_result::ill_formed &&
+        deleted_references > deleted_before &&
+        (deleted_reference_at < ft.declaration.first_token() ||
+         deleted_reference_at >= ft.declaration.end_token()))
+        return r;
     for (analysed_declaration &d : declarations) {
         if (d.node != ft.declaration || d.result == analysis_result::ill_formed)
             continue;
@@ -583,6 +623,14 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         r == analysis_result::unsupported &&
         unsupported.size() > unsupported_before &&
         !strcmp(unsupported[unsupported_before].detail, "if consteval");
+    /* ... an explicit instantiation's too, whose errors are its own: one
+       that fails is not known to be well-formed */
+    SyntaxRef requester = instantiations[index].requested_by;
+    if (r != analysis_result::well_formed &&
+        unsupported.size() > unsupported_before && requester &&
+        requester != ft.declaration &&
+        requester.is(syntax_kind::explicit_instantiation))
+        charge_requester(requester, unsupported_before);
     if (r == analysis_result::unsupported &&
         unsupported.size() > unsupported_before &&
         (horizon_hidden != hidden_before || undecided_body) &&
@@ -642,8 +690,8 @@ void semantic_analysis::lambda_error_in_enclosing(SyntaxRef lambda)
  * specialization), which would recurse without the depth growing.
  */
 analysis_result semantic_analysis::specialization_matching_in_progress(
-    SyntaxRef at, uint32_t class_template, const template_argument *arguments,
-    uint32_t count)
+    SyntaxRef at, template_ref class_template,
+    const template_argument *arguments, uint32_t count)
 {
     for (const class_matching &m : class_matchings) {
         if (m.class_template != class_template || m.count != count)
@@ -673,12 +721,14 @@ analysis_result semantic_analysis::specialization_matching_in_progress(
  * functions defined in it are analysed with it (/4 would instantiate a
  * member's definition only when used).
  */
-analysis_result semantic_analysis::instantiate_class(
-    SyntaxRef at, uint32_t class_template, const template_argument *arguments,
-    uint32_t count, entity_index &c, bool named_only)
+analysis_result
+semantic_analysis::instantiate_class(SyntaxRef at, template_ref class_template,
+                                     const template_argument *arguments,
+                                     uint32_t count, entity_index &c,
+                                     bool named_only)
 {
     c = 0;
-    const function_template ft = function_templates[class_template - 1];
+    const function_template ft = function_templates[class_template];
     /* [temp.inst]/2: naming a specialization in a declaration can
        leave it incomplete. For example, a function may return
        optional<ForwardDeclared> before ForwardDeclared is defined. */
@@ -692,7 +742,7 @@ analysis_result semantic_analysis::instantiate_class(
                 type_table[arguments[i].type.unqualified()];
             if (arg.kind != type_kind::class_type ||
                 entity_table[arg.entity].kind != entity_kind::class_type ||
-                entity_table[arg.entity].size)
+                entity_table[arg.entity].details().size)
                 continue;
             bool self = defining_class && arg.entity == defining_class;
             /* a specialization that is itself waiting for the class being
@@ -739,7 +789,8 @@ analysis_result semantic_analysis::instantiate_class(
         /* a specialization named before its template was defined
            ([temp.inst]/2's "declared specialization" is not one): defined
            now that the template is */
-        if (entity_table[c].defined || x.defining)
+        if (entity_table[c].defined || x.defining ||
+            naming_friend == entity_table[ft.entity].name)
             return analysis_result::well_formed;
         /* the pattern again: a specialization declared since it was
            named ([temp.class.spec.match]) */
@@ -751,6 +802,7 @@ analysis_result semantic_analysis::instantiate_class(
                                             arguments, count);
         VTRY(matched, matching_specialization(at, class_template, arguments,
                                               count, pattern, deduced));
+        instantiations[k].unmatched = false;
         if (pattern != x.pattern) {
             instantiation_record &y = instantiations[k];
             y.pattern = pattern;
@@ -805,8 +857,15 @@ analysis_result semantic_analysis::instantiate_class(
        primary's or a specialization's */
     uint32_t pattern = 0;
     owned_array<template_argument> deduced;
-    VTRY(matched, matching_specialization(at, class_template, arguments, count,
-                                          pattern, deduced));
+    /* [temp.friend]/1, [temp.inst]/2: a specialization only named (a
+       friend) chooses no pattern, which may be ambiguous by the time one
+       is declared; the use that defines it matches then */
+    /* (the friend's own specialization, not one its arguments need) */
+    record.unmatched = naming_friend == entity_table[ft.entity].name;
+    if (!record.unmatched) {
+        VTRY(matched, matching_specialization(at, class_template, arguments,
+                                              count, pattern, deduced));
+    }
     record.pattern = pattern;
     record.first_argument = static_cast<uint32_t>(template_arguments.size());
     record.argument_count = count;
@@ -836,7 +895,7 @@ analysis_result semantic_analysis::instantiate_class(
             entity_table[ft.entity].linkage_of_name;
         entity_table[c].type = qualified_type::make(
             type_table.of_entity(type_kind::class_type, c), cv_none);
-        entity_table[c].instantiation = index + 1;
+        entity_table[c].instantiation = instantiation_ref::at(index);
         instantiations[index].specialization = c;
         instantiations[index].named_before_definition = !defined_by;
         /* (declared while the specializations of a class are declared:
@@ -858,9 +917,9 @@ void semantic_analysis::complete_instantiation(entity_index c)
     if (!c || entity_table[c].kind != entity_kind::class_type)
         return;
     const entity &x = entity_table[c];
-    if (!x.instantiation || x.defined || x.size)
+    if (!x.instantiation || x.defined || x.details().size)
         return;
-    uint32_t index = x.instantiation - 1;
+    uint32_t index = x.instantiation.index();
     if (instantiations[index].defining)
         return;
     if (!instantiations[index].lazy) {
@@ -869,11 +928,14 @@ void semantic_analysis::complete_instantiation(entity_index c)
            was made an incomplete class: the use that needs it complete
            names it again, where the template defines it now */
         const instantiation_record record = instantiations[index];
-        if (!record.named_before_definition || record.has_failure ||
-            !record.specialization ||
-            !function_templates
-                 [entity_table[record.template_entity].instantiation - 1]
-                     .definition)
+        /* (a friend's, with no pattern chosen: a partial specialization
+           may define it) */
+        if (record.has_failure || !record.specialization ||
+            (!record.unmatched &&
+             (!record.named_before_definition ||
+              !function_templates[entity_table[record.template_entity]
+                                      .template_record]
+                   .definition)))
             return;
         owned_array<template_argument> again;
         for (uint32_t i = 0; i < record.argument_count; i++) {
@@ -885,7 +947,7 @@ void semantic_analysis::complete_instantiation(entity_index c)
                 const struct type &arg = type_table[a.type.unqualified()];
                 if (arg.kind == type_kind::class_type &&
                     entity_table[arg.entity].kind == entity_kind::class_type &&
-                    (!entity_table[arg.entity].size ||
+                    (!entity_table[arg.entity].details().size ||
                      !entity_table[arg.entity].defined))
                     return;
             }
@@ -893,7 +955,7 @@ void semantic_analysis::complete_instantiation(entity_index c)
         }
         entity_index done = 0;
         instantiate_class(current_declaration,
-                          entity_table[record.template_entity].instantiation,
+                          entity_table[record.template_entity].template_record,
                           again.data(), record.argument_count, done);
         return;
     }
@@ -908,7 +970,7 @@ bool semantic_analysis::require_complete(entity_index c) const
         return true;
     const_cast<semantic_analysis *>(this)->complete_instantiation(c);
     const entity &x = entity_table[c];
-    return x.size || x.defined;
+    return x.details().size || x.defined;
 }
 
 bool semantic_analysis::require_complete(qualified_type t) const
@@ -938,6 +1000,28 @@ analysis_result semantic_analysis::define_class_outside(SyntaxRef at,
     return r;
 }
 
+/* [temp.class.spec.match]: the pattern of a class specialization that a
+   friend declaration only named, chosen when it is defined */
+analysis_result semantic_analysis::choose_pattern(SyntaxRef at, uint32_t index)
+{
+    const instantiation_record x = instantiations[index];
+    template_ref class_template = class_template_of(x.template_entity);
+    owned_array<template_argument> arguments;
+    for (uint32_t i = 0; i < x.argument_count; i++)
+        arguments.append(template_arguments[x.first_argument + i]);
+    uint32_t pattern = 0;
+    owned_array<template_argument> deduced;
+    VTRY(matched, matching_specialization(at, class_template, arguments.data(),
+                                          x.argument_count, pattern, deduced));
+    instantiation_record &y = instantiations[index];
+    y.unmatched = false;
+    y.pattern = pattern;
+    y.first_deduced = static_cast<uint32_t>(template_arguments.size());
+    for (const template_argument &a : deduced)
+        template_arguments.append(a);
+    return analysis_result::well_formed;
+}
+
 /*
  * The class of instantiations[index], defined: its template's (or partial
  * specialization's) class-specifier analysed again, then the member
@@ -963,10 +1047,13 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
         return not_supported_because(at, "temp.inst",
                                      "class instantiations nested 64 deep or "
                                      "more (defining a specialization)");
+    if (instantiations[index].unmatched) {
+        VTRY(chosen, choose_pattern(at, index));
+    }
     const instantiation_record record = instantiations[index];
     const function_template ft =
-        function_templates[entity_table[record.template_entity].instantiation -
-                           1];
+        function_templates[entity_table[record.template_entity]
+                               .template_record];
     function_template definition = ft;
     if (record.pattern)
         definition = function_templates[record.pattern - 1];
@@ -1204,22 +1291,23 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     entity_index scope = instantiations[b.instantiation].specialization;
     /* (a virtual function is needed by the vtable, [temp.inst]/11; an
        explicit instantiation of the class defines its members, /10) */
-    if (entity_table[scope].explicitly_instantiated ==
+    if (entity_table[scope].details().explicitly_instantiated ==
         instantiation_kind::definition)
         return true;
     /* [temp.explicit]/11: an explicit instantiation declaration names a
        class whose vtable another unit emits: its virtual functions are not
        needed by one [impl.clang] */
-    bool vtable_elsewhere = entity_table[scope].explicitly_instantiated ==
-                            instantiation_kind::declaration;
+    bool vtable_elsewhere =
+        entity_table[scope].details().explicitly_instantiated ==
+        instantiation_kind::declaration;
     if (name && lookup_id == entity_table[scope].name) {
-        if (entity_index d = entity_table[scope].destructor)
+        if (entity_index d = entity_table[scope].details().destructor)
             if (entity_table[d].member_definition_needed ||
                 (entity_table[d].virtual_ && !vtable_elsewhere) ||
                 explicitly_instantiated(d) == instantiation_kind::definition)
                 return true;
-        for (entity_index k = entity_table[scope].first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = entity_table[scope].details().first_constructor;
+             k; k = entity_table[k].details().next_constructor)
             if (entity_table[k].member_definition_needed ||
                 explicitly_instantiated(k) == instantiation_kind::definition)
                 return true;
@@ -1234,7 +1322,8 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     /* (the overloads it may define: those with as many parameters, a
        definition declaring one function, [dcl.meaning]/1) */
     int written = definition_parameter_count(o.definition);
-    for (entity_index e = first; e; e = entity_table[e].next_overload) {
+    for (entity_index e = first; e;
+         e = entity_table[e].details().next_overload) {
         if (written >= 0 && entity_table[e].kind == entity_kind::function &&
             type_table[entity_table[e].type.unqualified()].kind ==
                 type_kind::function &&
@@ -1316,6 +1405,39 @@ bool semantic_analysis::explicit_instantiation_takes_verdict(
            !strncmp(rule, "dcl.fct.def.coroutine", 21);
 }
 
+/* [class.dtor]/15: a static data member defined here is destroyed at the
+   program's end.  Asked for here, not at its declaration: its class may be
+   completed only later (a specialization over the class that has the
+   member).  Whether its destructor became needed */
+bool semantic_analysis::static_member_destructor_needed(qualified_type type)
+{
+    while (type_table[type.unqualified()].kind == type_kind::array)
+        type = type_table[type.unqualified()].operand;
+    const auto &object = type_table[type.unqualified()];
+    if (object.kind != type_kind::class_type)
+        return false;
+    entity_index destructor = entity_table[object.entity].details().destructor;
+    if (!destructor || entity_table[destructor].member_definition_needed)
+        return false;
+    entity_table[destructor].member_definition_needed = true;
+    return true;
+}
+
+/* [class.dtor]/12, [basic.def.odr]/8: the deallocation function a virtual
+   destructor's class chose is odr-used where the destructor is defined:
+   here by the deleting destructor, which the class's virtual table names.
+   Whether it became needed */
+bool semantic_analysis::deleting_destructor_needs(entity_index c)
+{
+    const dynamic_class *d = dynamic_of(c);
+    if (!d || !d->deallocation ||
+        entity_table[d->deallocation].member_definition_needed ||
+        !virtual_table_needed(c))
+        return false;
+    entity_table[d->deallocation].member_definition_needed = true;
+    return true;
+}
+
 /* [basic.def.odr]/11, [temp.inst]/4: a function whose definition the
    translation unit emits (one defined, its body analysed, and not an
    explicit instantiation declaration's specialization, [temp.explicit]/11;
@@ -1333,9 +1455,18 @@ bool semantic_analysis::emitted_functions_needed()
         if (f.index() + 16 < entity_table.size())
             __builtin_prefetch(&entity_table[f + 16]);
         entity &x = entity_table[f];
+        if (x.kind == entity_kind::variable && x.defined &&
+            !x.nonstatic_member && !x.automatic && x.enclosing &&
+            entity_table[x.enclosing].kind == entity_kind::class_type) {
+            marked = static_member_destructor_needed(x.type) || marked;
+            continue;
+        }
+        if (x.kind == entity_kind::function && x.virtual_ &&
+            x.special == special_member::destructor)
+            marked = deleting_destructor_needs(x.enclosing) || marked;
         if (x.kind != entity_kind::function || !x.defined ||
             x.member_definition_needed || x.member_body_deferred ||
-            x.unsupported_body || x.deleted || x.implicit ||
+            x.details().unsupported_body || x.deleted || x.implicit ||
             (x.inline_ &&
              explicitly_instantiated(f) != instantiation_kind::definition))
             continue;
@@ -1395,7 +1526,9 @@ void semantic_analysis::instantiate_pending(bool at_end)
             while (explicit_class &&
                    entity_table[explicit_class].kind ==
                        entity_kind::class_type &&
-                   entity_table[explicit_class].explicitly_instantiated !=
+                   entity_table[explicit_class]
+                           .details()
+                           .explicitly_instantiated !=
                        instantiation_kind::definition)
                 explicit_class = entity_table[explicit_class].enclosing;
             bool explicit_ =
@@ -1414,8 +1547,10 @@ void semantic_analysis::instantiate_pending(bool at_end)
                 explicit_instantiation_verdict(explicit_class, r, failure,
                                                dependent);
             else if (r == analysis_result::ill_formed && dependent &&
-                     b.function && entity_table[b.function].member_needed_by)
-                use_ill_formed(entity_table[b.function].member_needed_by);
+                     b.function &&
+                     entity_table[b.function].details().member_needed_by)
+                use_ill_formed(
+                    entity_table[b.function].details().member_needed_by);
             progress = true;
         }
         for (; next_definition < pending_definitions.size();
@@ -1425,7 +1560,7 @@ void semantic_analysis::instantiate_pending(bool at_end)
                 continue;
             entity_index t = instantiations[index].template_entity;
             const function_template ft =
-                function_templates[entity_table[t].instantiation - 1];
+                function_templates[entity_table[t].template_record];
             if (!at_end && !instantiable_early(ft.declaration))
                 continue;
             if (!ft.definition) {
@@ -1462,6 +1597,21 @@ void semantic_analysis::instantiate_pending(bool at_end)
     pending_definitions.clear();
 }
 
+/* the template parameters of function template record bound to the arguments
+   of instantiation index in specialization e's scope: a definition may rename
+   a declaration's */
+void semantic_analysis::bind_specialization_parameters(entity_index e,
+                                                       uint32_t record,
+                                                       uint32_t index)
+{
+    const function_template ft = function_templates[record - 1];
+    const instantiation_record x = instantiations[index];
+    for (uint32_t i = 0; i < ft.parameter_count && i < x.argument_count; i++)
+        bind_template_argument(
+            e, template_parameter_entities[ft.first_parameter + i],
+            template_arguments[x.first_argument + i]);
+}
+
 /*
  * declare()'s part when the declarator is a specialization's
  * (instantiate): a function of the template's scope, with the template's
@@ -1483,6 +1633,10 @@ analysis_result semantic_analysis::declare_specialization(
         /* the definition of a specialization whose declaration was
            instantiated before */
         declared_entity = record.specialization;
+        bind_specialization_parameters(
+            declared_entity,
+            entity_table[record.template_entity].template_record.number(),
+            index);
         return analysis_result::well_formed;
     }
     /* (a copy: making the entity can move the table) */
@@ -1511,8 +1665,8 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].immediate = t.immediate;
     entity_table[e].operator_function = t.operator_function;
     entity_table[e].conversion_function = t.conversion_function;
-    entity_table[e].implemented = t.implemented;
-    entity_table[e].instantiation = index + 1;
+    entity_table[e].set(&entity_details::implemented, t.details().implemented);
+    entity_table[e].instantiation = instantiation_ref::at(index);
     /* a member function template's specialization: a member function of
        its class ([temp.mem]) */
     entity_table[e].nonstatic_member = t.nonstatic_member;
@@ -1524,7 +1678,7 @@ analysis_result semantic_analysis::declare_specialization(
     if (t.explicit_dependent)
         entity_table[e].explicit_ = s.explicit_;
     entity_table.add_declaration(e, declaration);
-    const function_template ft = function_templates[t.instantiation - 1];
+    const function_template ft = function_templates[t.template_record];
     entity_table[e].gnu_flags = ft.gnu_flags;
     entity_table[e].abi_tag = ft.abi_tag;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
@@ -1587,7 +1741,7 @@ analysis_result semantic_analysis::declare_variable_specialization(
     entity_table[e].defined = explicit_ || t.defined;
     if (!entity_table[e].defined)
         entity_table[e].inline_ = false;
-    entity_table[e].instantiation = index + 1;
+    entity_table[e].instantiation = instantiation_ref::at(index);
     entity_table.add_declaration(e, declaration);
     instantiations[index].specialization = e;
     declared_name d;
@@ -1611,7 +1765,7 @@ bool semantic_analysis::enumerator_value(entity_index e,
     fundamental_type underlying = fundamental_of(x.type);
     const struct type &record = type_table[x.type.unqualified()];
     if (record.kind == type_kind::enumeration)
-        underlying = entity_table[record.entity].underlying;
+        underlying = entity_table[record.entity].details().underlying;
     if (!fundamental_type_is_signed(tokens.files.behavior, underlying) ||
         static_cast<int64_t>(x.value) >= 0)
         return false;
@@ -1662,7 +1816,8 @@ bool semantic_analysis::specialization_dependent_value(entity_index e,
 bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
                                                  qualified_type &type) const
 {
-    for (uint32_t k = template_record(t); k; k = templates_by_entity.after(k)) {
+    for (uint32_t k = template_record(t).number(); k;
+         k = templates_by_entity.after(k)) {
         const function_template &ft = function_templates[k - 1];
         if (i >= ft.parameter_count)
             continue;
@@ -1685,7 +1840,8 @@ bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
 SyntaxRef semantic_analysis::parameter_type_constraint(entity_index t,
                                                        uint32_t i) const
 {
-    for (uint32_t k = template_record(t); k; k = templates_by_entity.after(k)) {
+    for (uint32_t k = template_record(t).number(); k;
+         k = templates_by_entity.after(k)) {
         const function_template &ft = function_templates[k - 1];
         if (i >= ft.parameter_count)
             continue;

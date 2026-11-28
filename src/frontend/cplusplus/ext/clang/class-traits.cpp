@@ -20,7 +20,7 @@ namespace cplusplus
 bool semantic_analysis::empty_class(entity_index c) const
 {
     const entity &x = entity_table[c];
-    if (x.union_ || x.dynamic || x.virtual_base_count)
+    if (x.union_ || x.details().dynamic || x.details().virtual_base_count)
         return false;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
@@ -35,13 +35,14 @@ bool semantic_analysis::empty_class(entity_index c) const
             type_table[m.type.unqualified()].kind == type_kind::class_type &&
             empty_class(type_table[m.type.unqualified()].entity))
             continue;
-        if (!m.bit_field || m.bit_width)
+        if (!m.bit_field || m.details().bit_width)
             return false;
     }
-    for (uint32_t i = 0; i < x.base_count; i++)
-        if (!empty_class(type_table[entity_table[class_bases[x.first_base + i]]
-                                        .type.unqualified()]
-                             .entity))
+    for (uint32_t i = 0; i < x.details().base_count; i++)
+        if (!empty_class(
+                type_table[entity_table[class_bases[x.details().first_base + i]]
+                               .type.unqualified()]
+                    .entity))
             return false;
     return true;
 }
@@ -51,7 +52,7 @@ bool semantic_analysis::empty_class(entity_index c) const
 bool semantic_analysis::copy_reads_nothing(entity_index c) const
 {
     const entity &x = entity_table[c];
-    if (x.union_ || x.dynamic || x.virtual_base_count)
+    if (x.union_ || x.details().dynamic || x.details().virtual_base_count)
         return false;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
@@ -62,9 +63,9 @@ bool semantic_analysis::copy_reads_nothing(entity_index c) const
         if (t.kind != type_kind::class_type || !copy_reads_nothing(t.entity))
             return false;
     }
-    for (uint32_t i = 0; i < x.base_count; i++)
+    for (uint32_t i = 0; i < x.details().base_count; i++)
         if (!copy_reads_nothing(
-                type_table[entity_table[class_bases[x.first_base + i]]
+                type_table[entity_table[class_bases[x.details().first_base + i]]
                                .type.unqualified()]
                     .entity))
             return false;
@@ -79,16 +80,17 @@ bool semantic_analysis::polymorphic_class(entity_index c) const
     if (const dynamic_class *d = dynamic_of(c))
         if (d->slot_count)
             return true;
-    for (uint32_t i = 0; i < x.base_count; i++)
+    for (uint32_t i = 0; i < x.details().base_count; i++)
         if (polymorphic_class(
-                type_table[entity_table[class_bases[x.first_base + i]]
+                type_table[entity_table[class_bases[x.details().first_base + i]]
                                .type.unqualified()]
                     .entity))
             return true;
-    for (uint32_t i = 0; i < x.virtual_base_count; i++)
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++)
         if (polymorphic_class(
                 type_table
-                    [entity_table[class_virtual_bases[x.first_virtual_base + i]]
+                    [entity_table[class_virtual_bases
+                                      [x.details().first_virtual_base + i]]
                          .type.unqualified()]
                         .entity))
             return true;
@@ -100,18 +102,19 @@ bool semantic_analysis::polymorphic_class(entity_index c) const
 bool semantic_analysis::virtual_destructor(entity_index c) const
 {
     const entity &x = entity_table[c];
-    if (x.destructor && entity_table[x.destructor].virtual_)
+    if (x.details().destructor && entity_table[x.details().destructor].virtual_)
         return true;
-    for (uint32_t i = 0; i < x.base_count; i++)
+    for (uint32_t i = 0; i < x.details().base_count; i++)
         if (virtual_destructor(
-                type_table[entity_table[class_bases[x.first_base + i]]
+                type_table[entity_table[class_bases[x.details().first_base + i]]
                                .type.unqualified()]
                     .entity))
             return true;
-    for (uint32_t i = 0; i < x.virtual_base_count; i++)
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++)
         if (virtual_destructor(
                 type_table
-                    [entity_table[class_virtual_bases[x.first_virtual_base + i]]
+                    [entity_table[class_virtual_bases
+                                      [x.details().first_virtual_base + i]]
                          .type.unqualified()]
                         .entity))
             return true;
@@ -128,10 +131,10 @@ bool semantic_analysis::triviality_unknown(entity_index c) const
     if (x.implicit_copy_deleted || x.defaulted_move_constructor ||
         x.defaulted_move_assignment)
         return true;
-    if (x.destructor && entity_table[x.destructor].deleted)
+    if (x.details().destructor && entity_table[x.details().destructor].deleted)
         return true;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor)
         if (entity_table[k].deleted && copy_or_move_constructor(c, k))
             return true;
     owned_array<entity_index> classes;
@@ -161,30 +164,36 @@ bool semantic_analysis::declared_defaulted(entity_index f) const
 bool semantic_analysis::clang_trivial_special_members(entity_index c)
 {
     const entity &x = entity_table[c];
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor) {
-        if (entity_table[k].implicit || declared_deleted(k) ||
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
+        if (entity_table[k].implicit ||
+            entity_table[k].constraint_unsatisfied || declared_deleted(k) ||
             declared_defaulted(k))
             continue;
         const struct type &f = type_table[entity_table[k].type.unqualified()];
         if (!f.parameter_count || copy_or_move_constructor(c, k))
             return false;
     }
-    if (x.dynamic || (x.destructor && !declared_deleted(x.destructor) &&
-                      !declared_defaulted(x.destructor)))
+    if (x.details().dynamic ||
+        (x.details().destructor && !declared_deleted(x.details().destructor) &&
+         !declared_defaulted(x.details().destructor)))
         return false;
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
     if (found.unknown || found.ambiguous)
         return false;
-    for (entity_index o = found.entity; o; o = entity_table[o].next_overload)
+    for (entity_index o = found.entity; o;
+         o = entity_table[o].details().next_overload)
         if (entity_table[o].kind == entity_kind::function &&
             (copy_assignment_operator(o, c) ||
              move_assignment_operator(o, c)) &&
-            !declared_deleted(o) && !declared_defaulted(o))
+            !entity_table[o].constraint_unsatisfied && !declared_deleted(o) &&
+            !declared_defaulted(o))
             return false;
     for (uint32_t i = 0; i < x.member_count; i++)
-        if (entity_table[class_members[x.first_member + i]].default_initializer)
+        if (entity_table[class_members[x.first_member + i]]
+                .details()
+                .default_initializer)
             return false;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
@@ -204,14 +213,14 @@ bool semantic_analysis::class_trivially_copyable(entity_index c, bool &known)
 {
     known = true;
     const entity &x = entity_table[c];
-    if (x.dynamic)
+    if (x.details().dynamic)
         return false;
     /* a user-provided destructor (a deleted one is trivial) */
-    if (x.destructor && !declared_deleted(x.destructor) &&
-        !declared_defaulted(x.destructor))
+    if (x.details().destructor && !declared_deleted(x.details().destructor) &&
+        !declared_defaulted(x.details().destructor))
         return false;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor)
         if (copy_or_move_constructor(c, k) && !entity_table[k].implicit &&
             !declared_deleted(k) && !declared_defaulted(k) &&
             !entity_table[k].constraint_unsatisfied)
@@ -234,14 +243,15 @@ bool semantic_analysis::class_trivially_copyable(entity_index c, bool &known)
         return false;
     } else {
         for (entity_index o = found.entity; o;
-             o = entity_table[o].next_overload)
+             o = entity_table[o].details().next_overload)
             assignments.append(o);
     }
     for (entity_index o : assignments)
         if (entity_table[o].kind == entity_kind::function &&
             (copy_assignment_operator(o, c) ||
              move_assignment_operator(o, c)) &&
-            !declared_deleted(o) && !declared_defaulted(o))
+            !entity_table[o].constraint_unsatisfied && !declared_deleted(o) &&
+            !declared_defaulted(o))
             return false;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
@@ -262,7 +272,8 @@ bool semantic_analysis::class_trivially_copyable(entity_index c, bool &known)
    followed */
 static bool clang_template_default_constructor_of(const entity &x)
 {
-    return x.constructor_template || x.constructor_templates;
+    return x.details().constructor_template ||
+           x.details().constructor_templates;
 }
 
 /* [class.derived]/2: whether class d has class b among its direct or
@@ -270,19 +281,20 @@ static bool clang_template_default_constructor_of(const entity &x)
 bool semantic_analysis::derives_from(entity_index d, entity_index b) const
 {
     const entity &x = entity_table[d];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index k = type_table[entity_table[class_bases[x.first_base + i]]
-                                        .type.unqualified()]
-                             .entity;
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index k =
+            type_table[entity_table[class_bases[x.details().first_base + i]]
+                           .type.unqualified()]
+                .entity;
         if (k == b || derives_from(k, b))
             return true;
     }
-    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++) {
         entity_index k =
-            type_table
-                [entity_table[class_virtual_bases[x.first_virtual_base + i]]
-                     .type.unqualified()]
-                    .entity;
+            type_table[entity_table[class_virtual_bases
+                                        [x.details().first_virtual_base + i]]
+                           .type.unqualified()]
+                .entity;
         if (k == b || derives_from(k, b))
             return true;
     }
@@ -319,22 +331,23 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
                bases, direct or indirect ([class.mi]/4); a class is none of
                its own */
             require_complete(dk.entity);
-            if (!entity_table[dk.entity].size)
+            if (!entity_table[dk.entity].details().size)
                 return not_supported_because(n, "meta.rel",
                                              "a virtual-base-of trait with a "
                                              "derived class that has no size");
             const entity &x = entity_table[dk.entity];
-            for (uint32_t i = 0; i < x.virtual_base_count; i++)
-                if (type_table[entity_table[class_virtual_bases
-                                                [x.first_virtual_base + i]]
-                                   .type.unqualified()]
-                        .entity == bk.entity)
+            for (uint32_t i = 0; i < x.details().virtual_base_count; i++)
+                if (type_table
+                        [entity_table[class_virtual_bases
+                                          [x.details().first_virtual_base + i]]
+                             .type.unqualified()]
+                            .entity == bk.entity)
                     value = true;
         } else if (bk.entity == dk.entity) {
             value = !entity_table[bk.entity].union_;
         } else {
             require_complete(dk.entity);
-            if (!entity_table[dk.entity].size)
+            if (!entity_table[dk.entity].details().size)
                 return not_supported_because(
                     n, "meta.rel",
                     "a base-of trait with a derived class that has no size");
@@ -382,7 +395,7 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     if (is_class) {
         c = type_table[t.unqualified()].entity;
         require_complete(c);
-        if (!entity_table[c].size)
+        if (!entity_table[c].details().size)
             return false;
     }
     answer = false;
@@ -424,8 +437,9 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
                 if (!known || !known_default)
                     return false;
             } else {
-                for (entity_index k = entity_table[c].first_constructor; k;
-                     k = entity_table[k].next_constructor)
+                for (entity_index k =
+                         entity_table[c].details().first_constructor;
+                     k; k = entity_table[k].details().next_constructor)
                     if (declared_deleted(k) &&
                         !type_table[entity_table[k].type.unqualified()]
                              .parameter_count)
@@ -525,10 +539,11 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
             return false;
         const entity &x = entity_table[c];
         if (declares_move_constructor(c) || declares_move_assignment(c) ||
-            declares_copy_constructor(c) || x.user_copy_assignments)
+            declares_copy_constructor(c) || x.details().user_copy_assignments)
             return false;
         bool declared_destructor =
-            x.destructor && !entity_table[x.destructor].implicit;
+            x.details().destructor &&
+            !entity_table[x.details().destructor].implicit;
         switch (w) {
         case unary_trait_kind::has_trivial_move_constructor:
         case unary_trait_kind::has_trivial_move_assign:
@@ -649,8 +664,9 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
                    (beside an X() = default or = delete: not followed) */
                 if (entity_table[c].defaulted_default_constructor)
                     return false;
-                for (entity_index k = entity_table[c].first_constructor; k;
-                     k = entity_table[k].next_constructor)
+                for (entity_index k =
+                         entity_table[c].details().first_constructor;
+                     k; k = entity_table[k].details().next_constructor)
                     if (declared_deleted(k) &&
                         !type_table[entity_table[k].type.unqualified()]
                              .parameter_count)
@@ -731,10 +747,11 @@ void semantic_analysis::base_classes_of(entity_index c,
                                         owned_array<entity_index> &out) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index b = type_table[entity_table[class_bases[x.first_base + i]]
-                                        .type.unqualified()]
-                             .entity;
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index b =
+            type_table[entity_table[class_bases[x.details().first_base + i]]
+                           .type.unqualified()]
+                .entity;
         out.append(b);
         base_classes_of(b, out);
     }
@@ -831,7 +848,7 @@ bool semantic_analysis::standard_layout_class(entity_index c, bool &answer)
 {
     const entity &x = entity_table[c];
     answer = false;
-    if (x.dynamic || x.virtual_base_count)
+    if (x.details().dynamic || x.details().virtual_base_count)
         return true;
     uint8_t first_access = 0xff;
     for (uint32_t i = 0; i < x.member_count; i++) {
@@ -854,8 +871,8 @@ bool semantic_analysis::standard_layout_class(entity_index c, bool &answer)
         if (!sub)
             return true;
     }
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = entity_table[class_bases[x.first_base + i]];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        const entity &b = entity_table[class_bases[x.details().first_base + i]];
         bool sub = false;
         if (!class_property_trait(int(unary_trait_kind::is_standard_layout),
                                   b.type, sub))
@@ -863,7 +880,7 @@ bool semantic_analysis::standard_layout_class(entity_index c, bool &answer)
         if (!sub)
             return true;
     }
-    if (x.base_count) {
+    if (x.details().base_count) {
         entity_index owner = 0;
         if (!first_data_class(c, owner))
             return true;
@@ -977,7 +994,7 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
     uint64_t extent = 0;
     if (!unique_class_extent(record.entity, unique, extent))
         return false;
-    answer = unique && extent == 8 * entity_table[record.entity].size;
+    answer = unique && extent == 8 * entity_table[record.entity].details().size;
     return true;
 }
 
@@ -995,21 +1012,21 @@ bool semantic_analysis::unique_class_extent(entity_index c, bool &unique,
     extent = 0;
     require_complete(c);
     const entity &x = entity_table[c];
-    if (!x.size)
+    if (!x.details().size)
         return false;
     bool known = true;
     bool copyable = class_trivially_copyable(c, known);
     if (!known)
         return false;
-    if (!copyable || x.dynamic || x.virtual_base_count)
+    if (!copyable || x.details().dynamic || x.details().virtual_base_count)
         return true;
     struct piece {
         uint64_t offset, size;
     };
     owned_array<piece> pieces;
     bool pieces_in_union = false;
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = entity_table[class_bases[x.first_base + i]];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        const entity &b = entity_table[class_bases[x.details().first_base + i]];
         entity_index bc = type_table[b.type.unqualified()].entity;
         /* an empty base has no bytes of its own */
         if (empty_class(bc))
@@ -1022,7 +1039,7 @@ bool semantic_analysis::unique_class_extent(entity_index c, bool &unique,
            without */
         if (!sub)
             return true;
-        pieces.append(piece{8 * b.offset, covered});
+        pieces.append(piece{8 * b.details().offset, covered});
     }
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
@@ -1058,7 +1075,7 @@ bool semantic_analysis::unique_class_extent(entity_index c, bool &unique,
         /* [ext:clang_type_traits] a bit-field's bits are its width, a
            union's the whole class (as clang++ answers) */
         if (m.bit_field)
-            size = m.bit_width;
+            size = m.details().bit_width;
         /* a reference member's bytes are a pointer's */
         if (type_table[m.type.unqualified()].kind ==
                 type_kind::lvalue_reference ||
@@ -1069,19 +1086,19 @@ bool semantic_analysis::unique_class_extent(entity_index c, bool &unique,
         if (!size)
             continue;
         if (x.union_) {
-            if (!m.bit_field && size != 8 * x.size)
+            if (!m.bit_field && size != 8 * x.details().size)
                 return true;
             pieces_in_union = true;
             continue;
         }
         if (m.bit_field)
-            pieces.append(piece{m.bit_offset, size});
+            pieces.append(piece{m.details().bit_offset, size});
         else
-            pieces.append(piece{8 * m.offset, size});
+            pieces.append(piece{8 * m.details().offset, size});
     }
     if (x.union_) {
         unique = pieces_in_union;
-        extent = 8 * x.size;
+        extent = 8 * x.details().size;
         return true;
     }
     uint64_t end = 0;
@@ -1125,7 +1142,7 @@ bool semantic_analysis::layout_compatible(qualified_type a, qualified_type b,
         const struct type &k = type_table[a.unqualified()];
         if (k.kind == type_kind::class_type) {
             require_complete(k.entity);
-            if (!entity_table[k.entity].size)
+            if (!entity_table[k.entity].details().size)
                 known = false;
         }
         return true;
@@ -1142,8 +1159,8 @@ bool semantic_analysis::layout_compatible(qualified_type a, qualified_type b,
     if (x.kind == type_kind::enumeration && y.kind == type_kind::enumeration) {
         require_complete(x.entity);
         require_complete(y.entity);
-        return entity_table[x.entity].underlying ==
-               entity_table[y.entity].underlying;
+        return entity_table[x.entity].details().underlying ==
+               entity_table[y.entity].details().underlying;
     }
     if (x.kind != type_kind::class_type || y.kind != type_kind::class_type)
         return false;
@@ -1152,7 +1169,7 @@ bool semantic_analysis::layout_compatible(qualified_type a, qualified_type b,
     require_complete(d);
     const entity &p = entity_table[c];
     const entity &q = entity_table[d];
-    if (!p.size || !q.size) {
+    if (!p.details().size || !q.details().size) {
         known = false;
         return false;
     }
@@ -1166,8 +1183,8 @@ bool semantic_analysis::layout_compatible(qualified_type a, qualified_type b,
     }
     if (!layout_p || !layout_q)
         return false;
-    if (p.union_ || p.base_count || q.base_count || p.virtual_base_count ||
-        q.virtual_base_count) {
+    if (p.union_ || p.details().base_count || q.details().base_count ||
+        p.details().virtual_base_count || q.details().virtual_base_count) {
         known = false;
         return false;
     }
@@ -1190,8 +1207,10 @@ bool semantic_analysis::layout_compatible(qualified_type a, qualified_type b,
         /* clang: a [[no_unique_address]] member makes two distinct
            classes not layout-compatible (CWG 2759); a member with another
            alignment or offset is not the same layout */
-        if (m.bit_field != n.bit_field || m.bit_width != n.bit_width ||
-            m.no_unique_address || n.no_unique_address || m.offset != n.offset)
+        if (m.bit_field != n.bit_field ||
+            m.details().bit_width != n.details().bit_width ||
+            m.no_unique_address || n.no_unique_address ||
+            m.details().offset != n.details().offset)
             return false;
         if (!layout_compatible(m.type, n.type, known))
             return false;
@@ -1285,17 +1304,17 @@ bool semantic_analysis::relocatable_type(qualified_type t, bool cpp26,
     entity_index c = record.entity;
     require_complete(c);
     const entity &x = entity_table[c];
-    if (!x.size) {
+    if (!x.details().size) {
         known = false;
         return false;
     }
-    if (x.virtual_base_count)
+    if (x.details().virtual_base_count)
         return false;
     if (class_head_names_trivial_abi(c)) {
         known = false;
         return false;
     }
-    if (x.dynamic && !cpp26)
+    if (x.details().dynamic && !cpp26)
         return false;
     /* a user-declared move assignment operator: user-provided or deleted */
     if (cpp26 && declares_move_assignment(c))
@@ -1310,14 +1329,15 @@ bool semantic_analysis::relocatable_type(qualified_type t, bool cpp26,
         }
         return true;
     }
-    if (x.destructor && !entity_table[x.destructor].implicit)
+    if (x.details().destructor &&
+        !entity_table[x.details().destructor].implicit)
         return false;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k = x.details().first_constructor; k;
+         k = entity_table[k].details().next_constructor)
         if (!entity_table[k].implicit && copy_or_move_constructor(c, k))
             return false;
-    if (x.user_copy_assignments || x.implicit_copy_deleted ||
-        x.constructor_template || x.constructor_templates) {
+    if (x.details().user_copy_assignments || x.implicit_copy_deleted ||
+        x.details().constructor_template || x.details().constructor_templates) {
         known = false;
         return false;
     }
@@ -1327,8 +1347,8 @@ bool semantic_analysis::relocatable_type(qualified_type t, bool cpp26,
         known = false;
         return false;
     }
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = entity_table[class_bases[x.first_base + i]];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        const entity &b = entity_table[class_bases[x.details().first_base + i]];
         if (!relocatable_type(b.type, cpp26, known) || !known)
             return false;
     }

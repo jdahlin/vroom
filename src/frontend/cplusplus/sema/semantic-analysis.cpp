@@ -86,7 +86,7 @@ void semantic_analysis::name_lookup_detail(token_index t,
         name_held_detail(t, found.unknown_by);
         last_unsupported_held_by(found.unknown_entity);
     } else if (found.unknown_entity &&
-               entity_table[found.unknown_entity].instantiation &&
+               entity_table[found.unknown_entity].template_record &&
                !entity_table[found.unknown_entity].held_by_template)
         /* [temp.dep.constexpr]/2: in a template's own declaration, only
            the parameter's bare name as an array bound is represented
@@ -457,10 +457,11 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
         cause = held_cause::not_parsed;
     for (size_t i = held_before; i < held_pending.size(); i++) {
         entity &held = entity_table[held_pending[i]];
-        if (d.has_unsupported && !held.held_because)
-            held.held_because = unsupported[unsupported_before].subclause;
-        else if (!d.has_unsupported && !held.held_because)
-            held.held_by = cause;
+        if (d.has_unsupported && !held.details().held_because)
+            held.set(&entity_details::held_because,
+                     unsupported[unsupported_before].subclause);
+        else if (!d.has_unsupported && !held.details().held_because)
+            held.set(&entity_details::held_by, cause);
         /* (a well-formed declaration that holds a name, a definition of a
            class template whose first declaration was refused, keeps the
            holder that declaration was; it is the holder when there is no
@@ -471,10 +472,11 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     held_pending.resize(held_before);
     for (size_t i = scopes_before; i < unknown_scopes_pending.size(); i++) {
         entity &scope = entity_table[unknown_scopes_pending[i]];
-        if (d.has_unsupported && !scope.unknown_because)
-            scope.unknown_because = unsupported[unsupported_before].subclause;
-        else if (!d.has_unsupported && !scope.unknown_because)
-            scope.unknown_by = cause;
+        if (d.has_unsupported && !scope.details().unknown_because)
+            scope.set(&entity_details::unknown_because,
+                      unsupported[unsupported_before].subclause);
+        else if (!d.has_unsupported && !scope.details().unknown_because)
+            scope.set(&entity_details::unknown_by, cause);
     }
     unknown_scopes_pending.resize(scopes_before);
     declaration_refusals = outer_refusals;

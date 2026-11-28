@@ -89,7 +89,7 @@ bool semantic_analysis::friend_names(const friend_record &f,
            all specializations of that template ... are friends" */
         if (e == f.template_entity)
             return true;
-        uint32_t i = entity_table[e].instantiation;
+        uint32_t i = entity_table[e].instantiation.number();
         return i && instantiations[i - 1].template_entity == f.template_entity;
     }
     if (f.befriended)
@@ -327,7 +327,11 @@ analysis_result semantic_analysis::friend_elaborated_class(entity_index c,
         type_index named = 0;
         uint32_t cv = 0;
         declaring_specializations++;
+        uint32_t outer_naming = naming_friend;
+        if (type[1][0].is_token())
+            naming_friend = tokens.identifier(type[1][0].token());
         analysis_result r = template_type(type[1], 0, false, named, &cv);
+        naming_friend = outer_naming;
         declaring_specializations--;
         if (r != analysis_result::well_formed)
             return r;
@@ -365,7 +369,7 @@ analysis_result semantic_analysis::friend_elaborated_class(entity_index c,
     entity_index later = entity_table.find(space, name);
     bool being_defined = later &&
                          entity_table[later].kind == entity_kind::class_type &&
-                         !entity_table[later].size;
+                         !entity_table[later].details().size;
     if (found.unknown && !found.ambiguous && instantiation_depth && !local &&
         !found.entity && !being_defined) {
         befriend_by_name(c, space, name);
@@ -455,7 +459,7 @@ semantic_analysis::overload_with_parameters(entity_index first,
 {
     for (entity_index o = first;
          o && entity_table[o].kind == entity_kind::function;
-         o = entity_table[o].next_overload)
+         o = entity_table[o].details().next_overload)
         if (same_parameters(type_table, entity_table[o].type.unqualified(),
                             type.unqualified()))
             return o;
@@ -736,10 +740,8 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
            whatever its type's) */
         bool no_linkage = type_without_external_linkage(type) &&
                           !within_unnamed_namespace(space);
-        /* (one a class template specialization defines is defined here
-           whatever its type's linkage) */
-        bool local_definition =
-            no_linkage && defines && entity_table[c].instantiation;
+        /* (one defined here is defined whatever its type's linkage) */
+        bool local_definition = no_linkage && defines;
         if ((no_linkage && !local_definition) ||
             tokens.files.behavior.microsoft_extensions)
             return not_supported_because(
@@ -750,7 +752,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         befriended = entity_table.make(entity_kind::function, name, space);
         entity &made = entity_table[befriended];
         made.type = type;
-        made.implemented = m.implemented;
+        made.set(&entity_details::implemented, m.implemented);
         made.operator_function = m.operator_function;
         made.linkage_of_name = linkage::external;
         /* [basic.link]/4: within an unnamed namespace, internal */
@@ -808,7 +810,7 @@ analysis_result semantic_analysis::constrained_friend_function(
                                        tokens.identifier(m.id), space);
     entity &made = entity_table[f];
     made.type = type;
-    made.implemented = m.implemented;
+    made.set(&entity_details::implemented, m.implemented);
     made.operator_function = m.operator_function;
     made.linkage_of_name = linkage::external;
     if (within_unnamed_namespace(space))
@@ -956,13 +958,14 @@ bool semantic_analysis::implicitly_declares(entity_index k, bool destructor,
                                             qualified_type type)
 {
     const entity &x = entity_table[k];
-    bool user_destructor = x.destructor && !entity_table[x.destructor].implicit;
+    bool user_destructor = x.details().destructor &&
+                           !entity_table[x.details().destructor].implicit;
     if (destructor)
         return !user_destructor &&
                !type_table[type.unqualified()].parameter_count;
     bool user_constructor = false, user_copy = false, user_move = false;
-    for (entity_index o = x.first_constructor; o;
-         o = entity_table[o].next_constructor) {
+    for (entity_index o = x.details().first_constructor; o;
+         o = entity_table[o].details().next_constructor) {
         if (entity_table[o].implicit)
             continue;
         user_constructor = true;
@@ -977,7 +980,7 @@ bool semantic_analysis::implicitly_declares(entity_index k, bool destructor,
     entity_index first = entity_table.find(k, name);
     for (entity_index o = first;
          o && entity_table[o].kind == entity_kind::function;
-         o = entity_table[o].next_overload) {
+         o = entity_table[o].details().next_overload) {
         if (entity_table[o].implicit)
             continue;
         copy_kind kind = copy_parameter(k, entity_table[o].type);
@@ -1045,12 +1048,12 @@ analysis_result semantic_analysis::friend_member_function(
                 "a friend constructor or destructor with another name or with "
                 "cv-qualifiers");
         if (m.destructor) {
-            befriended = entity_table[k].destructor;
+            befriended = entity_table[k].details().destructor;
         } else {
             /* a constructor: by its parameters (an exception specification
                is not part of the match, [except.spec]/5 checks it) */
-            for (entity_index o = entity_table[k].first_constructor; o;
-                 o = entity_table[o].next_constructor)
+            for (entity_index o = entity_table[k].details().first_constructor;
+                 o; o = entity_table[o].details().next_constructor)
                 if (same_parameters(type_table,
                                     entity_table[o].type.unqualified(),
                                     type.unqualified()))
@@ -1064,7 +1067,7 @@ analysis_result semantic_analysis::friend_member_function(
                 "a friend member name that is not a function in its class");
         for (entity_index o = first;
              o && entity_table[o].kind == entity_kind::function;
-             o = entity_table[o].next_overload)
+             o = entity_table[o].details().next_overload)
             if (same_parameters(type_table, entity_table[o].type.unqualified(),
                                 type.unqualified()) &&
                 entity_table[o].member_cv == function_cv)

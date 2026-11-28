@@ -346,10 +346,10 @@ bool only_unary(preprocessing_op_or_punc op)
 analysis_result semantic_analysis::operator_function_declaration(SyntaxRef n,
                                                                  entity_index f)
 {
-    if (entity_table[f].allocation != allocation_function::none)
+    if (entity_table[f].details().allocation != allocation_function::none)
         return allocation_function_declaration(n, f);
     const entity &x = entity_table[f];
-    preprocessing_op_or_punc op = x.implemented;
+    preprocessing_op_or_punc op = x.details().implemented;
     const struct type &function = type_table[x.type.unqualified()];
     const qualified_type *parameters =
         type_table.parameters(x.type.unqualified());
@@ -439,7 +439,7 @@ analysis_result semantic_analysis::operator_function_declaration(SyntaxRef n,
        ([dcl.fct.default]), except where explicitly stated below.  Operator
        functions cannot have more or fewer parameters than the number
        required for the corresponding operator" */
-    if (x.default_arguments)
+    if (x.details().default_arguments)
         return ill_formed(n,
                           "an operator function cannot have default "
                           "arguments",
@@ -491,7 +491,7 @@ bool semantic_analysis::copy_assignment_operator(entity_index f,
         return false;
     /* an operator+ or operator== of that parameter is none */
     if (!x.operator_function ||
-        x.implemented != preprocessing_op_or_punc::EQUAL)
+        x.details().implemented != preprocessing_op_or_punc::EQUAL)
         return false;
     const struct type &function = type_table[x.type.unqualified()];
     if (function.parameter_count != 1 || function.variadic)
@@ -509,7 +509,7 @@ bool semantic_analysis::moved_bitwise(entity_index c)
     /* [class.copy.assign]/9: trivial when no subobject's assignment is an
        operator function and the class has no virtual function */
     const entity &x = entity_table[c];
-    return x.defaulted_move_assignment && !x.dynamic &&
+    return x.defaulted_move_assignment && !x.details().dynamic &&
            !assignment_not_trivial(c);
 }
 
@@ -522,7 +522,7 @@ bool semantic_analysis::assigned_bitwise(entity_index c)
        assignment operator makes the implicit copy assignment deleted:
        not analysed */
     const entity &x = entity_table[c];
-    if (x.dynamic ||
+    if (x.details().dynamic ||
         ((x.defaulted_move_constructor || x.defaulted_move_assignment) &&
          !x.defaulted_copy_assignment))
         return false;
@@ -537,10 +537,12 @@ bool semantic_analysis::assigned_bitwise(entity_index c)
     if (found.unknown && !(found.unknown_entity &&
                            member_function_template_of(found.unknown_entity)))
         return false;
-    for (entity_index o = found.entity; o; o = entity_table[o].next_overload) {
+    for (entity_index o = found.entity; o;
+         o = entity_table[o].details().next_overload) {
         if (entity_table[o].kind != entity_kind::function)
             return false;
-        if (copy_assignment_operator(o, c) || move_assignment_operator(o, c))
+        if (!entity_table[o].constraint_unsatisfied &&
+            (copy_assignment_operator(o, c) || move_assignment_operator(o, c)))
             return false;
     }
     owned_array<entity_index> classes;

@@ -321,10 +321,26 @@ void semantic_analysis::record_target_features(SyntaxRef definition,
         return spelling.size() == strlen(word) &&
                !memcmp(spelling.data(), word, spelling.size());
     };
+    auto append_target = [&](token_index i) {
+        owned_buffer spelling;
+        tokens.spelling(i, spelling.get());
+        if (spelling.size() < 2 || spelling.data()[0] != '"')
+            return;
+        if (features.size())
+            vbuffer_append(features.get(), ",", 1);
+        vbuffer_append(features.get(), spelling.data() + 1,
+                       spelling.size() - 2);
+    };
     /* the parentheses open since an __attribute__ */
     int depth = 0;
     bool in_attribute = false;
     for (token_index i = first; i < body; i++) {
+        /* [[gnu::target("...")]] */
+        if (!in_attribute && i + 4 < body && is(i, "gnu") && is(i + 1, "::") &&
+            is(i + 2, "target") && is(i + 3, "(")) {
+            append_target(i + 4);
+            continue;
+        }
         if (!in_attribute) {
             in_attribute = is(i, "__attribute__") || is(i, "__attribute");
             continue;
@@ -337,21 +353,14 @@ void semantic_analysis::record_target_features(SyntaxRef definition,
                 in_attribute = false;
         } else if (depth == 2 && i + 2 < body &&
                    (is(i, "target") || is(i, "__target__")) && is(i + 1, "(")) {
-            owned_buffer spelling;
-            tokens.spelling(i + 2, spelling.get());
-            if (spelling.size() < 2 || spelling.data()[0] != '"')
-                continue;
-            if (features.size())
-                vbuffer_append(features.get(), ",", 1);
-            vbuffer_append(features.get(), spelling.data() + 1,
-                           spelling.size() - 2);
+            append_target(i + 2);
         }
     }
     if (!features.size())
         return;
     vbuffer_append(features.get(), "", 1);
-    entity_table[f].target_features =
-        static_cast<uint32_t>(target_strings.size() + 1);
+    entity_table[f].set(&entity_details::target_features,
+                        static_cast<uint32_t>(target_strings.size() + 1));
     vbuffer_append(target_strings.get(), features.data(), features.size());
 }
 
@@ -379,8 +388,9 @@ analysis_result semantic_analysis::analyse_function_body(
     analysis_result result =
         analyse_function_body_of(definition, compound, ctor_init);
     if (result == analysis_result::unsupported && unsupported.size() > before &&
-        f && !entity_table[f].held_because)
-        entity_table[f].held_because = unsupported[before].subclause;
+        f && !entity_table[f].details().held_because)
+        entity_table[f].set(&entity_details::held_because,
+                            unsupported[before].subclause);
     /* the body's own declarations (a local alias, a variable) are not the
        function: its definition's caller asks which function it defined */
     last_declared = f;
@@ -546,7 +556,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
                  subobject_destructor_inaccessible(owner, sub))) {
                 result = worse(
                     result, ill_formed_at_token(
-                                entity_table[owner].class_key,
+                                entity_table[owner].details().class_key,
                                 "the destructor of a potentially constructed "
                                 "subobject is potentially invoked by the "
                                 "destructor and it is deleted or inaccessible",
@@ -668,7 +678,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
         }
         if (!b.has(language_feature::non_literal_constexpr_variables))
             for (uint32_t v : found.variables) {
-                const entity &e = entity_table[entity_index_in(semantics[v].a)];
+                const entity &e = entity_table[semantics[v].entity_a()];
                 if (e.automatic &&
                     literal_type(e.type) == constness::not_constant)
                     result = worse(

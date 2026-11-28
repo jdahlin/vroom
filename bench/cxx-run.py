@@ -12,7 +12,9 @@ the -O0 object defines are also clang -O0's, by name, binding (global,
 local, weak) and COMDAT group.  A program of several translation units names the others in
 /* cxx-run-units: FILE... */ (files of src/test/cxx/run/units, which hold
 their headers too); each compiler compiles them as the program and links
-them with it.
+them with it.  /* cxx-run-local-names-differ: why */ compares only the
+symbols that are not local; /* cxx-run-symbols-differ: why */ none at all
+(vcc runs code where clang has constant data).
 
     bench/cxx-run.py [-j N] [-O LEVELS] [--no-cache] [-v] [PATTERN]
 
@@ -192,11 +194,17 @@ def one(job):
             results.append((level, 'vcc: ' + why))
             continue
         ours = defined(o)
+        wanted = symbols
+        if 'cxx-run-symbols-differ' in head:
+            wanted = None
+        if wanted is not None and 'cxx-run-local-names-differ' in head:
+            ours = {k: v for k, v in ours.items() if v != 'local'}
+            wanted = {k: v for k, v in wanted.items() if v != 'local'}
         # (above -O0 an inlined static function may be gone)
-        if level == '0' and symbols is not None and ours != symbols:
-            missing = sorted(set(symbols) - set(ours))
-            extra = sorted(set(ours) - set(symbols))
-            bound = sorted(k for k in ours if k in symbols and ours[k] != symbols[k])
+        if level == '0' and wanted is not None and ours != wanted:
+            missing = sorted(set(wanted) - set(ours))
+            extra = sorted(set(ours) - set(wanted))
+            bound = sorted(k for k in ours if k in wanted and ours[k] != wanted[k])
             results.append((level, f'symbols: missing {missing} extra {extra} binding {bound}'))
             continue
         pk = passed_key([o] + objs, key)

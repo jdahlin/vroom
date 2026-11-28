@@ -16,6 +16,7 @@
 #ifndef VCC_CPLUSPLUS_PARSE_H
 #define VCC_CPLUSPLUS_PARSE_H
 
+#include "frontend/cplusplus/stable-array.h"
 #include "frontend/cplusplus/table-index.h"
 #include "frontend/cplusplus/cplusplus.h"
 
@@ -82,7 +83,7 @@ class token_stream
     owned_array<bool> revertible_keywords;
 
   private:
-    owned_array<token, token_index> tokens;
+    stable_array<token, token_index> tokens;
     /* the tokens at which source_files::layout_pragma changed, and what it
        changed to */
     owned_array<token_index> layout_change_at;
@@ -91,8 +92,15 @@ class token_stream
     owned_array<token_index> target_change_at;
     owned_array<uint32_t> target_change_to;
     uint32_t target_pragma_before = 0;
-    /* token i is preprocessing_tokens[first_piece[i] .. first_piece[i+1]) */
-    owned_array<uint32_t, token_index> first_piece;
+    /* A token is made from one preprocessing token, its own `preprocessing`,
+       except a string literal concatenated from several ([lex.phases]/1.6)
+       or one the conversion changed: those have their preprocessing tokens
+       kept, preprocessing_tokens[first .. first + count), in token order */
+    struct kept_pieces {
+        token_index at;
+        uint32_t first, count;
+    };
+    owned_array<kept_pieces> kept;
     owned_array<preprocessing_token> preprocessing_tokens;
     owned_array<uint32_t, token_index> identifiers;
     /* the preprocessing token read ahead to see whether a string literal is
@@ -705,6 +713,9 @@ struct decl_specifier_facts {
     /* in: [temp.res]/5's contexts, where a qualified-id that names a member
        of an unknown specialization is assumed to name a type */
     bool implicit_typename = false;
+    /* in: an alias-declaration's type-id, whose first specifier is a type
+       ([dcl.typedef]/2) */
+    bool alias_type_id = false;
     /* out: a name in the sequence depends on a template parameter */
     bool dependent = false;
     /* [dcl.type.elab]/1: an elaborated-type-specifier, whether it has the
@@ -1421,6 +1432,7 @@ class parser
     /* the lookahead after the '>' of the template-argument-list whose '<'
        is at tokens[ahead], brackets balanced; 0 when none ends before a
        ';', '{' or '}' */
+    bool less_than_operator(unsigned i);
     unsigned angle_group_end(unsigned ahead);
     /* angle_group_end of the current token, then a ( or a :: */
     bool angle_group_follows_call();

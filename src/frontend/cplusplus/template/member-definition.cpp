@@ -275,7 +275,7 @@ analysis_result semantic_analysis::member_definition_of_template(
             n, "temp.mem.func",
             "a member definition whose template-id is not resolved");
     }
-    uint32_t ct = class_template_of(named);
+    template_ref ct = class_template_of(named);
     if (!ct) {
         analysis_result refused = not_supported(n, "temp.mem.func");
         if (SyntaxElement template_name =
@@ -283,18 +283,17 @@ analysis_result semantic_analysis::member_definition_of_template(
             template_name_detail(template_name.token(), x, named);
         return refused;
     }
-    if (function_templates[ct - 1].name != named)
+    if (function_templates[ct].name != named)
         return not_supported_because(
             n, "temp.mem.func",
             "the name is a class template's injected-class-name");
-    if (function_templates[ct - 1].primary)
+    if (function_templates[ct].primary)
         return not_supported_because(n, "temp.mem.func",
                                      "the class is a specialization's pattern");
     entity_index expected_scope = outer;
     if (owner_cls)
         expected_scope = owner_cls;
-    if (!declared_in_scope_of(function_templates[ct - 1].entity,
-                              expected_scope))
+    if (!declared_in_scope_of(function_templates[ct].entity, expected_scope))
         return not_supported_because(
             n, "temp.mem.func",
             "the class template is declared in another scope");
@@ -351,7 +350,7 @@ analysis_result semantic_analysis::member_definition_of_template(
     }
     const template_argument *mine = arguments.data();
     uint32_t mine_count = static_cast<uint32_t>(arguments.size());
-    function_template of = function_templates[ct - 1];
+    function_template of = function_templates[ct];
     if (pattern) {
         of = function_templates[pattern - 1];
         mine = deduced.data();
@@ -547,7 +546,7 @@ analysis_result semantic_analysis::member_definition_of_template(
     record.declaration = n;
     record.definition = definition;
     record.inner = inner;
-    record.template_entity = function_templates[ct - 1].entity;
+    record.template_entity = function_templates[ct].entity;
     record.pattern = pattern;
     record.member_class = !variable && inner &&
                           !out_of_class_member(definition) &&
@@ -573,7 +572,7 @@ entity_index semantic_analysis::plain_class_nominated(SyntaxRef nested)
         return 0;
     if (!scope.entity ||
         entity_table[scope.entity].kind != entity_kind::class_type ||
-        !entity_table[scope.entity].size)
+        !entity_table[scope.entity].details().size)
         return 0;
     return scope.entity;
 }
@@ -605,11 +604,12 @@ semantic_analysis::defined_special_member(entity_index specialization,
 {
     if (tokens.identifier(name) != entity_table[specialization].name)
         return 0;
-    entity_index d = entity_table[specialization].destructor;
+    entity_index d = entity_table[specialization].details().destructor;
     if (d && (declared_by(d, o.definition) || declared_by(d, o.declaration)))
         return d;
-    for (entity_index k = entity_table[specialization].first_constructor; k;
-         k = entity_table[k].next_constructor)
+    for (entity_index k =
+             entity_table[specialization].details().first_constructor;
+         k; k = entity_table[k].details().next_constructor)
         if (declared_by(k, o.definition) || declared_by(k, o.declaration))
             return k;
     return 0;
@@ -646,7 +646,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     if (o.inner && !member_variable_template)
         return define_member_template(member, index, recorded);
     function_template of =
-        function_templates[entity_table[x.template_entity].instantiation - 1];
+        function_templates[entity_table[x.template_entity].template_record];
     uint32_t first = x.first_argument;
     if (x.pattern) {
         of = function_templates[x.pattern - 1];
@@ -683,8 +683,8 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         const instantiation_record ox =
             instantiations[o.outer_instantiation - 1];
         function_template oof =
-            function_templates[entity_table[ox.template_entity].instantiation -
-                               1];
+            function_templates[entity_table[ox.template_entity]
+                                   .template_record];
         uint32_t ofirst = ox.first_argument;
         if (ox.pattern) {
             oof = function_templates[ox.pattern - 1];
@@ -720,7 +720,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         defer_next_body_needs = true;
         bool defer_unneeded =
             recorded && x.specialization &&
-            entity_table[x.specialization].explicitly_instantiated !=
+            entity_table[x.specialization].details().explicitly_instantiated !=
                 instantiation_kind::definition;
         skip_unneeded_member_body = defer_unneeded;
         skipped_member_body = 0;
@@ -789,7 +789,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
                 first2 = entity_table.find(owner, lookup_id);
             for (entity_index f = first2;
                  f && !defined && entity_table[f].kind == entity_kind::function;
-                 f = entity_table[f].next_overload)
+                 f = entity_table[f].details().next_overload)
                 if (declared_by(f, o.definition) ||
                     declared_by(f, o.declaration))
                     defined = f;
@@ -837,15 +837,13 @@ semantic_analysis::define_member_of_member_class(uint32_t member,
     if (!template_id_name(y_id, found, held, c))
         return member_definition_unsupported(o.declaration, recorded,
                                              refusals_before);
-    uint32_t yt = class_template_of(held);
-    if (!yt || function_templates[yt - 1].name != held ||
-        function_templates[yt - 1].primary ||
-        !function_templates[yt - 1].is_class ||
-        !function_templates[yt - 1].definition ||
-        entity_table[held].enclosing != c)
+    template_ref yt = class_template_of(held);
+    if (!yt || function_templates[yt].name != held ||
+        function_templates[yt].primary || !function_templates[yt].is_class ||
+        !function_templates[yt].definition || entity_table[held].enclosing != c)
         return member_definition_unsupported(o.declaration, recorded,
                                              refusals_before);
-    const function_template d = function_templates[yt - 1];
+    const function_template d = function_templates[yt];
     owned_array<SyntaxRef> parameters;
     instantiation_context context;
     enter_instantiation(context, entity_table[c].enclosing, o.declaration);
@@ -955,8 +953,9 @@ semantic_analysis::record_template_member(const template_member_definition &m)
         bool special = name && tokens.identifier(name) ==
                                    entity_table[y.specialization].name;
         analysis_result one;
-        if (special || entity_table[y.specialization].explicitly_instantiated !=
-                           instantiation_kind::none)
+        if (special ||
+            entity_table[y.specialization].details().explicitly_instantiated !=
+                instantiation_kind::none)
             one = define_template_member(member, k, false);
         else
             one = defer_or_define_member(member, k, false);
@@ -1066,15 +1065,15 @@ analysis_result semantic_analysis::define_member_class_template_of(
                                  first);
     leave_instantiation(context);
     entity_index held = entity_table.find(c, name);
-    uint32_t declared = class_template_of(held);
+    template_ref declared = class_template_of(held);
     if (r != analysis_result::well_formed || !held || !declared ||
-        function_templates[declared - 1].name != held ||
-        function_templates[declared - 1].primary ||
-        function_templates[declared - 1].definition ||
-        !function_templates[declared - 1].is_class)
+        function_templates[declared].name != held ||
+        function_templates[declared].primary ||
+        function_templates[declared].definition ||
+        !function_templates[declared].is_class)
         return member_definition_unsupported(declaration, recorded,
                                              refusals_before);
-    const function_template d = function_templates[declared - 1];
+    const function_template d = function_templates[declared];
     /* [temp.over.link]/6: the same template-head */
     if (entity_table[d.entity].enclosing != c ||
         d.parameter_count != parameters.size() ||
@@ -1086,9 +1085,9 @@ analysis_result semantic_analysis::define_member_class_template_of(
     for (uint32_t i = 0; i < d.parameter_count; i++)
         if (entity_table[template_parameter_entities[first + i]].kind !=
             entity_kind::template_entity)
-            entity_table[template_parameter_entities[first + i]].instantiation =
-                declared;
-    function_template &record = function_templates[declared - 1];
+            entity_table[template_parameter_entities[first + i]]
+                .template_record = declared;
+    function_template &record = function_templates[declared];
     record.declaration = inner;
     record.definition = only;
     record.first_parameter = first;
@@ -1145,8 +1144,8 @@ analysis_result semantic_analysis::define_member_template_of(
             template_member_definitions[outer_member - 1];
         const instantiation_record ox = instantiations[outer_instantiation - 1];
         function_template oof =
-            function_templates[entity_table[ox.template_entity].instantiation -
-                               1];
+            function_templates[entity_table[ox.template_entity]
+                                   .template_record];
         uint32_t ofirst = ox.first_argument;
         if (ox.pattern) {
             oof = function_templates[ox.pattern - 1];
@@ -1174,7 +1173,7 @@ analysis_result semantic_analysis::define_member_template_of(
                         declares_special_member(c, definition[lead + 1]));
     entity_index held = 0;
     if (r == analysis_result::well_formed && constructor) {
-        held = entity_table[c].constructor_templates;
+        held = entity_table[c].details().constructor_templates;
     } else if (r == analysis_result::well_formed && m.has_id) {
         held = entity_table.find(c, tokens.identifier(m.id));
         if (held)
@@ -1250,8 +1249,9 @@ analysis_result semantic_analysis::define_member_template_of(
                 template_member_definitions[outer_member - 1];
             const instantiation_record ox =
                 instantiations[outer_instantiation - 1];
-            const function_template oof = function_templates
-                [entity_table[ox.template_entity].instantiation - 1];
+            const function_template oof =
+                function_templates[entity_table[ox.template_entity]
+                                       .template_record];
             bool differs = false;
             for (uint32_t i = 0; od.first_parameter && i < oof.parameter_count;
                  i++)

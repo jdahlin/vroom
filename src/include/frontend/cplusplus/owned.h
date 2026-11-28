@@ -22,7 +22,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common/asan.h"
 #include "common/buffer.h"
+#include "common/fail.h"
 
 namespace cplusplus
 {
@@ -34,11 +36,32 @@ inline size_t table_slot(size_t i)
     return i;
 }
 
-/* Index: the type operator[] takes */
+/* an element asked for that is not there: only the ASan build asks */
+inline void check_element(bool there)
+{
+#if VCC_ASAN
+    if (!there)
+        VBUG("index out of an array's bounds");
+#else
+    (void)there;
+#endif
+}
+
+/*
+ * Whether a table may hold a T: its bytes may be moved (realloc).  A type
+ * with a copy constructor of its own, whose bytes may still be moved,
+ * specializes this.
+ */
+template <typename T>
+inline constexpr bool relocatable_record = __is_trivially_copyable(T);
+
+/* Index: the type operator[] takes.  In an ASan build every subscript is
+   checked, and the room past the last element is poisoned, so a pointer
+   from data() that runs past the end is reported too. */
 template <typename T, typename Index = size_t> class owned_array
 {
     /* the elements are moved with realloc and never destroyed */
-    static_assert(__is_trivially_copyable(T) && __is_trivially_destructible(T),
+    static_assert(relocatable_record<T> && __is_trivially_destructible(T),
                   "owned_array<T>: T is not trivially copyable");
 
   public:
@@ -78,12 +101,15 @@ template <typename T, typename Index = size_t> class owned_array
             grown = capacity * 2;
         if (grown < n)
             grown = n;
+        /* (realloc copies the whole block) */
+        unpoison_room();
         T *p = static_cast<T *>(
             ::realloc(static_cast<void *>(elements), grown * sizeof(T)));
         if (!p)
             abort();
         elements = p;
         capacity = grown;
+        poison_room();
     }
     /* value may be one of this array's own elements, which reserve moves:
        copied before (std::vector's push_back allows the same) */
@@ -91,6 +117,7 @@ template <typename T, typename Index = size_t> class owned_array
     {
         T copy = value;
         reserve(count + 1);
+        unpoison(count, count + 1);
         elements[count] = copy;
         return elements[count++];
     }
@@ -98,6 +125,7 @@ template <typename T, typename Index = size_t> class owned_array
     T *extend(size_t n)
     {
         reserve(count + n);
+        unpoison(count, count + n);
         T *first = elements + count;
         count += n;
         return first;
@@ -106,27 +134,34 @@ template <typename T, typename Index = size_t> class owned_array
     void resize(size_t n)
     {
         reserve(n);
+        unpoison(count, n);
         count = n;
+        poison_room();
     }
     void clear()
     {
         count = 0;
+        poison_room();
     }
 
     T &operator[](Index i)
     {
+        check_element(table_slot(i) < count);
         return elements[table_slot(i)];
     }
     const T &operator[](Index i) const
     {
+        check_element(table_slot(i) < count);
         return elements[table_slot(i)];
     }
     T &back()
     {
+        check_element(count);
         return elements[count - 1];
     }
     const T &back() const
     {
+        check_element(count);
         return elements[count - 1];
     }
     T *data()
@@ -163,8 +198,39 @@ template <typename T, typename Index = size_t> class owned_array
     }
 
   private:
+    /* elements [from, to) may be used */
+    void unpoison(size_t from, size_t to)
+    {
+        if (to > from)
+            VASAN_UNPOISON(elements + from, (to - from) * sizeof(T));
+    }
+    void unpoison_room()
+    {
+        unpoison(count, capacity);
+    }
+    void poison_room()
+    {
+        if (capacity > count)
+            VASAN_POISON(elements + count, (capacity - count) * sizeof(T));
+    }
+
     T *elements = nullptr;
     size_t count = 0, capacity = 0;
+};
+
+/* an owned_array whose records also go by a Ref (record_ref) */
+template <typename T, typename Ref> class record_table : public owned_array<T>
+{
+  public:
+    using owned_array<T>::operator[];
+    T &operator[](Ref r)
+    {
+        return (*this)[static_cast<size_t>(r.index())];
+    }
+    const T &operator[](Ref r) const
+    {
+        return (*this)[static_cast<size_t>(r.index())];
+    }
 };
 
 /*
@@ -330,14 +396,13 @@ class record_chains
     {
         for (size_t i = next.size(); i < records.size(); i++) {
             size_t k = table_slot(key(records[i]));
-            while (ends.size() <= k)
-                ends.append(chain{0, 0});
+            chain &ends = ends_of(k);
             uint32_t at = static_cast<uint32_t>(i + 1);
-            if (ends[k].last)
-                next[ends[k].last - 1] = at;
+            if (ends.last)
+                next[ends.last - 1] = at;
             else
-                ends[k].first = at;
-            ends[k].last = at;
+                ends.first = at;
+            ends.last = at;
             next.append(0);
         }
     }
@@ -345,8 +410,8 @@ class record_chains
     template <typename Key> uint32_t first(Key key) const
     {
         size_t k = table_slot(key);
-        if (k < ends.size())
-            return ends[k].first;
+        if (k / PAGE < page_of.size() && page_of[k / PAGE])
+            return chains[(page_of[k / PAGE] - 1) * PAGE + k % PAGE].first;
         return 0;
     }
     uint32_t after(uint32_t record) const
@@ -358,7 +423,24 @@ class record_chains
     struct chain {
         uint32_t first, last;
     };
-    owned_array<chain> ends;
+    /* the chains' ends by key, in pages made for the keys that have
+       records: most keys have none, and a table with an end per entity was
+       megabytes of zeros.  page_of: a page's number plus one, 0 none */
+    static constexpr size_t PAGE = 64;
+    chain &ends_of(size_t k)
+    {
+        while (page_of.size() <= k / PAGE)
+            page_of.append(0);
+        if (!page_of[k / PAGE]) {
+            chain *made = chains.extend(PAGE);
+            for (size_t i = 0; i < PAGE; i++)
+                made[i] = chain{0, 0};
+            page_of[k / PAGE] = static_cast<uint32_t>(chains.size() / PAGE);
+        }
+        return chains[(page_of[k / PAGE] - 1) * PAGE + k % PAGE];
+    }
+    owned_array<uint32_t> page_of;
+    owned_array<chain> chains;
     owned_array<uint32_t> next;
 };
 

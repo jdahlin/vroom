@@ -134,7 +134,8 @@ bool semantic_analysis::other_function_of_placeholder(entity_index prior,
 {
     const entity &first = entity_table[prior];
     if (first.kind == entity_kind::function) {
-        for (entity_index o = prior; o; o = entity_table[o].next_overload)
+        for (entity_index o = prior; o;
+             o = entity_table[o].details().next_overload)
             if (entity_table[o].kind != entity_kind::function ||
                 same_parameters(type_table, entity_table[o].type.unqualified(),
                                 type.unqualified()))
@@ -218,7 +219,9 @@ analysis_result semantic_analysis::placeholder_declaration(
             allocation_function_declaration) */
          (m.operator_function && !in_member_template_declarator &&
           m.allocation != allocation_function::none) ||
-         m.literal_operator || m.template_id || m.destructor))
+         /* (an explicit specialization's name, [temp.expl.spec]) */
+         m.literal_operator || (m.template_id && !specialization_declarator) ||
+         m.destructor))
         return not_supported_because(
             declaration, "dcl.spec.auto",
             "a placeholder type in this kind of declaration");
@@ -231,7 +234,8 @@ analysis_result semantic_analysis::placeholder_declaration(
         scope = m.namespace_qualifier;
     entity_index prior = entity_table.find(scope, tokens.identifier(m.id));
     if (!placeholder) {
-        for (entity_index f = prior; f; f = entity_table[f].next_overload)
+        for (entity_index f = prior; f;
+             f = entity_table[f].details().next_overload)
             if (entity_table[f].kind == entity_kind::function &&
                 entity_table[f].placeholder_return)
                 return not_supported_because(
@@ -435,7 +439,7 @@ semantic_analysis::deduce_initializer_list(SyntaxElement braced, entity_index e,
 {
     done = false;
     if (type_table[type.unqualified()].kind != type_kind::placeholder ||
-        !entity_table[e].automatic || declaration_deduced.unqualified())
+        declaration_deduced.unqualified())
         return analysis_result::well_formed;
     for (token_index t = current_declaration.first_token();
          t < braced.first_token(); t++)
@@ -484,7 +488,7 @@ semantic_analysis::deduce_initializer_list(SyntaxElement braced, entity_index e,
             return analysis_result::well_formed;
         element = decayed;
     }
-    uint32_t list_template = 0;
+    template_ref list_template = 0;
     VTRY(found, std_class_template(current_declaration, "initializer_list",
                                    list_template));
     if (!list_template)
@@ -497,7 +501,7 @@ semantic_analysis::deduce_initializer_list(SyntaxElement braced, entity_index e,
                                  1, c));
     require_complete(c);
     if (entity_table[c].kind != entity_kind::class_type ||
-        !entity_table[c].size)
+        !entity_table[c].details().size)
         return analysis_result::well_formed;
     type = qualified_type::make(entity_table[c].type.unqualified(), type.cv());
     declaration_deduced =
@@ -530,9 +534,9 @@ analysis_result semantic_analysis::deduced_initialization(
        rules) was not known when its name was declared */
     entity_index closure = 0;
     if (type_table[type.unqualified()].kind == type_kind::class_type &&
-        entity_table[type_table[type.unqualified()].entity].lambda)
+        entity_table[type_table[type.unqualified()].entity].details().lambda)
         closure = type_table[type.unqualified()].entity;
-    if (closure && entity_table[closure].closure_variable == e) {
+    if (closure && entity_table[closure].details().closure_variable == e) {
         /* [abi:closure-types]: a closure type of an inline variable's
            initializer is named after the variable in every translation
            unit */
@@ -625,6 +629,11 @@ bool semantic_analysis::deduce_member_body_now(entity_index e)
     const entity &x = entity_table[e];
     if (x.kind != entity_kind::function)
         return false;
+    /* the name that needs the type may be one a call is choosing: the
+       body's own calls do not replace that */
+    scoped_value<token_index> callee(overloaded_callee, overloaded_callee);
+    scoped_value<token_index> target(overload_target_token,
+                                     overload_target_token);
     if (defining_bodies && x.enclosing == defining_bodies_class &&
         entity_table[x.enclosing].instantiation) {
         for (size_t i = 0; i < defining_bodies->size(); i++) {
@@ -703,11 +712,11 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
            specialization occurs when its definition is instantiated, even
            in an unevaluated operand */
         if (entity_table[e].instantiation) {
-            uint32_t idx = entity_table[e].instantiation - 1;
+            uint32_t idx = entity_table[e].instantiation.index();
             instantiation_record &rec = instantiations[idx];
             const entity tmpl = entity_table[rec.template_entity];
             const function_template ft =
-                function_templates[tmpl.instantiation - 1];
+                function_templates[tmpl.template_record];
             if (!rec.defined && !rec.defining && ft.definition) {
                 rec.quiet = quiet_member_bodies != 0;
                 if (!instantiation_depth && !rec.wanted_by && !unevaluated &&
@@ -734,12 +743,12 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
                 "a variable whose placeholder type is not deduced "
                 "(its initializer was not analysed)");
         if (after.kind == entity_kind::function && after.instantiation) {
-            if (after.unsupported_body)
+            if (after.details().unsupported_body)
                 return not_supported_caused_by(
                     current_declaration, "dcl.spec.auto",
                     "a function template's specialization whose placeholder "
                     "type is not deduced",
-                    body_failures[after.unsupported_body - 1]);
+                    body_failures[after.details().unsupported_body - 1]);
             return not_supported_because(
                 current_declaration, "dcl.spec.auto",
                 "a function template's specialization whose placeholder "

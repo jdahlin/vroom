@@ -73,7 +73,7 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
             !entity_table[c].instantiation)
             return true;
         const instantiation_record &inst =
-            instantiations[entity_table[c].instantiation - 1];
+            instantiations[entity_table[c].instantiation];
         if (inst.argument_count < 1 ||
             template_arguments[inst.first_argument].kind !=
                 template_argument::kind_t::type)
@@ -90,6 +90,22 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
     if (t.kind == type_kind::class_type &&
         type_table[element.unqualified()].kind == type_kind::class_type)
         return list_elements_convert(list, element);
+    /* /5: nor does a string-literal convert to an arithmetic element of
+       an initializer_list ({""} is not the backing array's initializer:
+       std::string{""} calls the const char* constructor) */
+    if (t.kind == type_kind::class_type &&
+        type_table[element.unqualified()].kind == type_kind::fundamental) {
+        owned_array<SyntaxElement> elements;
+        if (list_clauses(list, elements) != analysis_result::well_formed)
+            return true;
+        for (size_t i = 0; i < elements.size(); i++)
+            if (elements[i].is_token() &&
+                tokens[elements[i].token()].kind == token_kind::literal &&
+                tokens[elements[i].token()].literal ==
+                    literal_kind::string_literal)
+                return false;
+        return true;
+    }
     if (type_table[element.unqualified()].kind != type_kind::array)
         return true;
     owned_array<SyntaxElement> clauses;
@@ -347,11 +363,12 @@ void semantic_analysis::overload_set(entity_index e,
                                      owned_array<entity_index> &out) const
 {
     size_t first = out.size();
-    for (entity_index link = e; link; link = entity_table[link].next_overload) {
+    for (entity_index link = e; link;
+         link = entity_table[link].details().next_overload) {
         /* a class's copy of a base's function stands for it */
         e = link;
-        if (entity_table[e].using_shadow_of)
-            e = entity_table[e].using_shadow_of;
+        if (entity_table[e].details().using_shadow_of)
+            e = entity_table[e].details().using_shadow_of;
         bool seen = false;
         for (entity_index other : out)
             if (other == e)
@@ -418,7 +435,7 @@ analysis_result semantic_analysis::best_viable_function(
             first = 1;
         size_t defaults = 0;
         if (c.function)
-            defaults = entity_table[c.function].default_arguments;
+            defaults = entity_table[c.function].details().default_arguments;
         /* default arguments that are not known: the candidate is taken to
            have them until an argument given rules it out */
         bool assumed = c.function &&
@@ -486,6 +503,7 @@ analysis_result semantic_analysis::best_viable_function(
                             type_kind::class_type &&
                         entity_table[type_table[list_target.unqualified()]
                                          .entity]
+                            .details()
                             .size &&
                         !is_aggregate(
                             type_table[list_target.unqualified()].entity)) {
@@ -539,8 +557,8 @@ analysis_result semantic_analysis::best_viable_function(
                                     list_initializer_list(list_target);
                                 if (semantics[value.node].kind ==
                                     semantic_kind::construct)
-                                    a.function = entity_index_in(
-                                        semantics[value.node].b);
+                                    a.function =
+                                        semantics[value.node].entity_b();
                             }
                             if (tr.kind == type_kind::lvalue_reference ||
                                 tr.kind == type_kind::rvalue_reference) {
@@ -652,8 +670,22 @@ analysis_result semantic_analysis::best_viable_function(
         /* [temp.func.order]/3 (CWG2445): with a synthesized candidate of
            reversed parameters, "the order of the function parameters in
            its template is reversed" for the ordering */
+        /* two member templates, one reversed: the implicit object
+           parameter of each stands against the other's parameter, which,
+           depending on a template parameter, gives a unique type no class
+           matches: neither is at least as specialized */
+        auto takes_dependent = [&](const overload_candidate &c) {
+            qualified_type t =
+                entity_table[function_templates[c.template_index].entity].type;
+            return type_table[t.unqualified()].parameter_count == 1 &&
+                   depends_on_template_parameter(
+                       type_table.parameters(t.unqualified())[0]);
+        };
+        bool crossed = x.template_index && y.template_index && x.member &&
+                       y.member && x.reversed != y.reversed &&
+                       takes_dependent(x) && takes_dependent(y);
         if (x.template_index && y.template_index &&
-            x.template_index != y.template_index) {
+            x.template_index != y.template_index && !crossed) {
             /* (an order analysis cannot tell is neither: the final check
                below makes the call unsupported) */
             bool unknown = false;
@@ -673,10 +705,8 @@ analysis_result semantic_analysis::best_viable_function(
            deduct]) and F2 is not": a deduction-guide a program declares is
            better than an implicit one of a constructor */
         if (x.template_index && y.template_index) {
-            const function_template &fx =
-                function_templates[x.template_index - 1];
-            const function_template &fy =
-                function_templates[y.template_index - 1];
+            const function_template &fx = function_templates[x.template_index];
+            const function_template &fy = function_templates[y.template_index];
             if (fx.guide_of && !fx.implicit_guide && fy.guide_of &&
                 fy.implicit_guide)
                 return true;
@@ -693,6 +723,44 @@ analysis_result semantic_analysis::best_viable_function(
             (entity_table[x.function].gnu_flags & gnu_enable_if) >
                 (entity_table[y.function].gnu_flags & gnu_enable_if))
             return true;
+        /* [ext:gnu_attributes] [impl.clang] glibc's _FORTIFY_SOURCE wrappers
+           (open(const char *, int) overloadable beside the variadic open):
+           clang takes the wrapper for its pass_object_size parameter; the
+           wrapper only checks, and vcc calls the library function */
+        if (x.function && y.function &&
+            !(entity_table[x.function].gnu_flags & gnu_overloadable) &&
+            (entity_table[y.function].gnu_flags & gnu_overloadable) &&
+            type_table[entity_table[x.function].type.unqualified()].variadic)
+            return true;
+        /* [impl.clang] (CWG2327) direct-initialization of a class C from
+           another class with a conversion function returning C: clang
+           calls it (the copy or move constructor of its result), over a
+           constructor reached by a conversion to something else */
+        auto takes_result = [&](size_t f) {
+            const struct type &t = type_table[candidates[f].type.unqualified()];
+            if (width != 2 || t.parameter_count != 1)
+                return false;
+            const conversion_sequence &q = ics[f * width + 1];
+            if (q.kind != conversion_sequence::form::user_defined ||
+                !q.function)
+                return false;
+            const struct type &p =
+                type_table[type_table
+                               .parameters(candidates[f].type.unqualified())[0]
+                               .unqualified()];
+            if (p.kind != type_kind::lvalue_reference &&
+                p.kind != type_kind::rvalue_reference)
+                return false;
+            const struct type &returned = type_table
+                [type_table[entity_table[q.function].type.unqualified()]
+                     .operand.unqualified()];
+            const struct type &referred = type_table[p.operand.unqualified()];
+            return returned.kind == type_kind::class_type &&
+                   referred.kind == type_kind::class_type &&
+                   returned.entity == referred.entity;
+        };
+        if (takes_result(f1) && !takes_result(f2))
+            return true;
         /* (2.6) "F1 is a constructor for a class D, F2 is a constructor
            for a base class B of D, and for all arguments the corresponding
            parameters of F1 and F2 have the same type": F2 is one D
@@ -700,8 +768,8 @@ analysis_result semantic_analysis::best_viable_function(
         if (x.function && y.function && !x.template_index &&
             !y.template_index &&
             entity_table[x.function].special == special_member::constructor &&
-            !entity_table[x.function].inherited_constructor &&
-            entity_table[y.function].inherited_constructor &&
+            !entity_table[x.function].details().inherited_constructor &&
+            entity_table[y.function].details().inherited_constructor &&
             entity_table[x.function].enclosing ==
                 entity_table[y.function].enclosing) {
             const qualified_type *p1 = type_table.parameters(
@@ -780,6 +848,14 @@ analysis_result semantic_analysis::best_viable_function(
                           "function, and the invocation is ill-formed",
                           "over.match");
     }
+    if (candidates[w].late)
+        for (size_t i = 0; i < candidates.size(); i++)
+            if (state[i] != viability::not_viable && !candidates[i].late &&
+                candidates[i].function != candidates[w].function)
+                return not_supported_because(
+                    at, "temp.dep.candidate",
+                    "a function declared after the template that is better "
+                    "than one declared before it");
     /* [temp.func.order]/6: two specializations of unconstrained function
        templates that partial ordering finds equally specialized
        ([temp.deduct.partial]/10) are indistinguishable, so
@@ -824,9 +900,9 @@ analysis_result semantic_analysis::best_viable_function(
             entity_table[x.function].enclosing !=
                 entity_table[y.function].enclosing)
             return false;
-        const uint32_t both[2] = {x.template_index, y.template_index};
-        for (uint32_t t : both) {
-            SyntaxRef d = function_templates[t - 1].declaration;
+        const template_ref both[2] = {x.template_index, y.template_index};
+        for (template_ref t : both) {
+            SyntaxRef d = function_templates[t].declaration;
             if (template_head_constrained(d) || trailing_constraint(d) ||
                 uses_decltype(d))
                 return false;

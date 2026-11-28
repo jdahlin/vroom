@@ -291,7 +291,7 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
            in the slot after the complete object one destroys and
            deallocates the most derived object ([abi:vtable-components]) */
         uint32_t callee =
-            virtual_function(entity_index_in(node(n.b).b), variable(), n.at, 1);
+            virtual_function(node(n.b).entity_b(), variable(), n.at, 1);
         if (!callee)
             return 0;
         uint32_t argument = variable();

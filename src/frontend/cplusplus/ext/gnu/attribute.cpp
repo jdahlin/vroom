@@ -614,6 +614,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     uint32_t standard = 0;
     if (token_index tag = scoped_gnu_abi_tag(n))
         return add_gnu_abi_tag(n, tag, g);
+    if (scoped_gnu_function_hint(n))
+        return analysis_result::well_formed;
     if (n.is(syntax_kind::attribute_specifier) &&
         attributes_as_gnu(n, standard)) {
         g.flags |= standard;
@@ -637,6 +639,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             else if (c.is(syntax_kind::attribute_specifier) &&
                      attributes_as_gnu(c, standard))
                 g.flags |= standard;
+            else if (scoped_gnu_function_hint(c))
+                continue;
             else if (!c.is_token())
                 return not_supported_because(
                     n, "ext.gnu",
