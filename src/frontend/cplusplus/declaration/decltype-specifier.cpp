@@ -98,6 +98,20 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
             n, "dcl.type.decltype",
             "a decltype-specifier of an unexpected shape");
     SyntaxElement operand = n[2];
+    /* [ext:clang_pack_indexing] an unparenthesized E...[I] is its element's
+       unparenthesized id-expression (not a type-dependent one, below) */
+    uint32_t element = 0;
+    bool indexed = false;
+    if (operand.is_node() &&
+        operand.is(syntax_kind::clang_pack_index_expression)) {
+        bool dependent = false;
+        VTRY(r, pack_index(operand, element, dependent));
+        if (!dependent) {
+            indexed = true;
+            operand = operand[0];
+        }
+    }
+    expansion_scope scope(*this, indexed, element);
     if (operand.is_token() && operand.is_identifier()) {
         lookup_result found = lookup_unqualified(
             tokens.identifier(operand.token()), lookup_filter::any);
@@ -115,7 +129,7 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
     }
     /* an operand that names a template parameter (or a type that depends
        on one) is type-dependent ([temp.dep.expr]): not analysed */
-    if (names_dependent_entity(n.first_token(), n.end_token())) {
+    if (!indexed && names_dependent_entity(n.first_token(), n.end_token())) {
         /* [temp.dep.expr]/4: "Expressions of the following forms are never
            type-dependent (because the type of the expression cannot be
            dependent): ... sizeof unary-expression, sizeof ( type-id ),
@@ -900,12 +914,19 @@ void semantic_analysis::collect_written_bindings(
             }
             continue;
         }
-        /* (sizeof...(P) is mangled by P's position whatever P is) */
+        /* (sizeof...(P) is mangled by P's position whatever P is; P...[I]
+           names the pack whatever its elements are) */
+        bool indexed =
+            t.index() + 2 < n.end_token().index() &&
+            tokens[t + 1].kind == token_kind::operator_or_punctuator &&
+            is_operator(tokens[t + 1], preprocessing_op_or_punc::ELLIPSIS) &&
+            tokens[t + 2].kind == token_kind::operator_or_punctuator &&
+            is_operator(tokens[t + 2], preprocessing_op_or_punc::LEFT_BRACKET);
         bool measured =
             t.index() >= 2 &&
             tokens[t - 2].kind == token_kind::operator_or_punctuator &&
             is_operator(tokens[t - 2], preprocessing_op_or_punc::ELLIPSIS);
-        if (!pack || (!pack_depends(pack) && !measured))
+        if (!pack || (!pack_depends(pack) && !measured && !indexed))
             continue;
         for (uint32_t i = 0; i < entity_table[pack].member_count; i++) {
             entity_index a = pack_elements[entity_table[pack].value + i];

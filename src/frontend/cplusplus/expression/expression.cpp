@@ -272,6 +272,8 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
         return clang_bit_cast(e, m);
     case syntax_kind::clang_convertvector_expression:
         return clang_convertvector(e, m);
+    case syntax_kind::clang_pack_index_expression:
+        return pack_index_expression(e, m);
     case syntax_kind::clang_source_location_expression:
         return clang_source_location(e, m);
     case syntax_kind::operator_function_id: {

@@ -693,9 +693,23 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                 break;
             unsigned length = 0;
             name_class c = classify_name(0, &length);
-            if (c == name_class::concept_ &&
-                (at(standard_keyword::auto_, length) ||
-                 at(standard_keyword::decltype_, length))) {
+            if (pack_index_follows() &&
+                (c == name_class::type || c == name_class::unknown)) {
+                /* [ext:clang_pack_indexing] a simple-type-specifier */
+                clang_pack_index(syntax_kind::clang_pack_index_specifier);
+                if (failed())
+                    return 0;
+                facts.has_defining_type_specifier = true;
+            } else if (pack_index_follows() &&
+                       (c == name_class::type || c == name_class::unknown)) {
+                /* [ext:clang_pack_indexing] a simple-type-specifier */
+                clang_pack_index(syntax_kind::clang_pack_index_specifier);
+                if (failed())
+                    return 0;
+                facts.has_defining_type_specifier = true;
+            } else if (c == name_class::concept_ &&
+                       (at(standard_keyword::auto_, length) ||
+                        at(standard_keyword::decltype_, length))) {
                 /* placeholder-type-specifier: type-constraint auto,
                    type-constraint decltype(auto) ([dcl.spec.auto]) */
                 size_t placeholder_mark = begin_node();
@@ -1262,6 +1276,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                                  syntax_kind::clang_type_transformation,
                                  syntax_kind::clang_atomic_type_specifier,
                                  syntax_kind::clang_bit_int_type_specifier,
+                                 syntax_kind::clang_pack_index_specifier,
                                  syntax_kind::placeholder_type_specifier))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
@@ -1388,6 +1403,13 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                     unsigned_bit_int = false;
                 r = clang_bit_int_type(c, unsigned_bit_int, denoted);
                 class_type = denoted.unqualified();
+            } else if (c.is(syntax_kind::clang_pack_index_specifier)) {
+                /* [ext:clang_pack_indexing] */
+                qualified_type denoted;
+                uint32_t named_cv = 0;
+                r = pack_index_type(c, denoted, named_cv);
+                class_type = denoted.unqualified();
+                cv |= named_cv;
             } else if (c.is(syntax_kind::placeholder_type_specifier)) {
                 /* [dcl.spec.auto]: decltype(auto); a type-constraint is
                    [temp.param]'s */
@@ -1465,6 +1487,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                       syntax_kind::clang_type_transformation,
                       syntax_kind::clang_atomic_type_specifier,
                       syntax_kind::clang_bit_int_type_specifier,
+                      syntax_kind::clang_pack_index_specifier,
                       syntax_kind::placeholder_type_specifier))
                 declares_class = true;
             continue;

@@ -155,6 +155,9 @@ EXTENSION(clang_pragma_attribute, clang,
           "target(\"features\") attribute over the functions defined between them")
 EXTENSION(clang_bit_int, clang,
           "clang Language Extensions, _BitInt (C23 6.2.5) in C++: _BitInt(N) a type-specifier")
+EXTENSION(clang_pack_indexing, clang,
+          "clang Language Extensions, Pack indexing: C++26's T...[I] and e...[I] "
+          "(P2662R3) in every language mode (libc++'s tuple)")
 EXTENSION(clang_ext_vector_type, clang,
           "clang Language Extensions, Vectors and Extended Vectors: "
           "__attribute__((ext_vector_type(N))) on an alias-declaration, a vector of N "
