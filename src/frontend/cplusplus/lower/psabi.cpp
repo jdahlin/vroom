@@ -172,7 +172,7 @@ void c_lowering::psabi_call(const semantic_node &n, uint32_t call)
     } else {
         while (spelled(at + 1, ".") || spelled(at + 1, "->"))
             at += 2;
-        while (at > 2 && spelled(at - 1, "::"))
+        while (at.index() > 2 && spelled(at - 1, "::"))
             at -= 2;
     }
     ast_builder_psabi_site(c, AST_BUILDER_PSABI_CALL, call,

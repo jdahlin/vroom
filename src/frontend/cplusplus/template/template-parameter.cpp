@@ -51,7 +51,7 @@ bool type_parameter_follows(parser &p, unsigned ahead)
     if (p.at(preprocessing_op_or_punc::COMMA, ahead) ||
         p.at(preprocessing_op_or_punc::EQUAL, ahead))
         return true;
-    unsigned saved = p.position;
+    token_index saved = p.position;
     p.position += ahead;
     bool closing = p.at_closing_angle();
     p.position = saved;

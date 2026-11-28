@@ -194,7 +194,7 @@ void syntax_tree::dump(node_index n, token_stream &tokens, vbuffer *out) const
         if (c.is_token()) {
             for (size_t i = 0; i < path.size(); i++)
                 vbuffer_append(out, "  ", 2);
-            write_child_token(c.index());
+            write_child_token(token_index{c.index()});
             vbuffer_append(out, "\n", 1);
         } else {
             write_line(c.node(), path.size());

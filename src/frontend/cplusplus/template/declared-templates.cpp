@@ -1550,7 +1550,7 @@ bool semantic_analysis::same_dependent_parameter_type(SyntaxRef a, SyntaxRef b)
         eb = default_argument_start(y.default_argument) - 1;
     if (ea - a.first_token() != eb - b.first_token())
         return false;
-    for (token_index i = 0; i < ea - a.first_token(); i++)
+    for (uint32_t i = 0; i < ea - a.first_token(); i++)
         if (!same_token_spelling(a.first_token() + i, b.first_token() + i))
             return false;
     return ea > a.first_token();

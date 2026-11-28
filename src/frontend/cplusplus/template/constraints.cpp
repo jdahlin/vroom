@@ -508,7 +508,7 @@ bool semantic_analysis::same_tokens(SyntaxRef a, SyntaxRef b)
 {
     if (a.end_token() - a.first_token() != b.end_token() - b.first_token())
         return false;
-    for (token_index i = 0; i < a.end_token() - a.first_token(); i++)
+    for (uint32_t i = 0; i < a.end_token() - a.first_token(); i++)
         if (!same_token_spelling(a.first_token() + i, b.first_token() + i))
             return false;
     return true;

@@ -245,7 +245,7 @@ analysis_result semantic_analysis::gnu_asm_operand(GnuAsmOperand n, bool output,
             VTRY_SET(r, operand_value(n, m));
     }
     built = expression_node(semantic_kind::gnu_asm_operand, m, constraint,
-                            m.node, name);
+                            m.node, name.index());
     semantics[built].value = output;
     return analysis_result::well_formed;
 }
@@ -307,9 +307,9 @@ analysis_result semantic_analysis::gnu_asm_statement(GnuAsmStatement n,
         } else if (section == 3 && c.is_token() &&
                    !c.is(preprocessing_op_or_punc::COMMA) &&
                    !c.is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-            clobbers.append(c.token());
+            clobbers.append(c.token().index());
         } else if (section == 4 && c.is_identifier()) {
-            labels.append(c.token());
+            labels.append(c.token().index());
         }
     }
     if (result != analysis_result::well_formed)
@@ -320,9 +320,9 @@ analysis_result semantic_analysis::gnu_asm_statement(GnuAsmStatement n,
         flags |= 8;
     /* symbolic names are unique among the operands */
     for (size_t a = 0; a < operands.size(); a++) {
-        token_index name = semantics[operands[a]].b;
+        token_index name{semantics[operands[a]].b};
         for (size_t b = 0; name && b < a; b++) {
-            token_index other = semantics[operands[b]].b;
+            token_index other{semantics[operands[b]].b};
             if (other && tokens.identifier(other) == tokens.identifier(name))
                 return ill_formed(n, "duplicate symbolic operand name",
                                   "ext.gnu");

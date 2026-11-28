@@ -121,12 +121,15 @@ bool dump_parsing_selftest(vbuffer *out)
     }
     {
         syntax_tree tree;
-        node_index a = tree.make(syntax_kind::unparsed, nullptr, 0, 0, 2);
+        node_index a =
+            tree.make(syntax_kind::unparsed, nullptr, 0, 0, token_index{2});
         size_t size = tree.size();
-        node_index b = tree.make(syntax_kind::unparsed, nullptr, 0, 2, 3);
+        node_index b = tree.make(syntax_kind::unparsed, nullptr, 0,
+                                 token_index{2}, token_index{3});
         syntax_child both[] = {syntax_child::node(a), syntax_child::node(b),
-                               syntax_child::token(3)};
-        node_index seq = tree.make(syntax_kind::declaration_seq, both, 3, 0, 4);
+                               syntax_child::token(token_index{3})};
+        node_index seq =
+            tree.make(syntax_kind::declaration_seq, both, 3, 0, token_index{4});
         ok &= parsing_check(out,
                             tree[seq].child_count == 3 &&
                                 tree.children(seq)[1].node() == b &&
@@ -142,7 +145,8 @@ bool dump_parsing_selftest(vbuffer *out)
                                 tree.count(syntax_kind::unparsed) == 1 &&
                                 tree.count(syntax_kind::declaration_seq) == 0,
                             "truncate takes back the nodes of a failed parse");
-        node_index c = tree.make(syntax_kind::declaration_seq, both, 1, 0, 2);
+        node_index c =
+            tree.make(syntax_kind::declaration_seq, both, 1, 0, token_index{2});
         ok &= parsing_check(out,
                             c == b && tree[c].first_child == 0 &&
                                 tree.children(c)[0].node() == a,
@@ -186,7 +190,7 @@ static void dump_parenthesized(const syntax_tree &tree, token_stream &tokens,
         bool parentheses;
     };
     owned_array<level> path;
-    token_index split_written = UINT32_MAX;
+    token_index split_written = token_index{UINT32_MAX};
     auto enter = [&](node_index n) {
         const syntax_node &s = tree[n];
         if (s.kind == syntax_kind::decltype_specifier ||
@@ -201,10 +205,10 @@ static void dump_parenthesized(const syntax_tree &tree, token_stream &tokens,
         if (s.kind == syntax_kind::postfix_expression && s.child_count) {
             syntax_child last = tree.children(n)[s.child_count - 1];
             if (last.is_token() &&
-                tokens[last.index()].kind ==
+                tokens[token_index{last.index()}].kind ==
                     token_kind::operator_or_punctuator &&
                 preprocessing_op_or_punc_primary(
-                    tokens[last.index()].op_or_punc) ==
+                    tokens[token_index{last.index()}].op_or_punc) ==
                     preprocessing_op_or_punc::RIGHT_PARENTHESIS)
                 parentheses = false;
         }
@@ -223,20 +227,21 @@ static void dump_parenthesized(const syntax_tree &tree, token_stream &tokens,
             continue;
         }
         syntax_child c = tree.children(top.node)[top.next_child++];
-        if (c.is_token() && tree.is_split(c.index())) {
+        if (c.is_token() && tree.is_split(token_index{c.index()})) {
             /* a split '>>': its first '>', then the rest */
-            if (split_written != c.index()) {
+            if (split_written != token_index{c.index()}) {
                 vbuffer_append(out, "> ", 2);
-                split_written = c.index();
+                split_written = token_index{c.index()};
             } else {
                 owned_buffer spelling;
-                tokens.spelling(c.index(), spelling.get());
+                tokens.spelling(token_index{c.index()}, spelling.get());
                 vbuffer_append(out, spelling.data() + 1, spelling.size() - 1);
                 vbuffer_append(out, " ", 1);
-                split_written = UINT32_MAX;
+                split_written = token_index{UINT32_MAX};
             }
         } else if (c.is_token())
-            dump_spelled_tokens(tokens, c.index(), c.index() + 1, out);
+            dump_spelled_tokens(tokens, token_index{c.index()},
+                                token_index{c.index() + 1}, out);
         else
             enter(c.node());
     }

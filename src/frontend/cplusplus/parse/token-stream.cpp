@@ -56,9 +56,10 @@ uint32_t token_stream::target_pragma_at(token_index i)
 
 void token_stream::resume()
 {
-    make_through(static_cast<token_index>(-2));
+    make_through(token_index{UINT32_MAX - 1});
     has_lookahead = false;
-    preprocessing_tokens.resize(first_piece[tokens.size() - 1]);
+    preprocessing_tokens.resize(
+        first_piece[token_index{static_cast<uint32_t>(tokens.size() - 1)}]);
     first_piece.resize(tokens.size() - 1);
     identifiers.resize(tokens.size() - 1);
     tokens.resize(tokens.size() - 1);
@@ -67,17 +68,19 @@ void token_stream::resume()
 
 void token_stream::make_more(token_index i)
 {
-    while (!complete && tokens.size() <= i) {
+    while (!complete && tokens.size() <= i.index()) {
         preprocessing_token first = read();
         if (files.layout_pragma != layout_pragma_before) {
             /* a layout pragma ran before this token */
             layout_pragma_before = files.layout_pragma;
-            layout_change_at.append(static_cast<token_index>(tokens.size()));
+            layout_change_at.append(
+                token_index{static_cast<uint32_t>(tokens.size())});
             layout_change_to.append(layout_pragma_before);
         }
         if (files.target_pragma != target_pragma_before) {
             target_pragma_before = files.target_pragma;
-            target_change_at.append(static_cast<token_index>(tokens.size()));
+            target_change_at.append(
+                token_index{static_cast<uint32_t>(tokens.size())});
             target_change_to.append(target_pragma_before);
         }
         first_piece.append(static_cast<uint32_t>(preprocessing_tokens.size()));
@@ -133,7 +136,7 @@ void token_stream::make_more(token_index i)
 const token &token_stream::operator[](token_index i)
 {
     make_through(i);
-    if (i < tokens.size())
+    if (i.index() < tokens.size())
         return tokens[i];
     return tokens.back();
 }
@@ -141,16 +144,16 @@ const token &token_stream::operator[](token_index i)
 bool token_stream::at_end(token_index i)
 {
     make_through(i);
-    return i + 1 >= tokens.size() && complete;
+    return i.index() + 1 >= tokens.size() && complete;
 }
 
 const preprocessing_token *token_stream::pieces(token_index i, size_t *count)
 {
     make_through(i);
-    if (i >= tokens.size())
-        i = static_cast<token_index>(tokens.size() - 1);
+    if (i.index() >= tokens.size())
+        i = token_index{static_cast<uint32_t>(tokens.size() - 1)};
     size_t end = preprocessing_tokens.size();
-    if (i + 1 < tokens.size())
+    if (i.index() + 1 < tokens.size())
         end = first_piece[i + 1];
     *count = end - first_piece[i];
     return preprocessing_tokens.data() + first_piece[i];
@@ -188,9 +191,9 @@ size_t token_stream::spelling(token_index i, vbuffer *out)
 uint32_t token_stream::identifier(token_index i)
 {
     const token &t = (*this)[i];
-    if (i < identifiers.size() && t.kind != token_kind::identifier)
+    if (i.index() < identifiers.size() && t.kind != token_kind::identifier)
         return identifiers[i];
-    if (t.kind != token_kind::identifier || i >= tokens.size())
+    if (t.kind != token_kind::identifier || i.index() >= tokens.size())
         return 0;
     if (!identifiers[i])
         identifiers[i] = pp.identifier(t.preprocessing) + 1;
@@ -199,7 +202,7 @@ uint32_t token_stream::identifier(token_index i)
 
 void token_stream::name_token(token_index i, uint32_t id)
 {
-    if (i < identifiers.size())
+    if (i.index() < identifiers.size())
         identifiers[i] = id;
 }
 
