@@ -1697,7 +1697,8 @@ void semantic_analysis::implicitly_non_throwing(declarator_meaning &m,
         tokens.files.behavior.has(
             language_feature::exception_specification_in_type)) {
         owned_array<qualified_type> parameters;
-        const qualified_type *list = type_table.parameters(type.unqualified());
+        checked_span<const qualified_type> list =
+            type_table.parameters(type.unqualified());
         for (uint32_t i = 0; i < f.parameter_count; i++)
             parameters.append(list[i]);
         type = qualified_type::make(

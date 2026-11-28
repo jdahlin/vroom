@@ -103,7 +103,7 @@ uint32_t c_lowering::try_statement(const semantic_node &n)
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     uint32_t exception = c_local(c, vp);
     owned_array<ast_builder_catch> handlers;
-    const uint32_t *items = analysis.semantics.items(n.first);
+    checked_span<const uint32_t> items = analysis.semantics.items(n.first);
     for (uint32_t i = 0; i < n.count; i++) {
         const semantic_node &h = node(items[i]);
         ast_builder_catch k = {};

@@ -33,7 +33,7 @@ bool semantic_analysis::defaulted_equality_declared(entity_index c,
         return false;
     if (!three_way && fundamental_of(f.operand) != fundamental_type::bool_)
         return false;
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         type_table.parameters(type.unqualified());
     qualified_type object =
         qualified_type::make(entity_table[c].type.unqualified(), cv_none);

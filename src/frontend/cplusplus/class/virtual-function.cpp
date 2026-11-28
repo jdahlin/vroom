@@ -68,7 +68,8 @@ bool semantic_analysis::covariant_override(type_index base_function,
                                br.kind != type_kind::rvalue_reference))
         return false;
     /* the rest of the type is the base function's */
-    if (type_table.function(d.operand, type_table.parameters(base_function),
+    if (type_table.function(d.operand,
+                            type_table.parameters(base_function).data(),
                             b.parameter_count, b.variadic, b.non_throwing,
                             b.function_cv, b.function_ref) != function)
         return false;
@@ -694,7 +695,7 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                     n, "class.abstract",
                     "a member function returning the class itself in an "
                     "abstract class");
-            const qualified_type *ps =
+            checked_span<const qualified_type> ps =
                 type_table.parameters(m.type.unqualified());
             for (uint32_t i = 0; i < t.parameter_count; i++)
                 if (ps[i].unqualified() == self)

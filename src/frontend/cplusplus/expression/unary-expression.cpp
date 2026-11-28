@@ -329,7 +329,8 @@ bool semantic_analysis::has_variable_bound(qualified_type t) const
             t = r.operand;
             continue;
         case type_kind::function: {
-            const qualified_type *p = type_table.parameters(t.unqualified());
+            checked_span<const qualified_type> p =
+                type_table.parameters(t.unqualified());
             for (uint32_t i = 0; i < r.parameter_count; i++)
                 if (has_variable_bound(p[i]))
                     return true;

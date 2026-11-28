@@ -717,8 +717,10 @@ bool semantic_analysis::differ_in_exceptions(qualified_type a,
         x.variadic != y.variadic || x.parameter_count != y.parameter_count ||
         a.cv() != b.cv())
         return false;
-    const qualified_type *xp = type_table.parameters(a.unqualified());
-    const qualified_type *yp = type_table.parameters(b.unqualified());
+    checked_span<const qualified_type> xp =
+        type_table.parameters(a.unqualified());
+    checked_span<const qualified_type> yp =
+        type_table.parameters(b.unqualified());
     for (uint32_t i = 0; i < x.parameter_count; i++)
         if (!(xp[i] == yp[i]))
             return false;

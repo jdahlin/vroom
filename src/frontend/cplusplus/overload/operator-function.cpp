@@ -351,7 +351,7 @@ analysis_result semantic_analysis::operator_function_declaration(SyntaxRef n,
     const entity &x = entity_table[f];
     preprocessing_op_or_punc op = x.implemented;
     const struct type &function = type_table[x.type.unqualified()];
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         type_table.parameters(x.type.unqualified());
     bool member = x.enclosing &&
                   entity_table[x.enclosing].kind == entity_kind::class_type;

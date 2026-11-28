@@ -1420,7 +1420,7 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, template_ref ct,
             if (ftype.kind != type_kind::function || ftype.variadic ||
                 ftype.parameter_count != arguments.size())
                 continue;
-            const qualified_type *params =
+            checked_span<const qualified_type> params =
                 type_table.parameters(ctor_type.unqualified());
             owned_array<template_argument> values;
             owned_array<bool> set;

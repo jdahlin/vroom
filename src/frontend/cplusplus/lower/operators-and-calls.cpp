@@ -767,7 +767,7 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
             callee = node(callee).a;
         const gnu_builtin &row = gnu_builtin_at(
             analysis.entity_table[node(callee).entity_a()].gnu_builtin_row);
-        const uint32_t *items = analysis.semantics.items(n.first);
+        checked_span<const uint32_t> items = analysis.semantics.items(n.first);
         bool pointer = record(node(items[0]).type).kind == type_kind::pointer;
         uint32_t alignment = items[1];
         while (node(alignment).kind == semantic_kind::conversion)
@@ -932,7 +932,8 @@ uint32_t c_lowering::call(const semantic_node &n)
         if (node(named).kind == semantic_kind::entity &&
             (analysis.entity_table[node(named).entity_a()].gnu_flags &
              gnu_coroutine_builtin)) {
-            const uint32_t *items = analysis.semantics.items(n.first);
+            checked_span<const uint32_t> items =
+                analysis.semantics.items(n.first);
             uint32_t seq = 0;
             uint32_t first_arg = 0;
             for (uint32_t i = 0; i < n.count; i++) {
@@ -1007,7 +1008,8 @@ uint32_t c_lowering::call(const semantic_node &n)
                       !memcmp(fn_name.data(), "forward", 7)) ||
                      (fn_name.size() == 8 &&
                       !memcmp(fn_name.data(), "as_const", 8)))) {
-                    const uint32_t *items = analysis.semantics.items(n.first);
+                    checked_span<const uint32_t> items =
+                        analysis.semantics.items(n.first);
                     uint32_t arg = expression(items[0]);
                     if (!arg)
                         return 0;
@@ -1028,7 +1030,8 @@ uint32_t c_lowering::call(const semantic_node &n)
              gnu_library_function)) {
             owned_buffer fn_name;
             spelling(node(named).entity_a(), fn_name);
-            const uint32_t *items = analysis.semantics.items(n.first);
+            checked_span<const uint32_t> items =
+                analysis.semantics.items(n.first);
             const semantic_node &a0 = node(items[0]);
             if (a0.kind == semantic_kind::constant &&
                 record(a0.type).kind == type_kind::fundamental &&
@@ -1112,9 +1115,9 @@ uint32_t c_lowering::call(const semantic_node &n)
             arguments.append(object);
         }
     }
-    const uint32_t *items = analysis.semantics.items(n.first);
+    checked_span<const uint32_t> items = analysis.semantics.items(n.first);
     const struct type &ft = record(function_type);
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         analysis.type_table.parameters(function_type.unqualified());
     for (uint32_t i = 0; i < n.count; i++) {
         uint32_t a = 0;

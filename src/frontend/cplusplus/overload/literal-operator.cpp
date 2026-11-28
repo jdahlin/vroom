@@ -125,7 +125,7 @@ analysis_result semantic_analysis::literal_operator_declaration(SyntaxRef n,
        empty parameter-declaration-clause */
     if (x.instantiation && !function.parameter_count)
         return analysis_result::well_formed;
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         type_table.parameters(x.type.unqualified());
     auto character = [](fundamental_type t) {
         return t == fundamental_type::char_ ||

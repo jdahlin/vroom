@@ -47,6 +47,43 @@ inline void check_element(bool there)
 #endif
 }
 
+/* A run of count elements that belong to someone else.  A subscript is
+   checked in an ASan build, and the pointer is had only by asking (data()),
+   so a run does not lose its length on the way. */
+template <typename T> class checked_span
+{
+  public:
+    checked_span() = default;
+    checked_span(T *first, size_t count) : elements(first), length(count)
+    {
+    }
+    T &operator[](size_t i) const
+    {
+        check_element(i < length);
+        return elements[i];
+    }
+    T *data() const
+    {
+        return elements;
+    }
+    size_t size() const
+    {
+        return length;
+    }
+    T *begin() const
+    {
+        return elements;
+    }
+    T *end() const
+    {
+        return elements + length;
+    }
+
+  private:
+    T *elements = nullptr;
+    size_t length = 0;
+};
+
 /* Index: the type operator[] takes.  In an ASan build every subscript is
    checked, and the room past the last element is poisoned, so a pointer
    from data() that runs past the end is reported too. */

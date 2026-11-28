@@ -820,8 +820,10 @@ analysis_result semantic_analysis::musttail_return(Statement n, uint32_t built)
                           "incompatible with the calling function: target "
                           "function has different number of parameters",
                           "stmt.return");
-    const qualified_type *mine = type_table.parameters(caller.unqualified());
-    const qualified_type *theirs = type_table.parameters(callee.unqualified());
+    checked_span<const qualified_type> mine =
+        type_table.parameters(caller.unqualified());
+    checked_span<const qualified_type> theirs =
+        type_table.parameters(callee.unqualified());
     auto destroyed_class = [&](qualified_type t) {
         const struct type &k = type_table[t.unqualified()];
         return k.kind == type_kind::class_type && destroys(k.entity);

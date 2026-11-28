@@ -63,7 +63,7 @@ constness semantic_analysis::evaluate_integer_builtin(
     constant_evaluation &state, const gnu_builtin &b, const semantic_node &call,
     constant_value &v)
 {
-    const uint32_t *items = semantics.items(call.first);
+    checked_span<const uint32_t> items = semantics.items(call.first);
     constant_value x[2];
     for (uint32_t i = 0; i < call.count && i < 2; i++) {
         constness c = evaluate_node(state, items[i], x[i]);
@@ -132,7 +132,7 @@ constness semantic_analysis::evaluate_floating_classification(
     constant_evaluation &state, const gnu_builtin &b, const semantic_node &call,
     constant_value &v)
 {
-    const uint32_t *items = semantics.items(call.first);
+    checked_span<const uint32_t> items = semantics.items(call.first);
     uint32_t last = call.count - 1;
     constant_value x[2];
     /* fpclassify's five leading arguments are the classes' values */
@@ -287,7 +287,7 @@ constness semantic_analysis::evaluate_string_builtin(constant_evaluation &state,
                                                      const semantic_node &call,
                                                      constant_value &v)
 {
-    const uint32_t *items = semantics.items(call.first);
+    checked_span<const uint32_t> items = semantics.items(call.first);
     /* (memcmp and memchr take void pointers: the pointer is the argument
        before the conversions to void and from a more cv-qualified type,
        which is the same address, and its type tells the elements') */
@@ -472,7 +472,7 @@ semantic_analysis::evaluate_classify_type_builtin(const semantic_node &call,
 constness semantic_analysis::evaluate_object_size_builtin(
     constant_evaluation &state, const semantic_node &call, constant_value &v)
 {
-    const uint32_t *items = semantics.items(call.first);
+    checked_span<const uint32_t> items = semantics.items(call.first);
     if (call.count != 2)
         return constness::unknown;
     /* (the pointer as written, before the conversion to const void *) */
@@ -526,7 +526,7 @@ constness semantic_analysis::evaluate_overflow_builtin(
     constant_evaluation &state, const gnu_builtin &b, const semantic_node &call,
     constant_value &v)
 {
-    const uint32_t *items = semantics.items(call.first);
+    checked_span<const uint32_t> items = semantics.items(call.first);
     if (call.count != 3)
         return constness::unknown;
     constant_value x[3];

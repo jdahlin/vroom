@@ -455,8 +455,10 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             pr.function_cv != ar.function_cv ||
             pr.function_ref != ar.function_ref)
             return false;
-        const qualified_type *pp = type_table.parameters(p.unqualified());
-        const qualified_type *ap = type_table.parameters(a.unqualified());
+        checked_span<const qualified_type> pp =
+            type_table.parameters(p.unqualified());
+        checked_span<const qualified_type> ap =
+            type_table.parameters(a.unqualified());
         /* [temp.deduct.type]/10: "if the parameter-declaration
            corresponding to P_i is a function parameter pack, then the type
            of its declarator-id is compared with each remaining parameter
@@ -980,7 +982,7 @@ analysis_result semantic_analysis::deduce_from_call(
     const struct function_template &ft = function_templates[function_template];
     qualified_type type = entity_table[ft.entity].type;
     const struct type f = type_table[type.unqualified()];
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         type_table.parameters(type.unqualified());
     /* [temp.deduct.call]/1: "For a function parameter pack that occurs at
        the end of the parameter-declaration-list, deduction is performed

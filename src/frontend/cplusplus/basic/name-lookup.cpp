@@ -794,7 +794,7 @@ bool semantic_analysis::associated_with(qualified_type t,
     case type_kind::block_pointer:
         return associated_with(record.operand, classes, namespaces, complete);
     case type_kind::function: {
-        const qualified_type *parameters =
+        checked_span<const qualified_type> parameters =
             type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < record.parameter_count; i++)
             if (!associated_with(parameters[i], classes, namespaces, complete))

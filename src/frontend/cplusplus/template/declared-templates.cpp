@@ -962,7 +962,8 @@ VPRIV bool made_of_template_parameter(const types &table, qualified_type t,
     case type_kind::function: {
         if (made_of_template_parameter(table, r.operand, parameters, from))
             return true;
-        const qualified_type *p = table.parameters(t.unqualified());
+        checked_span<const qualified_type> p =
+            table.parameters(t.unqualified());
         for (uint32_t i = 0; i < r.parameter_count; i++)
             if (made_of_template_parameter(table, p[i], parameters, from))
                 return true;

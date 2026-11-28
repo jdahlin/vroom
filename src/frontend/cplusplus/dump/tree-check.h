@@ -146,7 +146,8 @@ struct tree_checker {
     void list(uint32_t parent, tree_sort sort, const char *what)
     {
         const semantic_node &node = analysis.semantics[parent];
-        const uint32_t *items = analysis.semantics.items(node.first);
+        checked_span<const uint32_t> items =
+            analysis.semantics.items(node.first);
         for (uint32_t i = 0; i < node.count; i++)
             child(parent, items[i], sort, false, what);
     }

@@ -105,7 +105,7 @@ bool c_lowering::without_linkage(qualified_type t) const
             t = r.operand;
             continue;
         case type_kind::function: {
-            const qualified_type *p =
+            checked_span<const qualified_type> p =
                 analysis.type_table.parameters(t.unqualified());
             for (uint32_t i = 0; i < r.parameter_count; i++)
                 if (without_linkage(p[i]))
@@ -194,7 +194,7 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
         break;
     case type_kind::function: {
         owned_array<ast_qualified_type> parameters;
-        const qualified_type *p =
+        checked_span<const qualified_type> p =
             analysis.type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < r.parameter_count; i++)
             parameters.append(parameter_type(p[i], at));
@@ -643,7 +643,7 @@ ast_qualified_type c_lowering::member_function_type(qualified_type object,
     const struct type &f = record(function);
     owned_array<ast_qualified_type> parameters;
     parameters.append(pointer_to(type(object, at)));
-    const qualified_type *p =
+    checked_span<const qualified_type> p =
         analysis.type_table.parameters(function.unqualified());
     for (uint32_t i = 0; i < f.parameter_count; i++)
         parameters.append(parameter_type(p[i], at));

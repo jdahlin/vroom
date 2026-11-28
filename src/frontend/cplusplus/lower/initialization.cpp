@@ -59,12 +59,12 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
                                   uint32_t vtt, token_index at)
 {
     owned_array<uint32_t> arguments;
-    const uint32_t *items = analysis.semantics.items(n.first);
+    checked_span<const uint32_t> items = analysis.semantics.items(n.first);
     /* [abi:calls]: a class parameter passed by address is a temporary the
        caller constructs and destroys at the end of the full-expression */
     qualified_type function_type = analysis.entity_table[n.entity_b()].type;
     const struct type &ft = record(function_type);
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         analysis.type_table.parameters(function_type.unqualified());
     for (uint32_t i = 0; i < n.count; i++) {
         uint32_t a = 0;
@@ -208,7 +208,7 @@ bool c_lowering::piecewise_initializer(uint32_t n) const
         built_in_place(x.type))
         return true;
     if (x.kind == semantic_kind::initializer_list) {
-        const uint32_t *items = analysis.semantics.items(x.first);
+        checked_span<const uint32_t> items = analysis.semantics.items(x.first);
         for (uint32_t i = 0; i < x.count; i++)
             if (piecewise_initializer(items[i]))
                 return true;
@@ -238,7 +238,7 @@ uint32_t c_lowering::initialize_list_into(uint32_t object,
                     cast(c_, void_type, AST_CAST_VOID), 0, 0);
     }
     if (x.kind == semantic_kind::initializer_list) {
-        const uint32_t *items = analysis.semantics.items(x.first);
+        checked_span<const uint32_t> items = analysis.semantics.items(x.first);
         owned_array<uint32_t> stmts;
         if (record(object_type).kind == type_kind::class_type) {
             entity_index ce = record(object_type).entity;
@@ -581,7 +581,7 @@ void c_lowering::find_named_return(uint32_t statement, entity_index &found,
     }
     if (n.kind == semantic_kind::block ||
         n.kind == semantic_kind::declarations) {
-        const uint32_t *items = analysis.semantics.items(n.first);
+        checked_span<const uint32_t> items = analysis.semantics.items(n.first);
         for (uint32_t i = 0; i < n.count; i++)
             find_named_return(items[i], found, mixed);
         return;
@@ -692,7 +692,7 @@ bool c_lowering::extends_to_static_owner(uint32_t root,
         return true;
     if (x.kind != semantic_kind::initializer_list || x.op)
         return false;
-    const uint32_t *items = analysis.semantics.items(x.first);
+    checked_span<const uint32_t> items = analysis.semantics.items(x.first);
     for (uint32_t i = 0; i < x.count; i++)
         if (extends_to_static_owner(items[i], n))
             return true;
@@ -826,7 +826,7 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
         /* a struct's initializer: a value per field, in order; none (0)
            for an unnamed bit-field, which is no element ([class.bit]/2) */
         owned_array<uint32_t> values;
-        const uint32_t *items = analysis.semantics.items(n.first);
+        checked_span<const uint32_t> items = analysis.semantics.items(n.first);
         entity_index ce = record(n.type).entity;
         const entity &x = analysis.entity_table[ce];
         class_type(ce, n.at);
@@ -941,7 +941,7 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
                     value_count, aux, 0);
     }
     owned_array<uint32_t> runs;
-    const uint32_t *items = analysis.semantics.items(n.first);
+    checked_span<const uint32_t> items = analysis.semantics.items(n.first);
     if (holds_data_member_pointer(n.type) &&
         (!record(n.type).bound_known || n.count < record(n.type).bound))
         return fail("a pointer to data member zero-initialized as part of "

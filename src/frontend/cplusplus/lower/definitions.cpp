@@ -21,9 +21,9 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     /* every parameter has a symbol, an unnamed one too */
     owned_array<uint32_t> parameters;
     const struct type &f = record(x.type);
-    const qualified_type *types =
+    checked_span<const qualified_type> types =
         analysis.type_table.parameters(x.type.unqualified());
-    const uint32_t *items = analysis.semantics.items(body.first);
+    checked_span<const uint32_t> items = analysis.semantics.items(body.first);
     /* a member function's this comes first */
     uint32_t implicit = 0;
     if (body.count > f.parameter_count)
@@ -197,7 +197,7 @@ bool c_lowering::function_definition(entity_index e)
     if (!s || !definition_body(e, s, 0))
         return false;
     const struct type &f = record(x.type);
-    const qualified_type *types =
+    checked_span<const qualified_type> types =
         analysis.type_table.parameters(x.type.unqualified());
     if (x.virtual_ && !thunk_definitions(e, body.at))
         return false;
