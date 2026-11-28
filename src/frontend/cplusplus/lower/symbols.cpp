@@ -274,6 +274,7 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         *slot = s;
         if (is_reference(x.type))
             ast_builder_symbol_debug_kind(c, s, reference_debug_kind(x.type));
+        ast_builder_symbol_debug_type(c, s, debug_type(x.type, at));
         gnu_attributes(e, s);
         return s;
     }
@@ -337,6 +338,10 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     s = ast_builder_symbol(c, kind, name.data(), name.size(), t, storage, flags,
                            0);
     *slot = s;
+    qualified_type declared = x.type;
+    if (x.kind == entity_kind::function)
+        declared = record(x.type).operand;
+    ast_builder_symbol_debug_type(c, s, debug_type(declared, at));
     if (x.kind == entity_kind::variable && is_reference(x.type))
         ast_builder_symbol_debug_kind(c, s, reference_debug_kind(x.type));
     /* (a member's scope is its class, which entries do not nest in yet) */

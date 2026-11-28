@@ -32,6 +32,14 @@ template <class T, int N> struct Many {
 
 int total = 5;
 
+namespace outer
+{
+enum class Color : short { red = 1, green = 3 };
+}
+enum Plain { minus = -2, plus = 7 };
+outer::Color shade = outer::Color::green;
+Plain plains[2] = {plus, minus};
+
 __attribute__((noinline)) static int use(const S &s, Box<long> box, S *p,
                                          int &&moved)
 {
@@ -54,5 +62,5 @@ int main()
 
     return use(s, box, &s, 4) == 0;
 }
-/* PRINT s.m s.b s.r box.item p->m p->b moved x alias total ns::hidden outer::anonymous */
-/* WHATIS box many s p */
+/* PRINT s.m s.b s.r box.item p->m p->b moved x alias total ns::hidden outer::anonymous shade plains */
+/* WHATIS box many s p shade plains */

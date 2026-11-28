@@ -479,6 +479,8 @@ class c_lowering
 
     /* declaring every function's symbol, which uses none */
     bool declaring_symbols = false;
+    owned_array<entity_index> debug_enums;
+    owned_array<ast_qualified_type> debug_enum_types;
     void qualified_entity_name(entity_index e, vbuffer *out) const;
     void describe_entity(entity_index e, const char *lead,
                          const owned_buffer &why);
@@ -513,6 +515,8 @@ class c_lowering
     bool is_reference(qualified_type t) const;
     /* -g (debug-names.cpp) */
     void debug_scope(entity_index e, vbuffer *out) const;
+    ast_qualified_type debug_enum_type(entity_index e, token_index at);
+    ast_qualified_type debug_type(qualified_type t, token_index at);
     void debug_class_name(entity_index e, vbuffer *out);
     void debug_type_name(qualified_type t, vbuffer *out);
     void debug_value_name(qualified_type t, uint64_t value, vbuffer *out) const;

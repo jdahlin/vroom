@@ -44,8 +44,13 @@ registers; D3 changes that and measures run time and compile time.
   functions, globals and classes; a class's name with its template arguments
   (types, integers and packs of them; other arguments are `?`) and the
   classes around it.
-- **D4c**: enumerations (now their integer type), member functions and static
-  members in their class, virtual bases.
+- **D4c, enumerations** (done): a variable, field or result of an
+  enumeration type, or a pointer, reference or array of one, is described by a
+  `DW_TAG_enumeration_type` built for the debugger (code generation still
+  sees the underlying type).  Its enumerators are found by scanning every
+  entity, once per enumeration.
+- **D4d**: member functions and static members inside their class, virtual
+  bases.
 - **D5, optimized code**: location lists at `-O1` and up; until then a
   variable there is optimized out.
 

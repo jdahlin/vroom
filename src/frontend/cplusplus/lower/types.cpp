@@ -511,6 +511,9 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
             kind = reference_debug_kind(m.type);
         ast_builder_type_record_debug_kind(c, made, c_fields[member_order[i]],
                                            kind, base);
+        if (!m.base_subobject)
+            ast_builder_type_record_debug_type(
+                c, made, c_fields[member_order[i]], debug_type(m.type, at));
     }
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];

@@ -358,6 +358,50 @@ void ast_builder_type_record_debug_name(cc *c, ast_qualified_type record,
         r->debug_scope = ast_builder_attribute_string(c, scope, scope_length);
 }
 
+void ast_builder_symbol_debug_type(cc *c, uint32_t s, ast_qualified_type t)
+{
+    if (c->describe_location && t) /* (-g) */
+        ast_builder_attributes(c, s)->debug_type = t;
+}
+
+void ast_builder_type_record_debug_type(cc *c, ast_qualified_type record,
+                                        uint32_t field, ast_qualified_type t)
+{
+    c->tags[AST_TYPE(c, record)->aux].f[field].debug_type = t;
+}
+
+ast_qualified_type ast_builder_type_debug_enum(cc *c, const char *name,
+                                               size_t length, const char *scope,
+                                               size_t scope_length,
+                                               ast_qualified_type underlying,
+                                               const uint32_t *enumerators,
+                                               uint32_t count, bool scoped)
+{
+    uint32_t ti = cc_tag_new(c, AST_TYPE_ENUM, 0, 0);
+    tag *r = &c->tags[ti];
+    ast_qualified_type t = AST_QUALIFIED_TYPE(r->ty, 0);
+
+    AST_TYPE(c, t)->base = underlying;
+    AST_TYPE(c, t)->size = AST_TYPE(c, underlying)->size;
+    AST_TYPE(c, t)->align = AST_TYPE(c, underlying)->align;
+    r->enums = ast_builder_list(c, enumerators, count);
+    r->nenum = count;
+    if (scoped)
+        r->flags |= AST_RECORD_FLAG_ENUM_SCOPED;
+    ast_builder_type_record_debug_name(c, t, name, length, scope, scope_length);
+    return t;
+}
+
+uint32_t ast_builder_debug_enumerator(cc *c, const char *name, size_t length,
+                                      int64_t value)
+{
+    uint32_t s = cc_symbol_new(c, AST_SYMBOL_ENUMERATOR,
+                               ast_builder_identifier(c, name, length), 0, 0);
+
+    c->syms[s].val = value;
+    return s;
+}
+
 void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,
                                 size_t length)
 {
@@ -472,6 +516,11 @@ void ast_builder_node_location(cc *c, uint32_t n, uint32_t location)
 {
     if (c->describe_location)
         c->nodes[n].loc = location;
+}
+
+bool ast_builder_debugging(cc *c)
+{
+    return c->describe_location != NULL;
 }
 
 uint32_t ast_builder_location(cc *c, uint32_t location)

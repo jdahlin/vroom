@@ -52,6 +52,7 @@ enum {
     DEBUG_AT_FRAME_BASE = 0x40,
     DEBUG_AT_TYPE = 0x49,
     DEBUG_AT_DATA_BIT_OFFSET = 0x6b,
+    DEBUG_AT_ENUM_CLASS = 0x6d,
     DEBUG_AT_LINKAGE_NAME = 0x6e,
 };
 /* DWARF's forms, and two that are written otherwise: a function's length (data4) and, below
@@ -316,6 +317,16 @@ static void debug_die_source_name(cc *c, debug_die *d, uint32_t s)
         debug_die_identifier(d, c->syms[s].name);
 }
 
+/* the type a debugger is told symbol s has */
+static ast_qualified_type debug_type_of(cc *c, uint32_t s)
+{
+    const attrs *a = codegen_symbol_attributes(c, s);
+
+    if (a->debug_type)
+        return a->debug_type;
+    return c->syms[s].ty;
+}
+
 static uint32_t debug_type_queue(debug_writer *w, uint32_t *slot, debug_type t)
 {
     if (*slot)
@@ -488,6 +499,8 @@ static void debug_record_write(debug_writer *w, ast_qualified_type t)
 
         if (f->debug_kind == AST_DEBUG_BASE)
             type = f->debug_base;
+        else if (f->debug_type)
+            type = f->debug_type;
         debug_die_declared(w, &m, type, debug_typedef_of(c, f->tdef, type),
                            f->debug_kind);
         if (f->bitfield) {
@@ -513,9 +526,15 @@ static void debug_enum_write(debug_writer *w, ast_qualified_type t)
 
     for (uint32_t i = 0; i < r->nenum; i++)
         negative = negative || c->syms[c->lists[r->enums + i]].val < 0;
-    debug_die_identifier(&d, r->name);
+    if (r->debug_name)
+        debug_die_text(&d, DEBUG_AT_NAME, c->strs[r->debug_name - 1].s,
+                       strlen(c->strs[r->debug_name - 1].s));
+    else
+        debug_die_identifier(&d, r->name);
     debug_die_number(&d, DEBUG_AT_BYTE_SIZE, DEBUG_FORM_UDATA, y->size);
     debug_die_type(w, &d, y->base, 0);
+    if (r->flags & AST_RECORD_FLAG_ENUM_SCOPED)
+        debug_die_number(&d, DEBUG_AT_ENUM_CLASS, DEBUG_FORM_FLAG, 1);
     debug_die_write(w, &d);
     for (uint32_t i = 0; i < r->nenum; i++) {
         const sym *s = &c->syms[c->lists[r->enums + i]];
@@ -661,8 +680,8 @@ static void debug_global_write(debug_writer *w, uint32_t s, bool coff)
     uint32_t depth = debug_scope_open(w, a->debug_scope);
 
     debug_die_source_name(c, &d, s);
-    debug_die_declared(w, &d, y->ty, debug_typedef_of(c, y->tdef, y->ty),
-                       a->debug_kind);
+    debug_die_declared(w, &d, debug_type_of(c, s),
+                       debug_typedef_of(c, y->tdef, y->ty), a->debug_kind);
     debug_die_number(&d, DEBUG_AT_EXTERNAL, DEBUG_FORM_FLAG,
                      y->sc != AST_STORAGE_STATIC);
     debug_die_number(&d, DEBUG_AT_LOCATION, DEBUG_FORM_SYMBOL, s);
@@ -682,7 +701,8 @@ static void debug_types_write(debug_writer *w)
         /* (a class's entry is in its namespaces, its label on the entry) */
         if (!t.reference && !t.tdef && !AST_QUALIFIED_TYPE_QUALIFIERS(t.type) &&
             !(y->flags & AST_TYPE_FLAG_ATOMIC) &&
-            (y->kind == AST_TYPE_STRUCT || y->kind == AST_TYPE_UNION))
+            (y->kind == AST_TYPE_STRUCT || y->kind == AST_TYPE_UNION ||
+             y->kind == AST_TYPE_ENUM))
             depth = debug_scope_open(w, w->c->tags[y->aux].debug_scope);
         vtext_format_append(w->b, ".Ldbg_t%u:\n", i + 1);
         w->writing = i;
@@ -733,8 +753,8 @@ static void debug_object_write(debug_writer *w, int tag, uint32_t s,
     debug_die d = debug_die_new(tag, false);
 
     debug_die_source_name(w->c, &d, s);
-    debug_die_declared(w, &d, y->ty, debug_typedef_of(w->c, y->tdef, y->ty),
-                       a->debug_kind);
+    debug_die_declared(w, &d, debug_type_of(w->c, s),
+                       debug_typedef_of(w->c, y->tdef, y->ty), a->debug_kind);
     for (uint32_t i = 0; frame && i < frame->count; i++)
         if (frame->locals[i].symbol == s) {
             debug_die_number(&d, DEBUG_AT_LOCATION, DEBUG_FORM_FRAME_OFFSET,
@@ -791,7 +811,11 @@ static void debug_function_append(debug_writer *w, uint32_t function,
     debug_die_number(&d, DEBUG_AT_EXTERNAL, DEBUG_FORM_FLAG,
                      y->sc != AST_STORAGE_STATIC);
     {
-        debug_die_type(w, &d, type->base, 0);
+        ast_qualified_type result = type->base;
+
+        if (a->debug_type)
+            result = a->debug_type;
+        debug_die_type(w, &d, result, 0);
         if (!(type->flags & AST_TYPE_FLAG_NO_PROTOTYPE))
             debug_die_number(&d, DEBUG_AT_PROTOTYPED, DEBUG_FORM_FLAG, 1);
     }
