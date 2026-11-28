@@ -375,7 +375,8 @@ uint32_t c_lowering::reference_temporary_symbol(ast_qualified_type t,
     symbol_linkage(named, storage, linked);
     uint32_t flags = AST_SYMBOL_FLAG_ADDRESS_TAKEN;
     if (linked & AST_SYMBOL_FLAG_WEAK)
-        flags |= AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK;
+        flags |= AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
+                 AST_SYMBOL_FLAG_COMDAT;
     else
         storage = AST_STORAGE_STATIC;
     bool weak = flags & AST_SYMBOL_FLAG_WEAK;

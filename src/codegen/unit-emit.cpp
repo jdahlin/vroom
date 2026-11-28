@@ -835,18 +835,24 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
             const char *offset = w ? "secrel32" : word;
             /* COFF: a function outside .text (-ffunction-sections' .text$NAME COMDATs, a section
 			   attribute) makes the unit's pc range DW_AT_ranges, one range per function, as clang
-			   (a debugger finds the unit of an address by its ranges); not below DWARF 3 */
+			   (a debugger finds the unit of an address by its ranges); not below DWARF 3.  ELF: so
+			   does a function in a COMDAT group (C++ vague linkage) */
             bool ranges = false;
 
-            for (uint32_t i = 0; w && v >= 3 && i < E.chunk_count && !ranges;
+            for (uint32_t i = 0; !CODEGEN_IS_DARWIN(c) && v >= 3 &&
+                                 i < E.chunk_count && !ranges;
                  i++) {
                 uint64_t key = E.chunks[i].key;
+                uint32_t s = (uint32_t)(key >> 1);
 
-                if (!(key & 1) && key < ((uint64_t)1 << 62) &&
-                    c->syms[key >> 1].kind == AST_SYMBOL_FUNCTION)
+                if ((key & 1) || key >= ((uint64_t)1 << 62) ||
+                    c->syms[s].kind != AST_SYMBOL_FUNCTION)
+                    continue;
+                if (w)
                     ranges = (o->sections & 1) ||
-                             codegen_symbol_attributes(c, (uint32_t)(key >> 1))
-                                 ->section;
+                             codegen_symbol_attributes(c, s)->section;
+                else
+                    ranges = c->syms[s].flags & AST_SYMBOL_FLAG_COMDAT;
             }
             vtext_format_append(&tail,
                                 "\t.text\n.Ldbg_text1:\n\t.section\t.debug_"
@@ -882,14 +888,20 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
                 vtext_format_append(
                     &tail, "\n\t.%s\t0\n\t.%s\t.Ldbg_ranges\n.Ldbg_cu_end:\n",
                     quad, offset);
-                vtext_string_append(
-                    &tail,
-                    v >= 5
-                        ? "\t.section\t.debug_rnglists,\"dr\"\n\t.long\t.Ldbg_"
-                          "rnglists_end-.Ldbg_rnglists_start\n"
-                          ".Ldbg_rnglists_start:\n\t.short\t5\n\t.byte\t8, "
-                          "0\n\t.long\t0\n.Ldbg_ranges:\n"
-                        : "\t.section\t.debug_ranges,\"dr\"\n.Ldbg_ranges:\n");
+                const char *name = ".debug_ranges", *flags = "\"\",@progbits";
+
+                if (v >= 5)
+                    name = ".debug_rnglists";
+                if (w)
+                    flags = "\"dr\"";
+                vtext_format_append(&tail, "\t.section\t%s,%s\n", name, flags);
+                if (v >= 5)
+                    vtext_string_append(
+                        &tail,
+                        "\t.long\t.Ldbg_rnglists_end-.Ldbg_rnglists_start\n"
+                        ".Ldbg_rnglists_start:\n\t.short\t5\n\t.byte\t8, "
+                        "0\n\t.long\t0\n");
+                vtext_string_append(&tail, ".Ldbg_ranges:\n");
                 for (uint32_t i = 0; i < E.chunk_count; i++) {
                     uint64_t key = E.chunks[i].key;
 
@@ -900,7 +912,11 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
                     vtext_string_append(&tail, v >= 5 ? "\t.byte\t6\n\t.quad\t"
                                                       : "\t.quad\t");
                     codegen_symbol_name_append(c, &tail, (uint32_t)(key >> 1));
-                    vtext_format_append(&tail, "\n\t.quad\t.Lfunc_end%u\n",
+                    const char *end = ".Lfe";
+
+                    if (CODEGEN_IS_X64(c))
+                        end = ".Lfunc_end";
+                    vtext_format_append(&tail, "\n\t.quad\t%s%u\n", end,
                                         (uint32_t)(key >> 1));
                 }
                 vtext_string_append(&tail,

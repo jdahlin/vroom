@@ -79,7 +79,7 @@ box of the picture above, and none of the right one.  What it does not say:
 | Guard variables, static initialization order, `__cxa_atexit` | Itanium ABI 3.3 | small |
 | Passing and returning classes ("non-trivial for the purposes of calls") | Itanium ABI 3.1 + the psABI | small, but every call |
 | Constructor/destructor variants (C1/C2, D0/D1/D2), array cookies | Itanium ABI 2.7, 5.1.4 | small |
-| Vague linkage (COMDAT for inline functions, instantiations, vtables) | Itanium ABI 5.2 | small; `obj/` has COMDAT for COFF, to check for ELF |
+| Vague linkage (COMDAT for inline functions, instantiations, vtables) | Itanium ABI 5.2 | ELF done (a group per symbol; clang's C5/D5 constructor groups and the guard in an inline variable's group are not copied); COFF and Mach-O left |
 | Exception tables, personality, `__cxa_*` | Itanium ABI level I/II, LSDA as GCC's | large in codegen, small in the front end |
 | What the library expects of the compiler | `lib/support` ([support.initlist], [support.rtti], [cmp], ...) is in the spec; libstdc++'s `__builtin_*` and type-trait intrinsics are not | long tail, per corpus (S8) |
 | Core issues resolved after n4861 | the CWG issues list; clang's `test/CXX/drs` is the oracle | per case, in `known-differences.txt` |
@@ -544,7 +544,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   declaration: a `for` whose body declares, tests and breaks); a glvalue
   comma or conditional selects an address; static locals carry the
   mangled name as their assembler name; inline functions are LINKONCE and
-  weak (no COMDAT group yet).  Dynamic initialization, class and
+  weak (on ELF each in a COMDAT group of its own since 2026-11-28).  Dynamic initialization, class and
   enumeration types, long double constants and an assignment used as an
   object fail the translation unit with a reason.  The mangler now gives
   an internal-linkage variable of the global namespace clang's `_ZL`
