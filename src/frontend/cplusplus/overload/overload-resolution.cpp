@@ -772,9 +772,9 @@ analysis_result semantic_analysis::best_viable_function(
             entity_table[y.function].details().inherited_constructor &&
             entity_table[x.function].enclosing ==
                 entity_table[y.function].enclosing) {
-            const qualified_type *p1 = type_table.parameters(
+            checked_span<const qualified_type> p1 = type_table.parameters(
                 entity_table[x.function].type.unqualified());
-            const qualified_type *p2 = type_table.parameters(
+            checked_span<const qualified_type> p2 = type_table.parameters(
                 entity_table[y.function].type.unqualified());
             size_t count1 =
                 type_table[entity_table[x.function].type.unqualified()]
@@ -804,8 +804,8 @@ analysis_result semantic_analysis::best_viable_function(
                 entity_table[y.function].member_cv) {
             type_index t1 = entity_table[x.function].type.unqualified();
             type_index t2 = entity_table[y.function].type.unqualified();
-            const qualified_type *p1 = type_table.parameters(t1);
-            const qualified_type *p2 = type_table.parameters(t2);
+            checked_span<const qualified_type> p1 = type_table.parameters(t1);
+            checked_span<const qualified_type> p2 = type_table.parameters(t2);
             bool same = type_table[t1].parameter_count ==
                         type_table[t2].parameter_count;
             for (uint32_t i = 0; same && i < type_table[t1].parameter_count;
@@ -882,9 +882,9 @@ analysis_result semantic_analysis::best_viable_function(
             type_table[entity_table[y.function].type.unqualified()];
         if (tx.parameter_count != ty.parameter_count)
             return false;
-        const qualified_type *px =
+        checked_span<const qualified_type> px =
             type_table.parameters(entity_table[x.function].type.unqualified());
-        const qualified_type *py =
+        checked_span<const qualified_type> py =
             type_table.parameters(entity_table[y.function].type.unqualified());
         if (!substituting || order_unknown) {
             for (uint32_t k = 0; k < tx.parameter_count; k++)

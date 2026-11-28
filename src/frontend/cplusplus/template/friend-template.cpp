@@ -387,9 +387,9 @@ analysis_result semantic_analysis::dependent_member_friend(
     /* the specializations complete already */
     uint32_t added = static_cast<uint32_t>(member_friends.size() - 1);
     for (uint32_t i = 0; i < instantiations.size(); i++) {
-        entity_index s = instantiations[i].specialization;
-        if (instantiations[i].template_entity == f.template_entity && s &&
-            entity_table[s].kind == entity_kind::class_type &&
+        entity_index s = instantiations.at_index(i).specialization;
+        if (instantiations.at_index(i).template_entity == f.template_entity &&
+            s && entity_table[s].kind == entity_kind::class_type &&
             entity_table[s].defined)
             befriend_member(added, s);
     }
@@ -407,7 +407,8 @@ void semantic_analysis::member_friends_of(entity_index s, bool complete)
     uint32_t i = entity_table[s].instantiation.number();
     if (!i || member_friends.empty())
         return;
-    entity_index t = instantiations[i - 1].template_entity;
+    entity_index t =
+        instantiations[instantiation_ref::from_number(i)].template_entity;
     for (uint32_t k = 0; k < member_friends.size(); k++)
         if (member_friends[k].template_entity == t &&
             member_friends[k].member.is(
@@ -426,8 +427,8 @@ void semantic_analysis::befriend_member(uint32_t k, entity_index s)
 {
     member_friend f = member_friends[k];
     uint32_t record = entity_table[s].instantiation.index();
-    uint32_t first_argument = instantiations[record].first_argument;
-    uint32_t argument_count = instantiations[record].argument_count;
+    uint32_t first_argument = instantiations.at_index(record).first_argument;
+    uint32_t argument_count = instantiations.at_index(record).argument_count;
     if (argument_count != f.pattern_count)
         return;
     /* [temp.deduct.type]: the parameters from C's arguments and S's */
@@ -594,7 +595,8 @@ bool semantic_analysis::constraint_names_enclosing_parameter(
         if (!i || entity_table[k].kind != entity_kind::class_type)
             continue;
         /* the primary template's record: its parameters' names */
-        entity_index te = instantiations[i - 1].template_entity;
+        entity_index te =
+            instantiations[instantiation_ref::from_number(i)].template_entity;
         for (const function_template &t : function_templates) {
             if (t.entity != te || !t.is_class || t.primary)
                 continue;
@@ -776,10 +778,10 @@ analysis_result semantic_analysis::friend_function_template(
                         n, "temp.friend",
                         "a friend member template the named class does not "
                         "declare");
-                owned_array<uint32_t> group;
+                owned_array<template_ref> group;
                 function_template_overloads(held, group);
-                for (uint32_t g : group) {
-                    const function_template f = function_templates[g - 1];
+                for (template_ref g : group) {
+                    const function_template f = function_templates[g];
                     const entity old = entity_table[f.entity];
                     if (old.enclosing != target || old.member_cv != cv)
                         continue;
@@ -816,14 +818,13 @@ analysis_result semantic_analysis::friend_function_template(
         return r;
     /* (a declaration too: its specializations' declarations are analysed
        with its friend specifier, instantiate) */
-    function_templates[last_function_template - 1].friend_class = c;
+    function_templates[last_function_template].friend_class = c;
     /* (a record this declaration made: one redeclaring a template declared
        before leaves that one as visible as it was) */
     if (!inner.is(syntax_kind::function_definition) &&
         function_templates.size() != records)
-        function_templates[last_function_template - 1].friend_declaration =
-            true;
-    befriend_template(c, function_templates[last_function_template - 1].entity);
+        function_templates[last_function_template].friend_declaration = true;
+    befriend_template(c, function_templates[last_function_template].entity);
     return analysis_result::well_formed;
 }
 

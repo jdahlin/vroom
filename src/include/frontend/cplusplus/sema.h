@@ -245,9 +245,10 @@ class types
     {
         return records[t];
     }
-    const qualified_type *parameters(type_index t) const
+    checked_span<const qualified_type> parameters(type_index t) const
     {
-        return parameter_lists.data() + records[t].first_parameter;
+        const type &r = records[t];
+        return {parameter_lists.data() + r.first_parameter, r.parameter_count};
     }
     /* the number of types, the unused type 0 included */
     size_t size() const
@@ -2063,9 +2064,10 @@ class semantic_tree
     {
         return nodes[n];
     }
-    const uint32_t *items(uint32_t first) const
+    /* the list that starts at first, or the rest of it from there */
+    checked_span<const uint32_t> items(uint32_t first) const
     {
-        return lists.data() + first;
+        return {lists.data() + first, list_rest[first]};
     }
     size_t size() const
     {
@@ -2075,6 +2077,8 @@ class semantic_tree
   private:
     owned_array<semantic_node> nodes;
     stable_array<uint32_t> lists;
+    /* per element of lists: the elements from it to its list's end */
+    owned_array<uint32_t> list_rest;
 };
 
 /* one expression analysis gave a type: what -fcxx-dump=type-claims has clang
@@ -3072,7 +3076,7 @@ class semantic_analysis
     owned_array<using_access> using_accesses;
     /* function_template_definition: the function_templates index plus one
        of the template its last declaration declared or redeclared */
-    uint32_t last_function_template = 0;
+    template_ref last_function_template;
     enum class copy_kind : uint8_t { none, copy, move };
     copy_kind copy_parameter(entity_index k, qualified_type function) const;
     bool implicitly_declares(entity_index k, bool destructor, bool assignment,
@@ -6901,7 +6905,7 @@ class semantic_analysis
     /* [temp.over]/1: the usable function templates (indices plus one) of
        a held name, in declaration order */
     void function_template_overloads(entity_index held,
-                                     owned_array<uint32_t> &out) const;
+                                     owned_array<template_ref> &out) const;
     /* [temp.over]/1 with [namespace.def]/7: the non-template functions a
        call of a held name weighs, its own (template_name_functions) and,
        for a namespace's name, those of the name in each namespace of the
@@ -7758,7 +7762,7 @@ class semantic_analysis
         const owned_array<SyntaxElement> *written = nullptr,
         SyntaxRef written_at = 0);
     analysis_result template_candidates(
-        SyntaxRef n, const owned_array<uint32_t> &group,
+        SyntaxRef n, const owned_array<template_ref> &group,
         const expression_meaning *meanings, uint32_t count,
         owned_array<overload_candidate> &candidates,
         owned_array<uint32_t> *first_arguments = nullptr,
@@ -8058,7 +8062,7 @@ class semantic_analysis
     struct function_set {
         token_index at = 0;
         owned_array<entity_index> functions;
-        owned_array<uint32_t> templates;
+        owned_array<template_ref> templates;
     };
     bool function_set_at(token_index at, function_set &out) const;
     bool named_function_set(SyntaxElement e, function_set &out) const;
@@ -8076,7 +8080,7 @@ class semantic_analysis
     analysis_result select_for_target(SyntaxRef at, const function_set &set,
                                       qualified_type ft, set_selection &how,
                                       entity_index &function,
-                                      uint32_t &template_index,
+                                      template_ref &template_index,
                                       owned_array<template_argument> &deduced,
                                       const char *&why,
                                       entity_index member_class = 0);

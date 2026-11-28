@@ -1149,7 +1149,7 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         return c;
     }
     uint32_t given = 0;
-    const uint32_t *items = nullptr;
+    checked_span<const uint32_t> items;
     uint32_t count = 0;
     entity_index c_entity = 0;
     if (record.kind == type_kind::array) {
@@ -1211,8 +1211,8 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
     /* [dcl.init.aggr]/4: the elements the list covers: an unnamed
        bit-field has no initializer and is zero */
     if (c_entity && entity_table[c_entity].union_)
-        return evaluate_union_initialization(state, init, zero, given, items,
-                                             read_only, place, c_entity);
+        return evaluate_union_initialization(
+            state, init, zero, given, items.data(), read_only, place, c_entity);
     uint32_t listed = count;
     if (c_entity) {
         listed = 0;
@@ -3758,7 +3758,8 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
            size, the first argument, is the allocation function's own) */
         if (x.a && semantics[x.a].kind == semantic_kind::call) {
             const semantic_node call = semantics[x.a];
-            const uint32_t *arguments = semantics.items(call.first);
+            checked_span<const uint32_t> arguments =
+                semantics.items(call.first);
             for (uint32_t i = 1; i < call.count; i++) {
                 constant_value placed;
                 c = evaluate_node(state, arguments[i], placed);
@@ -4191,7 +4192,7 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
        needed where it was named (an unevaluated operand, instantiate): a
        constant evaluation needs it ([temp.inst]/5, [expr.const]/11) */
     for (size_t i = 0; i < instantiations.size(); i++) {
-        const instantiation_record &x = instantiations[i];
+        const instantiation_record &x = instantiations.at_index(i);
         if (x.specialization != f || x.defined || x.defining)
             continue;
         const function_template &ft =
@@ -4216,7 +4217,7 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
         } else {
             const template_member_definition o =
                 template_member_definitions[m.member_definition - 1];
-            if (instantiations[m.instantiation].specialization !=
+            if (instantiations.at_index(m.instantiation).specialization !=
                     entity_table[f].enclosing ||
                 o.definition.is(syntax_kind::simple_declaration) || o.inner ||
                 o.member_class)
@@ -4321,7 +4322,8 @@ constness semantic_analysis::evaluate_invocation(
     if (!tokens.files.behavior.has(
             language_feature::constexpr_without_constant_result)) {
         type_index ft = e.type.unqualified();
-        const qualified_type *parameters = type_table.parameters(ft);
+        checked_span<const qualified_type> parameters =
+            type_table.parameters(ft);
         bool literal =
             literal_type(type_table[ft].operand) != constness::not_constant;
         for (uint32_t i = 0; i < type_table[ft].parameter_count; i++)
@@ -5055,7 +5057,7 @@ uint32_t semantic_analysis::switch_target(uint32_t node, uint64_t value,
     switch (x.kind) {
     case semantic_kind::block:
     case semantic_kind::declarations: {
-        const uint32_t *items = semantics.items(x.first);
+        checked_span<const uint32_t> items = semantics.items(x.first);
         for (uint32_t i = 0; i < x.count && !found; i++) {
             other = switch_target(items[i], value, found);
             if (other && (found || !target))
@@ -5140,7 +5142,7 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         return c;
     case semantic_kind::block:
     case semantic_kind::declarations: {
-        const uint32_t *items = semantics.items(x.first);
+        checked_span<const uint32_t> items = semantics.items(x.first);
         for (uint32_t i = 0; i < x.count; i++) {
             c = evaluate_statement(state, items[i], returned, result);
             if (c != constness::constant || returned || state.jump != jump_none)
@@ -5382,7 +5384,7 @@ constness semantic_analysis::potential_constant(uint32_t body)
     state.potential = true;
     state.frame = state.frames = 1;
     state.depth = 1;
-    const uint32_t *parameters = semantics.items(b.first);
+    checked_span<const uint32_t> parameters = semantics.items(b.first);
     for (uint32_t i = 0; i < b.count; i++) {
         constant_evaluation::object o;
         o.entity = entity_index_in(parameters[i]);

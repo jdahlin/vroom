@@ -409,6 +409,17 @@ void ast_builder_symbol_debug_class(cc *c, uint32_t s,
         ast_builder_attributes(c, s)->debug_class = record;
 }
 
+void ast_builder_type_record_debug_virtual_bases(cc *c,
+                                                 ast_qualified_type record,
+                                                 const uint32_t *pairs,
+                                                 uint32_t count)
+{
+    tag *r = &c->tags[AST_TYPE(c, record)->aux];
+
+    r->debug_virtual_bases = ast_builder_list(c, pairs, 2 * count);
+    r->debug_virtual_base_count = count;
+}
+
 void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,
                                 size_t length)
 {

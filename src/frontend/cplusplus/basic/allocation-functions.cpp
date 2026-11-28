@@ -276,7 +276,7 @@ semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
     qualified_type size = qualified_type::make(
         type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
     const struct type &function = type_table[x.type.unqualified()];
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         type_table.parameters(x.type.unqualified());
     const struct type &result = type_table[function.operand.unqualified()];
     if (allocation) {

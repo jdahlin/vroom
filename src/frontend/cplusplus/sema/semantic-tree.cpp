@@ -20,6 +20,7 @@ semantic_tree::semantic_tree()
     /* node 0 and list index 0 are none */
     nodes.append(semantic_node());
     lists.append(0);
+    list_rest.append(0);
 }
 
 const char *semantic_kind_name(semantic_kind kind)
@@ -117,8 +118,10 @@ uint32_t semantic_tree::add(const semantic_node &n)
 uint32_t semantic_tree::list(const uint32_t *items, size_t count)
 {
     uint32_t first = static_cast<uint32_t>(lists.size());
-    for (size_t i = 0; i < count; i++)
+    for (size_t i = 0; i < count; i++) {
         lists.append(items[i]);
+        list_rest.append(static_cast<uint32_t>(count - i));
+    }
     return first;
 }
 

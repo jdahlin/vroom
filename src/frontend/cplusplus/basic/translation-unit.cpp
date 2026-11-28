@@ -268,7 +268,7 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
         return type_without_external_linkage(record.operand, visible,
                                              arguments);
     case type_kind::function: {
-        const qualified_type *parameters =
+        checked_span<const qualified_type> parameters =
             type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < record.parameter_count; i++)
             if (type_without_external_linkage(parameters[i], visible,
@@ -595,8 +595,8 @@ analysis_result semantic_analysis::declare(
                 entity_table.make(entity_kind::none, name, scope);
             entity_table[held].held_by_template = true;
             for (size_t i = 0, k = function_templates.size(); i < k; i++)
-                if (function_templates[i].name == prior) {
-                    function_template copy = function_templates[i];
+                if (function_templates.at_index(i).name == prior) {
+                    function_template copy = function_templates.at_index(i);
                     copy.name = held;
                     function_templates.append(copy);
                 }
@@ -732,20 +732,22 @@ analysis_result semantic_analysis::declare(
                    its template was defined (e.g. through a typedef) is
                    implicitly instantiated when an object of it is defined */
                 uint32_t k = entity_table[record.entity].instantiation.index();
-                entity_index t = instantiations[k].template_entity;
+                entity_index t = instantiations.at_index(k).template_entity;
                 template_ref ct = entity_table[t].template_record;
-                if (ct && !instantiations[k].defining) {
+                if (ct && !instantiations.at_index(k).defining) {
                     entity_index done = record.entity;
                     /* (a copy: instantiate_class may grow template_arguments) */
                     owned_array<template_argument> arguments;
-                    for (uint32_t i = 0; i < instantiations[k].argument_count;
-                         i++)
+                    for (uint32_t i = 0;
+                         i < instantiations.at_index(k).argument_count; i++)
                         arguments.append(
-                            template_arguments
-                                [instantiations[k].first_argument + i]);
-                    VTRY(ir, instantiate_class(
-                                 declaration, ct, arguments.data(),
-                                 instantiations[k].argument_count, done));
+                            template_arguments[instantiations.at_index(k)
+                                                   .first_argument +
+                                               i]);
+                    VTRY(ir,
+                         instantiate_class(
+                             declaration, ct, arguments.data(),
+                             instantiations.at_index(k).argument_count, done));
                 }
             }
             const entity &c = entity_table[record.entity];
@@ -878,7 +880,7 @@ analysis_result semantic_analysis::declare(
         bool usable = false;
         const record_chains &chains = held_templates();
         for (uint32_t i = chains.first(prior); i; i = chains.after(i))
-            if (!function_templates[i - 1].unusable)
+            if (!function_templates[template_ref::from_number(i)].unusable)
                 usable = true;
         if (!usable)
             return not_supported_because(

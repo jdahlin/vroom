@@ -132,7 +132,8 @@ analysis_result semantic_analysis::member_function_template(
         bool allocation = m.allocation == allocation_function::new_ ||
                           m.allocation == allocation_function::new_array;
         const struct type &fn = type_table[type.unqualified()];
-        const qualified_type *ps = type_table.parameters(type.unqualified());
+        checked_span<const qualified_type> ps =
+            type_table.parameters(type.unqualified());
         if (fn.parameter_count < 2 || fn.variadic)
             return not_supported_because(n, "temp.mem",
                                          "an allocation or deallocation "
@@ -256,10 +257,10 @@ analysis_result semantic_analysis::member_function_template(
            requires-clause (if any), and the same template-head cannot be
            overloaded if any of them is a static member function template
            declaration" (judged when the return types are the same too) */
-        owned_array<uint32_t> group;
+        owned_array<template_ref> group;
         function_template_overloads(prior, group);
-        for (uint32_t g : group) {
-            const function_template f = function_templates[g - 1];
+        for (template_ref g : group) {
+            const function_template f = function_templates[g];
             if (entity_table[f.entity].nonstatic_member != s.static_ ||
                 entity_table[f.entity].enclosing != c)
                 continue;
@@ -348,7 +349,7 @@ analysis_result semantic_analysis::member_template_candidates(
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all,
     const owned_array<SyntaxElement> *written, SyntaxRef written_at)
 {
-    owned_array<uint32_t> group;
+    owned_array<template_ref> group;
     function_template_overloads(held, group);
     size_t first = candidates.size();
     /* which of the written template arguments are pack expansions */
@@ -380,15 +381,14 @@ analysis_result semantic_analysis::constructor_template_candidates(
     uint32_t count, bool copy, owned_array<overload_candidate> &candidates,
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all)
 {
-    owned_array<uint32_t> group;
+    owned_array<template_ref> group;
     function_template_overloads(entity_table[c].details().constructor_templates,
                                 group);
     if (copy) {
         size_t kept = 0;
-        for (uint32_t g : group)
-            if (!entity_table[function_templates[g - 1].entity].explicit_ ||
-                entity_table[function_templates[g - 1].entity]
-                    .explicit_dependent)
+        for (template_ref g : group)
+            if (!entity_table[function_templates[g].entity].explicit_ ||
+                entity_table[function_templates[g].entity].explicit_dependent)
                 group[kept++] = g;
         group.resize(kept);
     }
@@ -446,9 +446,9 @@ void semantic_analysis::introduce_member_templates(entity_index c,
         entity_table[head].set(&entity_details::member_templates, held);
     }
     for (size_t i = 0, k = function_templates.size(); i < k; i++)
-        if (function_templates[i].name == from &&
-            !function_templates[i].unusable) {
-            function_template copy = function_templates[i];
+        if (function_templates.at_index(i).name == from &&
+            !function_templates.at_index(i).unusable) {
+            function_template copy = function_templates.at_index(i);
             copy.name = held;
             function_templates.append(copy);
         }

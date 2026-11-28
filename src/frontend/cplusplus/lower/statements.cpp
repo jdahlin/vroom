@@ -17,7 +17,7 @@ uint32_t c_lowering::block(const uint32_t *items, uint32_t count)
 void c_lowering::block_items(uint32_t first, uint32_t count,
                              owned_array<uint32_t> &out)
 {
-    const uint32_t *items = analysis.semantics.items(first);
+    checked_span<const uint32_t> items = analysis.semantics.items(first);
     /* after a return, up to a statement that may hold a label */
     bool returned = false;
     for (uint32_t i = 0; i < count; i++) {
@@ -419,7 +419,7 @@ bool c_lowering::needs_run_time(uint32_t n) const
     if (needs_run_time(x.a) || needs_run_time(x.b) || needs_run_time(x.c) ||
         needs_run_time(x.d))
         return true;
-    const uint32_t *items = analysis.semantics.items(x.first);
+    checked_span<const uint32_t> items = analysis.semantics.items(x.first);
     for (uint32_t i = 0; i < x.count; i++)
         if (needs_run_time(items[i]))
             return true;
@@ -465,7 +465,7 @@ bool c_lowering::constant_initializer(uint32_t n) const
     case semantic_kind::string_literal:
         return true;
     case semantic_kind::initializer_list: {
-        const uint32_t *items = analysis.semantics.items(x.first);
+        checked_span<const uint32_t> items = analysis.semantics.items(x.first);
         for (uint32_t i = 0; i < x.count; i++)
             if (!constant_initializer(items[i]))
                 return false;
@@ -578,7 +578,7 @@ void c_lowering::label_scopes(uint32_t s, owned_array<uint32_t> &path)
         return;
     switch (n.kind) {
     case semantic_kind::declarations: {
-        const uint32_t *items = analysis.semantics.items(n.first);
+        checked_span<const uint32_t> items = analysis.semantics.items(n.first);
         for (uint32_t i = 0; i < n.count; i++)
             label_scopes(items[i], path);
         return;
@@ -598,7 +598,7 @@ void c_lowering::label_scopes(uint32_t s, owned_array<uint32_t> &path)
     }
     size_t mark = path.size();
     if (n.kind == semantic_kind::block) {
-        const uint32_t *items = analysis.semantics.items(n.first);
+        checked_span<const uint32_t> items = analysis.semantics.items(n.first);
         for (uint32_t i = 0; i < n.count; i++)
             label_scopes(items[i], path);
     } else {
@@ -654,8 +654,8 @@ uint32_t c_lowering::asm_statement(const semantic_node &n)
 {
     if (n.value & 4)
         return fail("an asm goto statement (labels as asm operands)", n.at);
-    const uint32_t *items = analysis.semantics.items(n.first);
-    const uint32_t *clobbers = analysis.semantics.items(n.b);
+    checked_span<const uint32_t> items = analysis.semantics.items(n.first);
+    checked_span<const uint32_t> clobbers = analysis.semantics.items(n.b);
     /* the strings, in one buffer: the template, then each operand's name
        and constraint, then the clobbers */
     owned_buffer pool;

@@ -574,7 +574,7 @@ analysis_result semantic_analysis::overloaded_operator(
            has a class type (quoted below) */
         auto takes_enumeration = [&](qualified_type function) {
             const struct type &f = type_table[function.unqualified()];
-            const qualified_type *parameters =
+            checked_span<const qualified_type> parameters =
                 type_table.parameters(function.unqualified());
             for (size_t i = 0; i < count && i < f.parameter_count; i++)
                 if (type_table[operand(i).type.unqualified()].kind ==
@@ -651,7 +651,7 @@ analysis_result semantic_analysis::overloaded_operator(
                                          "an operator whose argument-dependent "
                                          "lookup could not be completed");
         if (!held_names.empty()) {
-            owned_array<uint32_t> group;
+            owned_array<template_ref> group;
             owned_array<entity_index> associated_classes, associated_spaces;
             if (!associated_namespaces(types, associated_classes,
                                        associated_spaces))
@@ -660,10 +660,10 @@ analysis_result semantic_analysis::overloaded_operator(
                     "an operator whose associated namespaces could not be "
                     "determined");
             for (entity_index held : held_names) {
-                owned_array<uint32_t> one;
+                owned_array<template_ref> one;
                 function_template_overloads(held, one);
-                for (uint32_t t : one) {
-                    const function_template &entry = function_templates[t - 1];
+                for (template_ref t : one) {
+                    const function_template &entry = function_templates[t];
                     bool visible = !entry.hidden_friend;
                     if (entry.hidden_friend)
                         for (entity_index cls : associated_classes)
@@ -1116,7 +1116,7 @@ analysis_result semantic_analysis::overloaded_operator(
                         same_type_candidate = true;
                         break;
                     }
-                    const qualified_type *params =
+                    checked_span<const qualified_type> params =
                         type_table.parameters(ke.type.unqualified());
                     if (stripped(params[0]) == operands[0].type.unqualified()) {
                         same_type_candidate = true;
@@ -1160,7 +1160,7 @@ analysis_result semantic_analysis::overloaded_operator(
                     if (ft.kind != type_kind::function ||
                         ft.parameter_count != 1 || (ke.member_cv & cv_const))
                         continue;
-                    const qualified_type *params =
+                    checked_span<const qualified_type> params =
                         type_table.parameters(ke.type.unqualified());
                     conversion_sequence cs = implicit_conversion_sequence(
                         operands[1], params[0], true);
@@ -1289,7 +1289,7 @@ analysis_result semantic_analysis::overloaded_operator(
            every built-in candidate that must convert a class operand */
         const overload_candidate &win = candidates[chosen];
         const struct type &ft = type_table[win.type.unqualified()];
-        const qualified_type *params =
+        checked_span<const qualified_type> params =
             type_table.parameters(win.type.unqualified());
         bool beats_builtin = true;
         for (size_t i = 0; i < arguments.size() && beats_builtin; i++) {
@@ -1424,7 +1424,7 @@ analysis_result semantic_analysis::overloaded_operator(
     }
     const entity &x = entity_table[f];
     const struct type &type = type_table[x.type.unqualified()];
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         type_table.parameters(x.type.unqualified());
     /* the arguments in the order of the function's parameters: y, x for a
        synthesized candidate (/9: "y == x") */

@@ -418,10 +418,10 @@ bool semantic_analysis::deduce_conversion_templates(
     if (a_reference)
         dest = type_table[to.unqualified()].operand;
     for (entity_index held : conv_templates) {
-        owned_array<uint32_t> group;
+        owned_array<template_ref> group;
         function_template_overloads(held, group);
-        for (uint32_t g : group) {
-            const function_template ft = function_templates[g - 1];
+        for (template_ref g : group) {
+            const function_template ft = function_templates[g];
             qualified_type ret =
                 type_table[entity_table[ft.entity].type.unqualified()].operand;
             /* /2: "If P is a reference type, the type referred to by P is
@@ -483,7 +483,7 @@ bool semantic_analysis::deduce_conversion_templates(
                being substituted: no candidate, as the recursion cannot
                end otherwise */
             const uint64_t key =
-                (uint64_t(g) << 32) | dest.unqualified().index();
+                (uint64_t(g.number()) << 32) | dest.unqualified().index();
             bool busy = false;
             for (uint64_t a : defaulting_conversions)
                 if (a == key)
@@ -494,8 +494,8 @@ bool semantic_analysis::deduce_conversion_templates(
                 continue;
             }
             defaulting_conversions.append(key);
-            analysis_result dr = default_template_arguments(
-                current_declaration, template_ref::from_number(g), values, set);
+            analysis_result dr =
+                default_template_arguments(current_declaration, g, values, set);
             defaulting_conversions.resize(defaulting_conversions.size() - 1);
             if (dr != analysis_result::well_formed) {
                 unevaluated--;
@@ -537,11 +537,11 @@ bool semantic_analysis::has_implicit_conversion_function_templates(
     if (!visible_conversion_functions(c, functions, &templates))
         return true;
     for (entity_index held : templates) {
-        owned_array<uint32_t> group;
+        owned_array<template_ref> group;
         function_template_overloads(held, group);
-        for (uint32_t g : group) {
+        for (template_ref g : group) {
             bool explicit_ = false;
-            SyntaxRef d = function_templates[g - 1].declaration;
+            SyntaxRef d = function_templates[g].declaration;
             for (token_index t = d.first_token(); t + 1 < d.end_token(); t++) {
                 standard_keyword k = standard_keyword::none;
                 if (tokens[t].kind == token_kind::keyword)
@@ -710,7 +710,7 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
             /* (their partial ordering, [temp.func.order], is not trusted
                to find an ambiguity here) */
             owned_array<entity_index> functions, templates;
-            owned_array<uint32_t> group;
+            owned_array<template_ref> group;
             bool all = visible_conversion_functions(c, functions, &templates);
             for (entity_index held : templates)
                 function_template_overloads(held, group);

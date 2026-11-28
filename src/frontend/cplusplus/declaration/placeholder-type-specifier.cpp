@@ -92,7 +92,8 @@ qualified_type semantic_analysis::function_returning(qualified_type f,
 {
     const struct type r = type_table[f.unqualified()];
     owned_array<qualified_type> parameters;
-    const qualified_type *list = type_table.parameters(f.unqualified());
+    checked_span<const qualified_type> list =
+        type_table.parameters(f.unqualified());
     for (uint32_t i = 0; i < r.parameter_count; i++)
         parameters.append(list[i]);
     return qualified_type::make(
@@ -713,7 +714,7 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
            in an unevaluated operand */
         if (entity_table[e].instantiation) {
             uint32_t idx = entity_table[e].instantiation.index();
-            instantiation_record &rec = instantiations[idx];
+            instantiation_record &rec = instantiations.at_index(idx);
             const entity tmpl = entity_table[rec.template_entity];
             const function_template ft =
                 function_templates[tmpl.template_record];

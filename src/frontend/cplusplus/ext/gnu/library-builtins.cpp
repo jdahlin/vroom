@@ -1334,7 +1334,7 @@ constness semantic_analysis::evaluate_stdc_bits(constant_evaluation &state,
                                                 const semantic_node &call,
                                                 constant_value &v)
 {
-    const uint32_t *items = semantics.items(call.first);
+    checked_span<const uint32_t> items = semantics.items(call.first);
     constant_value x[2];
     for (uint32_t i = 0; i < call.count && i < 2; i++) {
         constness c = evaluate_node(state, items[i], x[i]);
@@ -1382,7 +1382,7 @@ constness semantic_analysis::evaluate_align(constant_evaluation &state,
                                             const semantic_node &call,
                                             constant_value &v)
 {
-    const uint32_t *items = semantics.items(call.first);
+    checked_span<const uint32_t> items = semantics.items(call.first);
     if (call.count != 2)
         return constness::unknown;
     fundamental_type f = fundamental_of(semantics[items[0]].type);
@@ -1578,7 +1578,7 @@ constness semantic_analysis::evaluate_query_builtin(constant_evaluation &state,
                                                     const semantic_node &call,
                                                     constant_value &v)
 {
-    const uint32_t *items = semantics.items(call.first);
+    checked_span<const uint32_t> items = semantics.items(call.first);
     constant_value x;
     constness c = evaluate_node(state, items[0], x);
     if (c != constness::constant)
@@ -1697,7 +1697,7 @@ constness semantic_analysis::evaluate_bit_count(constant_evaluation &state,
                                                 const semantic_node &call,
                                                 constant_value &v)
 {
-    const uint32_t *items = semantics.items(call.first);
+    checked_span<const uint32_t> items = semantics.items(call.first);
     constant_value x;
     constness c = evaluate_node(state, items[0], x);
     if (c == constness::constant && x.kind != constant_value_kind::integer)

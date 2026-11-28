@@ -230,7 +230,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 packs++;
             }
         const struct type ft = type_table[type.unqualified()];
-        const qualified_type *list = type_table.parameters(type.unqualified());
+        checked_span<const qualified_type> list =
+            type_table.parameters(type.unqualified());
         /* [temp.param]/14: "A template parameter pack of a function
            template shall not be followed by another template parameter
            unless that template parameter can be deduced from the
@@ -312,11 +313,11 @@ semantic_analysis::function_template_definition(SyntaxRef n,
        ([temp.over.link]/6: equivalent template-heads and function types),
        the first's record */
     entity_index prior = entity_table.find(outer, name);
-    owned_array<uint32_t> group;
+    owned_array<template_ref> group;
     if (prior)
         function_template_overloads(prior, group);
-    uint32_t earlier = 0;
-    for (uint32_t g : group) {
+    template_ref earlier;
+    for (template_ref g : group) {
         /* [temp.friend]/9: a friend template constrained by an enclosing
            template's parameter redeclares none: it is another template of
            the name, an overload ([temp.over]) */
@@ -329,7 +330,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
            equivalent using the rules described above to compare
            expressions involving template parameters"; one that is not is
            another template of the name, an overload ([temp.over]) */
-        const function_template f = function_templates[g - 1];
+        const function_template f = function_templates[g];
         bool same = equivalent_template(
             f, n, first, static_cast<uint32_t>(parameters.size()), type);
         /* [namespace.udecl]/13: one a using-declaration introduced joins
@@ -342,7 +343,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             earlier = g;
     }
     if (prior && earlier) {
-        const function_template f = function_templates[earlier - 1];
+        const function_template f = function_templates[earlier];
         const entity old = entity_table[f.entity];
         if (f.definition && defines)
             /* [basic.def.odr]/1: a second definition */
@@ -398,11 +399,11 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         entity_table.add_declaration(f.entity, n);
         last_function_template = earlier;
         if (first_defaults)
-            function_templates[earlier - 1].default_arguments =
-                hold_template_defaults(earlier);
+            function_templates[earlier].default_arguments =
+                hold_template_defaults(earlier.number());
         if (!s.friend_) {
-            function_templates[earlier - 1].hidden_friend = false;
-            function_templates[earlier - 1].friend_declaration = false;
+            function_templates[earlier].hidden_friend = false;
+            function_templates[earlier].friend_declaration = false;
         }
         if (defines) {
             if (renamed) {
@@ -410,7 +411,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                      merge_template_defaults(n, f.first_parameter, first,
                                              f.parameter_count, false));
             }
-            function_template &record = function_templates[earlier - 1];
+            function_template &record = function_templates[earlier];
             record.declaration = n;
             record.definition = definition;
             record.declarator = definition;
@@ -501,12 +502,12 @@ semantic_analysis::function_template_definition(SyntaxRef n,
        namespace) are another scope's declarations, held by that scope's
        name: they join calls of this one by lookup ([namespace.udir]/2), and
        what this declaration does to the scope's own set leaves them */
-    owned_array<uint32_t> local;
-    for (uint32_t g : group) {
+    owned_array<template_ref> local;
+    for (template_ref g : group) {
         bool held_here = false;
         for (entity_index h = prior; h;
              h = entity_table[h].details().using_shadow_of)
-            if (function_templates[g - 1].name == h)
+            if (function_templates[g].name == h)
                 held_here = true;
         if (held_here)
             local.append(g);
@@ -546,8 +547,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             x.function = f;
             template_name_functions.append(x);
         }
-    for (uint32_t g : local)
-        function_templates[g - 1].unusable = !overload;
+    for (template_ref g : local)
+        function_templates[g].unusable = !overload;
     if (!overload && (!held || held.index() < before ||
                       entity_table[held].kind != entity_kind::none)) {
         record.unusable = true;
@@ -556,9 +557,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 other.unusable = true;
     }
     function_templates.append(record);
-    last_function_template = static_cast<uint32_t>(function_templates.size());
+    last_function_template = template_ref::at(function_templates.size() - 1);
     if (defaults)
-        hold_template_defaults(last_function_template);
+        hold_template_defaults(last_function_template.number());
     return analysis_result::well_formed;
 }
 
@@ -617,10 +618,10 @@ semantic_analysis::function_template_id_value(SyntaxRef n, template_ref ft,
                            "specialization here";
         if (!found)
             return not_supported_because(n, "over.over", none);
-        owned_array<uint32_t> group;
+        owned_array<template_ref> group;
         function_template_overloads(function_templates[found].name, group);
-        for (uint32_t g : group)
-            if (entity_table[function_templates[g - 1].entity].nonstatic_member)
+        for (template_ref g : group)
+            if (entity_table[function_templates[g].entity].nonstatic_member)
                 return not_supported_because(n, "over.over", none);
         owned_array<overload_candidate> candidates;
         owned_array<uint32_t> first;

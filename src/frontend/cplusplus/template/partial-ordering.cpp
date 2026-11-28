@@ -175,7 +175,8 @@ bool semantic_analysis::orderable(qualified_type t, bool packs,
     case type_kind::function: {
         if (!orderable(r.operand, packs, pack_argument, value_kinds))
             return false;
-        const qualified_type *list = type_table.parameters(t.unqualified());
+        checked_span<const qualified_type> list =
+            type_table.parameters(t.unqualified());
         /* [temp.deduct.type]/10: a trailing function parameter pack is
            deduced element by element */
         for (uint32_t i = 0; i < r.parameter_count; i++)
@@ -211,8 +212,10 @@ bool semantic_analysis::at_least_as_specialized(template_ref f, template_ref g,
     qualified_type gtype = entity_table[gg.entity].type;
     const struct type fr = type_table[ftype.unqualified()];
     const struct type gr = type_table[gtype.unqualified()];
-    const qualified_type *fp = type_table.parameters(ftype.unqualified());
-    const qualified_type *gp = type_table.parameters(gtype.unqualified());
+    checked_span<const qualified_type> fp =
+        type_table.parameters(ftype.unqualified());
+    checked_span<const qualified_type> gp =
+        type_table.parameters(gtype.unqualified());
     /* [temp.func.order]/3 (CWG2445): a synthesized candidate of reversed
        order takes its template's two parameters in the other order */
     if ((f_reversed && (fr.parameter_count != 2 || arguments != 2)) ||
@@ -277,11 +280,16 @@ bool semantic_analysis::at_least_as_specialized(template_ref f, template_ref g,
     bool skipped = false;
     for (size_t k = 0; k < arguments; k++) {
         bool apack = k >= ffixed, ppack = k >= gfixed;
-        qualified_type a = fparam(k), p = gparam(k);
+        /* (the arguments past the fixed parameters are the pack's) */
+        qualified_type a, p;
         if (apack)
             a = type_table[fp[ffixed].unqualified()].operand;
+        else
+            a = fparam(k);
         if (ppack)
             p = type_table[gp[gfixed].unqualified()].operand;
+        else
+            p = gparam(k);
         /* [temp.deduct.type]/10: "During partial ordering
            ([temp.deduct.partial]), if Ai was originally a function
            parameter pack: ... if Pi is not a function parameter pack,
@@ -478,7 +486,7 @@ int semantic_analysis::function_template_order(template_ref f, template_ref g,
         bool dependent_types = false;
         qualified_type declared = entity_table[t.entity].type;
         const struct type d = type_table[declared.unqualified()];
-        const qualified_type *types_of =
+        checked_span<const qualified_type> types_of =
             type_table.parameters(declared.unqualified());
         for (uint32_t i = 0; i < d.parameter_count; i++)
             if (depends_on_template_parameter(types_of[i]))
@@ -500,7 +508,8 @@ int semantic_analysis::function_template_order(template_ref f, template_ref g,
         }
         qualified_type type = entity_table[t.entity].type;
         const struct type r = type_table[type.unqualified()];
-        const qualified_type *list = type_table.parameters(type.unqualified());
+        checked_span<const qualified_type> list =
+            type_table.parameters(type.unqualified());
         if (r.kind != type_kind::function || r.variadic)
             unknown = true;
         for (uint32_t i = 0; i < r.parameter_count && !unknown; i++)
@@ -552,7 +561,8 @@ int semantic_analysis::function_template_order(template_ref f, template_ref g,
     auto trailing_pack = [&](template_ref x, uint32_t &position) {
         qualified_type type = entity_table[function_templates[x].entity].type;
         const struct type r = type_table[type.unqualified()];
-        const qualified_type *list = type_table.parameters(type.unqualified());
+        checked_span<const qualified_type> list =
+            type_table.parameters(type.unqualified());
         position = r.parameter_count;
         if (!r.parameter_count ||
             type_table[list[r.parameter_count - 1].unqualified()].kind !=
@@ -838,7 +848,8 @@ uint64_t semantic_analysis::constraint_mapping(
 void semantic_analysis::specialization_atoms(uint32_t s,
                                              owned_array<uint64_t> &atoms)
 {
-    const function_template ft = function_templates[s - 1];
+    const function_template ft =
+        function_templates[template_ref::from_number(s)];
     entity_index scope = entity_table[ft.entity].enclosing;
     owned_array<constraint_binding> env;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
@@ -917,8 +928,10 @@ bool semantic_analysis::more_constrained_specialization(uint32_t s, uint32_t t)
 bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
                                                       bool &unknown)
 {
-    const function_template ss = function_templates[s - 1];
-    const function_template tt = function_templates[t - 1];
+    const function_template ss =
+        function_templates[template_ref::from_number(s)];
+    const function_template tt =
+        function_templates[template_ref::from_number(t)];
     if (ss.pattern_count != tt.pattern_count) {
         unknown = true;
         return false;

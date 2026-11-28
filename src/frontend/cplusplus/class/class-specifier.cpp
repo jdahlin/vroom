@@ -526,7 +526,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         name = tokens.identifier(id);
         /* (one named before its template was defined is the incomplete
            class made then) */
-        c = instantiations[specialization - 1].specialization;
+        c = instantiations[instantiation_ref::from_number(specialization)]
+                .specialization;
         if (!c)
             c = entity_table.make(entity_kind::class_type, name, scope);
         entity_table[c].linkage_of_name = linkage::external;
@@ -536,7 +537,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             type_table.of_entity(type_kind::class_type, c), cv_none);
         entity_table[c].instantiation =
             instantiation_ref::from_number(specialization);
-        instantiation_record &record = instantiations[specialization - 1];
+        instantiation_record &record =
+            instantiations[instantiation_ref::from_number(specialization)];
         record.specialization = c;
         /* [class.pre]/2: "The class-name is also bound in the scope of the
            class (template) itself; this is known as the
@@ -550,7 +552,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             /* a partial specialization's parameters, each the argument
                matching deduced */
             const function_template &ps =
-                function_templates[record.pattern - 1];
+                function_templates[template_ref::from_number(record.pattern)];
             for (uint32_t i = 0; i < ps.parameter_count; i++)
                 bind_template_argument(
                     c, template_parameter_entities[ps.first_parameter + i],
@@ -867,7 +869,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 remaining);
         for (const deferred_class_instantiation &d : ready) {
             if (!entity_table[d.specialization].defined &&
-                !instantiations[d.index].defining) {
+                !instantiations.at_index(d.index).defining) {
                 entity_index done = d.specialization;
                 size_t mark = unsupported.size();
                 analysis_result defined =
@@ -878,8 +880,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                    specialization complete defines it again */
                 if (defined == analysis_result::unsupported) {
                     unsupported.resize(mark);
-                    instantiations[d.index].lazy = true;
-                    instantiations[d.index].has_failure = false;
+                    instantiations.at_index(d.index).lazy = true;
+                    instantiations.at_index(d.index).has_failure = false;
                     continue;
                 }
                 result = worse(result, defined);
@@ -905,7 +907,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     current_declaration = outer_declaration;
     bool incomplete_argument = false;
     if (specialization) {
-        const auto &instantiation = instantiations[specialization - 1];
+        const auto &instantiation =
+            instantiations[instantiation_ref::from_number(specialization)];
         for (uint32_t i = 0; i < instantiation.argument_count; i++) {
             const auto &arg =
                 template_arguments[instantiation.first_argument + i];
@@ -1668,7 +1671,8 @@ bool semantic_analysis::accessible_here(entity_index member,
         uint32_t i =
             entity_table[function_state.function].instantiation.number();
         if (i) {
-            entity_index t = instantiations[i - 1].template_entity;
+            entity_index t = instantiations[instantiation_ref::from_number(i)]
+                                 .template_entity;
             for (const function_template &f : function_templates)
                 if (f.entity == t && f.friend_class) {
                     for (entity_index here = f.friend_class;
@@ -2816,8 +2820,11 @@ analysis_result semantic_analysis::member_declarator(
         if (record.kind == type_kind::class_type &&
             entity_table[record.entity].kind != entity_kind::class_type) {
             uint32_t inst = entity_table[record.entity].instantiation.number();
-            if (inst && instantiations[inst - 1].has_failure) {
-                unsupported.append(instantiations[inst - 1].failure);
+            if (inst && instantiations[instantiation_ref::from_number(inst)]
+                            .has_failure) {
+                unsupported.append(
+                    instantiations[instantiation_ref::from_number(inst)]
+                        .failure);
                 return analysis_result::unsupported;
             }
             return not_supported_because(

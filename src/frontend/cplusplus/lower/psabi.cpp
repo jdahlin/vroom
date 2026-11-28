@@ -105,7 +105,7 @@ void c_lowering::psabi_definition(entity_index e, uint32_t s,
 
     ast_builder_psabi_site(c, AST_BUILDER_PSABI_RESULT, s,
                            tokens.location(result_at));
-    const uint32_t *items = analysis.semantics.items(body.first);
+    checked_span<const uint32_t> items = analysis.semantics.items(body.first);
     for (uint32_t i = 0; i < body.count && i < parameters.size(); i++) {
         token_index at = parameter_token(entity_index_in(items[i]), first, end);
         ast_builder_psabi_site(c, AST_BUILDER_PSABI_PARAMETER, parameters[i],

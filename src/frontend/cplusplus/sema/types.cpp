@@ -59,7 +59,7 @@ bool types::same(const type &a, const qualified_type *a_parameters,
         a.variable_bound != other.variable_bound ||
         a.parameter_count != other.parameter_count)
         return false;
-    const qualified_type *b_parameters = parameters(b);
+    checked_span<const qualified_type> b_parameters = parameters(b);
     for (uint32_t i = 0; i < a.parameter_count; i++)
         if (!(a_parameters[i] == b_parameters[i]))
             return false;
@@ -74,7 +74,7 @@ void types::grow()
         slot = 0;
     for (uint32_t n = 1; n < records.size(); n++) {
         type_index t{n};
-        size_t i = hash(records[t], parameters(t)) & (size - 1);
+        size_t i = hash(records[t], parameters(t).data()) & (size - 1);
         while (slots[i])
             i = (i + 1) & (size - 1);
         slots[i] = t;
@@ -210,7 +210,7 @@ type_index types::function_qualified(type_index f, uint32_t function_cv,
     type t = records[f];
     t.function_cv = static_cast<uint8_t>(function_cv);
     t.function_ref = static_cast<uint8_t>(function_ref);
-    return intern(t, parameters(f));
+    return intern(t, parameters(f).data());
 }
 
 /* a class ([class.name]/1: "A class definition introduces a new type") or

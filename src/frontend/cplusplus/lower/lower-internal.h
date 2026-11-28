@@ -92,7 +92,16 @@ class c_lowering
         for (uint32_t &s : symbols)
             s = 0;
         records.resize(analysis.entity_table.size());
+        debug_enums.resize(analysis.entity_table.size());
+        first_enumerator.resize(analysis.entity_table.size());
+        next_enumerator.resize(analysis.entity_table.size());
         data_records.resize(analysis.entity_table.size());
+        for (ast_qualified_type &r : debug_enums)
+            r = 0;
+        for (entity_index &i : first_enumerator)
+            i = 0;
+        for (entity_index &i : next_enumerator)
+            i = 0;
         for (ast_qualified_type &r : records)
             r = 0;
         for (ast_qualified_type &r : data_records)
@@ -488,8 +497,10 @@ class c_lowering
 
     /* declaring every function's symbol, which uses none */
     bool declaring_symbols = false;
-    owned_array<entity_index> debug_enums;
-    owned_array<ast_qualified_type> debug_enum_types;
+    owned_array<ast_qualified_type, entity_index> debug_enums;
+    owned_array<entity_index, entity_index> first_enumerator, next_enumerator;
+    bool enumerators_gathered = false;
+    void gather_enumerators();
     void qualified_entity_name(entity_index e, vbuffer *out) const;
     void describe_entity(entity_index e, const char *lead,
                          const owned_buffer &why);
@@ -528,6 +539,8 @@ class c_lowering
     bool is_reference(qualified_type t) const;
     /* -g (debug-names.cpp) */
     void debug_scope(entity_index e, vbuffer *out) const;
+    void debug_virtual_bases(entity_index e, ast_qualified_type made,
+                             token_index at);
     ast_qualified_type debug_enum_type(entity_index e, token_index at);
     ast_qualified_type debug_type(qualified_type t, token_index at);
     void debug_class_name(entity_index e, vbuffer *out);

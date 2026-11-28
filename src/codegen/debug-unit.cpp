@@ -54,6 +54,7 @@ enum {
     DEBUG_AT_DATA_BIT_OFFSET = 0x6b,
     DEBUG_AT_ARTIFICIAL = 0x34,
     DEBUG_AT_SPECIFICATION = 0x47,
+    DEBUG_AT_VIRTUALITY = 0x4c,
     DEBUG_AT_ENUM_CLASS = 0x6d,
     DEBUG_AT_LINKAGE_NAME = 0x6e,
 };
@@ -74,6 +75,8 @@ enum {
     DEBUG_FORM_FRAME_OFFSET = 0xf3,
     DEBUG_FORM_SYMBOL = 0xf4,
     DEBUG_FORM_MEMBER = 0xf5, /* ref4: a member's declaration in its class */
+    /* an expression: from an object's address, that of its virtual base */
+    DEBUG_FORM_VIRTUAL_BASE = 0xf6,
 };
 enum { DEBUG_ATTRIBUTES = 8, DEBUG_SHAPES = 96 };
 
@@ -97,6 +100,11 @@ typedef struct debug_type {
     uint8_t reference; /* AST_DEBUG_*REFERENCE: the pointer type is one */
 } debug_type;
 
+typedef struct debug_member {
+    uint32_t type; /* its class's type index */
+    uint32_t symbol;
+} debug_member;
+
 typedef struct debug_writer {
     cc *c;
     tbuf *b;
@@ -110,9 +118,12 @@ typedef struct debug_writer {
     uint32_t *type_labels,
         *typedef_labels;        /* by qualified type, by sym; 0: none yet */
     uint32_t *reference_labels; /* by qualified type, two per: & and && */
-    uint32_t *members; /* the member functions and static members defined
+    struct debug_member
+        *members; /* the member functions and static members defined
                           here, declared in their classes */
     uint32_t member_count, member_capacity;
+    debug_member *statics; /* the static locals here, by their function */
+    uint32_t static_count;
 } debug_writer;
 
 static bool debug_chunk_is_function(const cc *c, const codegen_chunk *chunk)
@@ -264,6 +275,19 @@ static void debug_die_write(debug_writer *w, const debug_die *d)
             vtext_format_append(b, "\t.%s\t.Ldbg_m%llu-.Ldbg_cu\n", w->word,
                                 (unsigned long long)a->number);
             break;
+        case DEBUG_FORM_VIRTUAL_BASE: {
+            /* DW_OP_dup, deref (the virtual table), constu N, minus, deref
+               (the base's offset), plus */
+            unsigned bytes = 1;
+
+            for (uint64_t v = a->number; v > 127; v >>= 7)
+                bytes++;
+            vtext_format_append(b,
+                                "\t.byte\t%u, 18, 6, 16\n\t.uleb128\t%llu\n"
+                                "\t.byte\t28, 6, 34\n",
+                                bytes + 6, (unsigned long long)a->number);
+            break;
+        }
         case DEBUG_FORM_SYMBOL: /* DW_OP_addr */
             vtext_format_append(b, "\t.byte\t9, 3\n\t.%s\t", w->quad);
             codegen_symbol_name_append(w->c, b, (uint32_t)a->number);
@@ -534,12 +558,13 @@ static void debug_member_note(debug_writer *w, uint32_t s,
 {
     if (w->member_count == w->member_capacity) {
         w->member_capacity = 2 * w->member_capacity + 32;
-        w->members = (uint32_t *)realloc(w->members, w->member_capacity *
-                                                         sizeof *w->members);
+        w->members = (debug_member *)realloc(
+            w->members, w->member_capacity * sizeof *w->members);
         if (!w->members)
             vout_of_memory();
     }
-    w->members[w->member_count++] = s;
+    w->members[w->member_count++] =
+        VCC_LITERAL(debug_member, AST_QUALIFIED_TYPE_INDEX(debug_class), s);
     debug_type_label(w, debug_class, 0);
 }
 
@@ -596,11 +621,30 @@ static void debug_record_write(debug_writer *w, ast_qualified_type t)
         }
         debug_die_write(w, &m);
     }
-    for (uint32_t i = 0; i < w->member_count; i++)
-        if (AST_QUALIFIED_TYPE_INDEX(
-                codegen_symbol_attributes(c, w->members[i])->debug_class) ==
-            AST_QUALIFIED_TYPE_INDEX(t))
-            debug_member_write(w, w->members[i]);
+    for (uint32_t i = 0; i < r->debug_virtual_base_count; i++) {
+        const uint32_t *pair = &c->lists[r->debug_virtual_bases + 2 * i];
+        debug_die v = debug_die_new(DEBUG_TAG_INHERITANCE, false);
+
+        debug_die_type(w, &v, pair[0], 0);
+        debug_die_number(&v, DEBUG_AT_DATA_MEMBER_LOCATION,
+                         DEBUG_FORM_VIRTUAL_BASE, pair[1]);
+        debug_die_number(&v, DEBUG_AT_VIRTUALITY, DEBUG_FORM_UDATA, 1);
+        debug_die_write(w, &v);
+    }
+    /* (members are sorted by class: this one's start where the search
+       says) */
+    uint32_t of = AST_QUALIFIED_TYPE_INDEX(t), low = 0, high = w->member_count;
+
+    while (low < high) {
+        uint32_t middle = low + (high - low) / 2;
+
+        if (w->members[middle].type < of)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    while (low < w->member_count && w->members[low].type == of)
+        debug_member_write(w, w->members[low++].symbol);
     debug_children_end(w);
 }
 
@@ -872,6 +916,61 @@ static bool debug_is_parameter(const cc *c, uint32_t function, uint32_t s)
     return false;
 }
 
+/* a constructor or destructor: its variants are several functions of one declaration, which
+   classes do not list yet */
+static bool debug_is_structor(cc *c, uint32_t s)
+{
+    const attrs *a = codegen_symbol_attributes(c, s);
+    const tag *r = &c->tags[T(c, a->debug_class)->aux];
+    const char *name;
+
+    if (!a->debug_name)
+        return true;
+    name = c->strs[a->debug_name - 1].s;
+    return name[0] == '~' ||
+           (strlen(name) == vintern_ents[r->name].len &&
+            !memcmp(name, vintern_ents[r->name].s, vintern_ents[r->name].len));
+}
+
+/* by class, then by symbol: the order does not depend on the sort */
+static int debug_member_compare(const void *a, const void *b)
+{
+    const debug_member *x = (const debug_member *)a;
+    const debug_member *y = (const debug_member *)b;
+
+    if (x->type != y->type)
+        return x->type < y->type ? -1 : 1;
+    return x->symbol < y->symbol ? -1 : x->symbol > y->symbol;
+}
+
+/* the first of the static locals of function (they are sorted by function) */
+static uint32_t debug_statics_first(const debug_writer *w, uint32_t function)
+{
+    uint32_t low = 0, high = w->static_count;
+
+    while (low < high) {
+        uint32_t middle = low + (high - low) / 2;
+
+        if (w->statics[middle].type < function)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    return low;
+}
+
+static void debug_static_write(debug_writer *w, uint32_t s)
+{
+    cc *c = w->c;
+    const sym *y = &c->syms[s];
+    debug_die d = debug_die_new(DEBUG_TAG_VARIABLE, false);
+
+    debug_die_source_name(c, &d, s);
+    debug_die_declared(w, &d, y->ty, debug_typedef_of(c, y->tdef, y->ty), 0);
+    debug_die_number(&d, DEBUG_AT_LOCATION, DEBUG_FORM_SYMBOL, s);
+    debug_die_write(w, &d);
+}
+
 static void debug_function_append(debug_writer *w, uint32_t function,
                                   int version, const codegen_debug_frame *frame)
 {
@@ -884,13 +983,18 @@ static void debug_function_append(debug_writer *w, uint32_t function,
     parameters = N(y->body)->aux;
     const ctype *type = T(c, y->ty);
     bool variadic = (type->flags & AST_TYPE_FLAG_VARIADIC);
-    debug_die d =
-        debug_die_new(DEBUG_TAG_SUBPROGRAM,
-                      parameters || variadic || (frame && frame->count));
+    uint32_t first = debug_statics_first(w, function);
+    bool has_statics =
+        first < w->static_count && w->statics[first].type == function;
+    debug_die d = debug_die_new(DEBUG_TAG_SUBPROGRAM,
+                                parameters || variadic ||
+                                    (frame && frame->count) || has_statics);
 
     /* (a class's member: declared in it, which this definition completes) */
-    bool member = a->debug_class && (c->tags[T(c, a->debug_class)->aux].flags &
-                                     AST_RECORD_FLAG_COMPLETE);
+    bool member =
+        a->debug_class &&
+        (c->tags[T(c, a->debug_class)->aux].flags & AST_RECORD_FLAG_COMPLETE) &&
+        !debug_is_structor(c, function);
 
     if (member) {
         debug_member_note(w, function, a->debug_class);
@@ -949,6 +1053,8 @@ static void debug_function_append(debug_writer *w, uint32_t function,
         if (!debug_is_parameter(c, function, frame->locals[i].symbol))
             debug_object_write(w, DEBUG_TAG_VARIABLE, frame->locals[i].symbol,
                                frame);
+    while (first < w->static_count && w->statics[first].type == function)
+        debug_static_write(w, w->statics[first++].symbol);
     if (d.children)
         debug_children_end(w);
     debug_scope_close(w, depth);
@@ -1050,6 +1156,24 @@ VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
     if (!writer.type_labels || !writer.typedef_labels ||
         !writer.reference_labels)
         vout_of_memory();
+    /* the static locals with storage here, for their functions' entries
+       (a data chunk's key is odd) */
+    writer.statics = (debug_member *)malloc(((size_t)chunk_count + 1) *
+                                            sizeof(debug_member));
+    if (!writer.statics)
+        vout_of_memory();
+    for (uint32_t i = 0; i < chunk_count; i++) {
+        uint64_t key = chunks[i].key;
+        uint32_t s = (uint32_t)(key >> 1);
+
+        if (!(key & 1) || key >= ((uint64_t)1 << 62) || !c->syms[s].depth ||
+            !codegen_symbol_attributes(c, s)->debug_owner)
+            continue;
+        writer.statics[writer.static_count++] = VCC_LITERAL(
+            debug_member, codegen_symbol_attributes(c, s)->debug_owner, s);
+    }
+    qsort(writer.statics, writer.static_count, sizeof *writer.statics,
+          debug_member_compare);
     for (uint32_t i = 0; i < chunk_count; i++) {
         uint32_t function = (uint32_t)(chunks[i].key >> 1);
 
@@ -1068,12 +1192,16 @@ VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
             debug_function_append(&writer, function, v, frame);
         }
     }
+    if (writer.member_count)
+        qsort(writer.members, writer.member_count, sizeof *writer.members,
+              debug_member_compare);
     debug_types_write(&writer);
     free(writer.types);
     free(writer.type_labels);
     free(writer.typedef_labels);
     free(writer.reference_labels);
     free(writer.members);
+    free(writer.statics);
     vtext_string_append(tail, "\t.byte\t0\n.Ldbg_cu_end:\n");
     vtext_format_append(tail, "\t.section\t.debug_abbrev,%s\n",
                         w ? "\"dr\"" : "\"\",@progbits");

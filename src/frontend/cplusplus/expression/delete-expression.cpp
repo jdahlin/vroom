@@ -85,10 +85,10 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
             visible_conversion_functions(cls, functions, &templates);
         /* (an explicit conversion function template is none of /1's) */
         for (entity_index held : templates) {
-            owned_array<uint32_t> group;
+            owned_array<template_ref> group;
             function_template_overloads(held, group);
-            for (uint32_t g : group)
-                if (!entity_table[function_templates[g - 1].entity].explicit_)
+            for (template_ref g : group)
+                if (!entity_table[function_templates[g].entity].explicit_)
                     followed = false;
         }
         if (followed)
@@ -423,7 +423,7 @@ analysis_result semantic_analysis::usual_deallocation(
     bool all_void_first = true;
     for (entity_index f : set) {
         const struct type &ft = type_table[entity_table[f].type.unqualified()];
-        const qualified_type *parameters =
+        checked_span<const qualified_type> parameters =
             type_table.parameters(entity_table[f].type.unqualified());
         bool void_pointer = false;
         if (ft.parameter_count && parameters[0].unqualified() &&
@@ -453,7 +453,7 @@ analysis_result semantic_analysis::usual_deallocation(
         for (entity_index f : set) {
             const struct type &ft =
                 type_table[entity_table[f].type.unqualified()];
-            const qualified_type *parameters =
+            checked_span<const qualified_type> parameters =
                 type_table.parameters(entity_table[f].type.unqualified());
             uint32_t count = ft.parameter_count;
             bool has_align =

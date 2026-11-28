@@ -152,9 +152,10 @@ analysis_result semantic_analysis::variable_partial_specialization(
  */
 void semantic_analysis::equivalent_partial_specializations(uint32_t added)
 {
-    const function_template a = function_templates[added - 1];
+    const function_template a =
+        function_templates[template_ref::from_number(added)];
     for (uint32_t k = 0; k < function_templates.size(); k++) {
-        const function_template &o = function_templates[k];
+        const function_template &o = function_templates.at_index(k);
         if (k + 1 == added || o.primary != a.primary || !o.parameter_count)
             continue;
         /* [temp.over.link]/7: the template-heads' constraints equivalent
@@ -263,9 +264,11 @@ bool semantic_analysis::explicitly_specialized_class(entity_index c) const
     uint32_t record = entity_table[c].instantiation.number();
     if (!record)
         return false;
-    const instantiation_record &r = instantiations[record - 1];
+    const instantiation_record &r =
+        instantiations[instantiation_ref::from_number(record)];
     return r.specialization == c && r.pattern &&
-           !function_templates[r.pattern - 1].parameter_count;
+           !function_templates[template_ref::from_number(r.pattern)]
+                .parameter_count;
 }
 
 /*
@@ -311,7 +314,9 @@ bool semantic_analysis::member_class_specialization(SyntaxRef n,
     if (!is_class_entity(ns.entity))
         return false;
     uint32_t record = entity_table[ns.entity].instantiation.number();
-    if (!record || instantiations[record - 1].specialization != ns.entity)
+    if (!record ||
+        instantiations[instantiation_ref::from_number(record)].specialization !=
+            ns.entity)
         return false;
     /* [temp.expl.spec]/5: the members of an explicitly specialized class
        are defined as a normal class's, without template<> */
@@ -546,7 +551,8 @@ analysis_result semantic_analysis::class_specialization_definition(
             entity_table[r2.specialization].kind == entity_kind::class_type &&
             (entity_table[r2.specialization].defined || r2.defining) &&
             !(r2.pattern &&
-              !function_templates[r2.pattern - 1].parameter_count) &&
+              !function_templates[template_ref::from_number(r2.pattern)]
+                   .parameter_count) &&
             r2.argument_count == arguments.size()) {
             owned_array<template_argument> d;
             owned_array<bool> set;
@@ -647,7 +653,8 @@ analysis_result semantic_analysis::substitute_specialization(
     const template_argument *arguments, uint32_t count, bool &substituted)
 {
     substituted = false;
-    const function_template s = function_templates[specialization - 1];
+    const function_template s =
+        function_templates[template_ref::from_number(specialization)];
     SyntaxRef id = 0;
     if (s.is_variable) {
         id = variable_specialization_id(s.declarator);
@@ -709,7 +716,8 @@ bool semantic_analysis::pack_expansion_not_last(qualified_type t,
         return false;
     const struct type &r = type_table[t.unqualified()];
     if (r.kind == type_kind::function) {
-        const qualified_type *list = type_table.parameters(t.unqualified());
+        checked_span<const qualified_type> list =
+            type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < r.parameter_count; i++) {
             if (type_table[list[i].unqualified()].kind ==
                     type_kind::pack_expansion &&
@@ -834,7 +842,7 @@ analysis_result semantic_analysis::matching_specialization(
          templates_by_primary.update(function_templates, by_primary),
                   n = templates_by_primary.after(n)) {
         uint32_t k = n - 1;
-        const function_template s = function_templates[k];
+        const function_template s = function_templates.at_index(k);
         if (s.pattern_count != count)
             continue;
         owned_array<template_argument> d;
@@ -962,7 +970,9 @@ analysis_result semantic_analysis::matching_specialization(
             "no most specialized partial specialization");
     pattern = found[chosen];
     deduced.clear();
-    for (uint32_t i = 0; i < function_templates[pattern - 1].parameter_count;
+    for (uint32_t i = 0;
+         i <
+         function_templates[template_ref::from_number(pattern)].parameter_count;
          i++)
         deduced.append(all[first_deduced[chosen] + i]);
     return analysis_result::well_formed;

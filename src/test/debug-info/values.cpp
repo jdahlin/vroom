@@ -40,6 +40,20 @@ template <class T, int N> struct Many {
 
 int total = 5;
 
+struct Root {
+    int root;
+};
+struct Left : virtual Root {
+    int left;
+};
+struct Right : virtual Root {
+    int right;
+};
+struct Diamond : Left, Right {
+    int own;
+};
+Diamond diamond;
+
 namespace outer
 {
 enum class Color : short { red = 1, green = 3 };
@@ -60,6 +74,10 @@ __attribute__((noinline)) static int use(const S &s, Box<long> box, S *p,
 
     Counter counter{5};
 
+    diamond.root = 21;
+    diamond.right = 22;
+    Right &through = diamond;
+
     sum += outer::anonymous + (int)many.item[1].item;
     sum += counter.get(1) + Counter::twice(2) + Counter::count;
     return sum; /* STOP */
@@ -73,5 +91,5 @@ int main()
 
     return use(s, box, &s, 4) == 0;
 }
-/* PRINT s.m s.b s.r box.item p->m p->b moved x alias total ns::hidden outer::anonymous shade plains Counter::count counter */
+/* PRINT s.m s.b s.r box.item p->m p->b moved x alias total ns::hidden outer::anonymous shade plains Counter::count counter diamond.root diamond.right through.root */
 /* WHATIS box many s p shade plains counter */

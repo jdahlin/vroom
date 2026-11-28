@@ -47,6 +47,43 @@ inline void check_element(bool there)
 #endif
 }
 
+/* A run of count elements that belong to someone else.  A subscript is
+   checked in an ASan build, and the pointer is had only by asking (data()),
+   so a run does not lose its length on the way. */
+template <typename T> class checked_span
+{
+  public:
+    checked_span() = default;
+    checked_span(T *first, size_t count) : elements(first), length(count)
+    {
+    }
+    T &operator[](size_t i) const
+    {
+        check_element(i < length);
+        return elements[i];
+    }
+    T *data() const
+    {
+        return elements;
+    }
+    size_t size() const
+    {
+        return length;
+    }
+    T *begin() const
+    {
+        return elements;
+    }
+    T *end() const
+    {
+        return elements + length;
+    }
+
+  private:
+    T *elements = nullptr;
+    size_t length = 0;
+};
+
 /*
  * Whether a table may hold a T: its bytes may be moved (realloc).  A type
  * with a copy constructor of its own, whose bytes may still be moved,
@@ -218,18 +255,29 @@ template <typename T, typename Index = size_t> class owned_array
     size_t count = 0, capacity = 0;
 };
 
-/* an owned_array whose records also go by a Ref (record_ref) */
+/* an owned_array whose records go by a Ref (record_ref).  A bare number is
+   no subscript: a 1-based record number less one would pass for a
+   position, so a position is asked for by name (at_index) */
 template <typename T, typename Ref> class record_table : public owned_array<T>
 {
   public:
-    using owned_array<T>::operator[];
+    T &operator[](size_t) = delete;
+    const T &operator[](size_t) const = delete;
     T &operator[](Ref r)
     {
-        return (*this)[static_cast<size_t>(r.index())];
+        return at_index(r.index());
     }
     const T &operator[](Ref r) const
     {
-        return (*this)[static_cast<size_t>(r.index())];
+        return at_index(r.index());
+    }
+    T &at_index(size_t i)
+    {
+        return owned_array<T>::operator[](i);
+    }
+    const T &at_index(size_t i) const
+    {
+        return owned_array<T>::operator[](i);
     }
 };
 
