@@ -81,7 +81,7 @@ class token_stream
     owned_array<bool> revertible_keywords;
 
   private:
-    owned_array<token> tokens;
+    retaining_array<token> tokens;
     /* the tokens at which source_files::layout_pragma changed, and what it
        changed to */
     owned_array<token_index> layout_change_at;

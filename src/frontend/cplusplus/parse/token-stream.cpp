@@ -61,7 +61,7 @@ void token_stream::resume()
     preprocessing_tokens.resize(first_piece[tokens.size() - 1]);
     first_piece.resize(tokens.size() - 1);
     identifiers.resize(tokens.size() - 1);
-    tokens.resize(tokens.size() - 1);
+    tokens.truncate(tokens.size() - 1);
     complete = false;
 }
 

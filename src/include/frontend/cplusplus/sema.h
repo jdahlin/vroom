@@ -244,8 +244,8 @@ class types
               type_index b) const;
     void grow();
 
-    owned_array<type> records;
-    owned_array<qualified_type> parameter_lists;
+    retaining_array<type> records;
+    retaining_array<qualified_type> parameter_lists;
     /* open addressing: a type's index, 0 for an empty slot */
     owned_array<type_index> slots;
 };
@@ -1895,7 +1895,7 @@ class semantic_tree
 
   private:
     owned_array<semantic_node> nodes;
-    owned_array<uint32_t> lists;
+    retaining_array<uint32_t> lists;
 };
 
 /* one expression analysis gave a type: what -fcxx-dump=type-claims has clang

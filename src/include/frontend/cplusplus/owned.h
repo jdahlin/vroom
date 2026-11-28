@@ -9,6 +9,7 @@
  * functions are called.
  *
  *   owned_array<T>   a growable array of trivially copyable T
+ *   retaining_array<T>  ... whose elements stay readable where they were
  *   owned_buffer     a vbuffer (common/buffer.h) freed at the end of scope
  *   owned_string     a copy of some characters, NUL-terminated
  *
@@ -157,6 +158,96 @@ template <typename T> class owned_array
   private:
     T *elements = nullptr;
     size_t count = 0, capacity = 0;
+};
+
+/*
+ * An append-only array that is read through references and pointers while
+ * more is appended to it: the tokens (the parser looks ahead), the types
+ * and their parameter lists (analysis makes new ones), the semantic tree's
+ * lists (constant evaluation adds nodes).  Growing copies the elements and
+ * keeps the old storage until the owner goes, so what was read from there
+ * is still there; the same values, as long as nothing writes an element
+ * after appending it.  The storage doubles, so the old ones together are
+ * smaller than the current one.
+ */
+template <typename T> class retaining_array
+{
+    static_assert(__is_trivially_copyable(T) && __is_trivially_destructible(T),
+                  "retaining_array<T>: T is not trivially copyable");
+
+  public:
+    retaining_array() = default;
+    ~retaining_array()
+    {
+        for (size_t i = 0; i < retired.size(); i++)
+            ::free(retired[i]);
+        ::free(elements);
+    }
+    retaining_array(const retaining_array &) = delete;
+    retaining_array &operator=(const retaining_array &) = delete;
+
+    T &append(const T &value)
+    {
+        if (count == capacity)
+            grow();
+        elements[count] = value;
+        return elements[count++];
+    }
+    /* shorter: the first n elements kept */
+    void truncate(size_t n)
+    {
+        count = n;
+    }
+    T &operator[](size_t i)
+    {
+        return elements[i];
+    }
+    const T &operator[](size_t i) const
+    {
+        return elements[i];
+    }
+    T &back()
+    {
+        return elements[count - 1];
+    }
+    const T &back() const
+    {
+        return elements[count - 1];
+    }
+    const T *data() const
+    {
+        return elements;
+    }
+    size_t size() const
+    {
+        return count;
+    }
+    bool empty() const
+    {
+        return count == 0;
+    }
+
+  private:
+    /* value in append may be an element: its storage is kept */
+    void grow()
+    {
+        size_t grown = 16;
+        if (capacity)
+            grown = capacity * 2;
+        T *p = static_cast<T *>(::malloc(grown * sizeof(T)));
+        if (!p)
+            abort();
+        if (elements) {
+            memcpy(static_cast<void *>(p), elements, count * sizeof(T));
+            retired.append(elements);
+        }
+        elements = p;
+        capacity = grown;
+    }
+
+    T *elements = nullptr;
+    size_t count = 0, capacity = 0;
+    owned_array<T *> retired;
 };
 
 /*

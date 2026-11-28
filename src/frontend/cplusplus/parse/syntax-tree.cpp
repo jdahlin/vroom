@@ -27,13 +27,18 @@ constexpr syntax_kind_description syntax_kinds[] = {
 
 } // namespace
 
+/* (a reference to no node has kind count) */
 const char *syntax_kind_name(syntax_kind kind)
 {
+    if (kind >= syntax_kind::count)
+        return "no node";
     return syntax_kinds[static_cast<size_t>(kind)].nonterminal;
 }
 
 const char *syntax_kind_subclause(syntax_kind kind)
 {
+    if (kind >= syntax_kind::count)
+        return "dcl.pre";
     return syntax_kinds[static_cast<size_t>(kind)].subclause;
 }
 
