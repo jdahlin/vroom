@@ -5,6 +5,7 @@
  * template-arguments, and the parameters' names bound to the arguments.
  */
 #include "../cplusplus-internal.h"
+#include "common/hash.h"
 #include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
