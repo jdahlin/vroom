@@ -330,7 +330,8 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                 /* [temp.over.link]/5: two declarations' expressions
                    naming parameters are equivalent when their structures
                    are (expression_structure): the same entity */
-                if (exact && entity_table[x.template_entity].expression &&
+                if (exact &&
+                    entity_table[x.template_entity].details().expression &&
                     y.template_entity != x.template_entity)
                     return false;
                 continue;
@@ -758,16 +759,17 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
         require_complete(argument_class);
     const entity &x = entity_table[argument_class];
     if (!x.defined) {
-        if (!x.instantiation && !x.size)
+        if (!x.instantiation && !x.details().size)
             return 0;
         return -1;
     }
     int found = 0;
     owned_array<template_argument> result;
     owned_array<bool> result_set;
-    for (uint32_t i = 0; i < x.base_count; i++) {
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
         qualified_type b = qualified_type::make(
-            entity_table[class_bases[x.first_base + i]].type.unqualified(),
+            entity_table[class_bases[x.details().first_base + i]]
+                .type.unqualified(),
             a.cv());
         /* each attempt, direct or through b's bases, starts from the
            values before it: a failed match may have set some */

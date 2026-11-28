@@ -49,11 +49,11 @@ bool c_lowering::holds_data_member_pointer(qualified_type t) const
                     .entity_table[analysis.class_members[x.first_member + i]]
                     .type))
             return true;
-    for (uint32_t i = 0; i < x.virtual_base_count; i++)
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++)
         if (holds_data_member_pointer(
                 analysis
-                    .entity_table
-                        [analysis.class_virtual_bases[x.first_virtual_base + i]]
+                    .entity_table[analysis.class_virtual_bases
+                                      [x.details().first_virtual_base + i]]
                     .type))
             return true;
     return false;
@@ -141,15 +141,15 @@ uint32_t c_lowering::member_pointer_constant(qualified_type t,
     ast_qualified_type d = ast_builder_type_ptrdiff(c);
     const entity &f = analysis.entity_table[member];
     if (record(record(t).operand).kind != type_kind::function)
-        return ast_builder_integer(c, d,
-                                   static_cast<int64_t>(f.offset) + adjustment);
+        return ast_builder_integer(
+            c, d, static_cast<int64_t>(f.details().offset) + adjustment);
     ast_qualified_type vp = pointer_to(void_type);
     uint32_t ptr = 0;
     int64_t adj = 2 * adjustment;
     if (f.virtual_) {
         ptr = cast(ast_builder_integer(
                        c, d,
-                       static_cast<int64_t>(f.vtable_slot) *
+                       static_cast<int64_t>(f.details().vtable_slot) *
                            static_cast<int64_t>(analysis.pointer_size())),
                    vp, AST_CAST_INTEGER_TO_POINTER);
         adj |= 1;

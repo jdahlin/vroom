@@ -412,8 +412,9 @@ semantic_analysis::quiet_definition_failed(SyntaxRef at, uint32_t index,
         not_supported_because(at, "temp.inst", what);
     body_failures.append(unsupported[before]);
     unsupported.resize(before);
-    entity_table[x.specialization].unsupported_body =
-        static_cast<uint32_t>(body_failures.size());
+    entity_table[x.specialization].set(
+        &entity_details::unsupported_body,
+        static_cast<uint32_t>(body_failures.size()));
     /* (the quiet body that wanted it fails too, and is left undefined:
        no code calls a specialization that has none) */
     return r;
@@ -573,12 +574,14 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
            in an unevaluated operand is as well-formed as before.) */
         entity_index f = instantiations[index].specialization;
         body_failures.append(unsupported[unsupported_before]);
-        entity_table[f].unsupported_body =
-            static_cast<uint32_t>(body_failures.size());
+        entity_table[f].set(&entity_details::unsupported_body,
+                            static_cast<uint32_t>(body_failures.size()));
     }
     explicit_instantiation_verdict(
         instantiations[index].specialization, r,
-        entity_table[instantiations[index].specialization].unsupported_body,
+        entity_table[instantiations[index].specialization]
+            .details()
+            .unsupported_body,
         dependent);
     /* a generic lambda's specialization is no declaration of its own: an
        ill-formed body is the enclosing declaration's error (its use there
@@ -739,7 +742,7 @@ semantic_analysis::instantiate_class(SyntaxRef at, template_ref class_template,
                 type_table[arguments[i].type.unqualified()];
             if (arg.kind != type_kind::class_type ||
                 entity_table[arg.entity].kind != entity_kind::class_type ||
-                entity_table[arg.entity].size)
+                entity_table[arg.entity].details().size)
                 continue;
             bool self = defining_class && arg.entity == defining_class;
             /* a specialization that is itself waiting for the class being
@@ -914,7 +917,7 @@ void semantic_analysis::complete_instantiation(entity_index c)
     if (!c || entity_table[c].kind != entity_kind::class_type)
         return;
     const entity &x = entity_table[c];
-    if (!x.instantiation || x.defined || x.size)
+    if (!x.instantiation || x.defined || x.details().size)
         return;
     uint32_t index = x.instantiation.index();
     if (instantiations[index].defining)
@@ -944,7 +947,7 @@ void semantic_analysis::complete_instantiation(entity_index c)
                 const struct type &arg = type_table[a.type.unqualified()];
                 if (arg.kind == type_kind::class_type &&
                     entity_table[arg.entity].kind == entity_kind::class_type &&
-                    (!entity_table[arg.entity].size ||
+                    (!entity_table[arg.entity].details().size ||
                      !entity_table[arg.entity].defined))
                     return;
             }
@@ -967,7 +970,7 @@ bool semantic_analysis::require_complete(entity_index c) const
         return true;
     const_cast<semantic_analysis *>(this)->complete_instantiation(c);
     const entity &x = entity_table[c];
-    return x.size || x.defined;
+    return x.details().size || x.defined;
 }
 
 bool semantic_analysis::require_complete(qualified_type t) const
@@ -1288,22 +1291,23 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     entity_index scope = instantiations[b.instantiation].specialization;
     /* (a virtual function is needed by the vtable, [temp.inst]/11; an
        explicit instantiation of the class defines its members, /10) */
-    if (entity_table[scope].explicitly_instantiated ==
+    if (entity_table[scope].details().explicitly_instantiated ==
         instantiation_kind::definition)
         return true;
     /* [temp.explicit]/11: an explicit instantiation declaration names a
        class whose vtable another unit emits: its virtual functions are not
        needed by one [impl.clang] */
-    bool vtable_elsewhere = entity_table[scope].explicitly_instantiated ==
-                            instantiation_kind::declaration;
+    bool vtable_elsewhere =
+        entity_table[scope].details().explicitly_instantiated ==
+        instantiation_kind::declaration;
     if (name && lookup_id == entity_table[scope].name) {
-        if (entity_index d = entity_table[scope].destructor)
+        if (entity_index d = entity_table[scope].details().destructor)
             if (entity_table[d].member_definition_needed ||
                 (entity_table[d].virtual_ && !vtable_elsewhere) ||
                 explicitly_instantiated(d) == instantiation_kind::definition)
                 return true;
-        for (entity_index k = entity_table[scope].first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = entity_table[scope].details().first_constructor;
+             k; k = entity_table[k].details().next_constructor)
             if (entity_table[k].member_definition_needed ||
                 explicitly_instantiated(k) == instantiation_kind::definition)
                 return true;
@@ -1318,7 +1322,8 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     /* (the overloads it may define: those with as many parameters, a
        definition declaring one function, [dcl.meaning]/1) */
     int written = definition_parameter_count(o.definition);
-    for (entity_index e = first; e; e = entity_table[e].next_overload) {
+    for (entity_index e = first; e;
+         e = entity_table[e].details().next_overload) {
         if (written >= 0 && entity_table[e].kind == entity_kind::function &&
             type_table[entity_table[e].type.unqualified()].kind ==
                 type_kind::function &&
@@ -1411,7 +1416,7 @@ bool semantic_analysis::static_member_destructor_needed(qualified_type type)
     const auto &object = type_table[type.unqualified()];
     if (object.kind != type_kind::class_type)
         return false;
-    entity_index destructor = entity_table[object.entity].destructor;
+    entity_index destructor = entity_table[object.entity].details().destructor;
     if (!destructor || entity_table[destructor].member_definition_needed)
         return false;
     entity_table[destructor].member_definition_needed = true;
@@ -1461,7 +1466,7 @@ bool semantic_analysis::emitted_functions_needed()
             marked = deleting_destructor_needs(x.enclosing) || marked;
         if (x.kind != entity_kind::function || !x.defined ||
             x.member_definition_needed || x.member_body_deferred ||
-            x.unsupported_body || x.deleted || x.implicit ||
+            x.details().unsupported_body || x.deleted || x.implicit ||
             (x.inline_ &&
              explicitly_instantiated(f) != instantiation_kind::definition))
             continue;
@@ -1521,7 +1526,9 @@ void semantic_analysis::instantiate_pending(bool at_end)
             while (explicit_class &&
                    entity_table[explicit_class].kind ==
                        entity_kind::class_type &&
-                   entity_table[explicit_class].explicitly_instantiated !=
+                   entity_table[explicit_class]
+                           .details()
+                           .explicitly_instantiated !=
                        instantiation_kind::definition)
                 explicit_class = entity_table[explicit_class].enclosing;
             bool explicit_ =
@@ -1540,8 +1547,10 @@ void semantic_analysis::instantiate_pending(bool at_end)
                 explicit_instantiation_verdict(explicit_class, r, failure,
                                                dependent);
             else if (r == analysis_result::ill_formed && dependent &&
-                     b.function && entity_table[b.function].member_needed_by)
-                use_ill_formed(entity_table[b.function].member_needed_by);
+                     b.function &&
+                     entity_table[b.function].details().member_needed_by)
+                use_ill_formed(
+                    entity_table[b.function].details().member_needed_by);
             progress = true;
         }
         for (; next_definition < pending_definitions.size();
@@ -1656,7 +1665,7 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].immediate = t.immediate;
     entity_table[e].operator_function = t.operator_function;
     entity_table[e].conversion_function = t.conversion_function;
-    entity_table[e].implemented = t.implemented;
+    entity_table[e].set(&entity_details::implemented, t.details().implemented);
     entity_table[e].instantiation = instantiation_ref::at(index);
     /* a member function template's specialization: a member function of
        its class ([temp.mem]) */
@@ -1756,7 +1765,7 @@ bool semantic_analysis::enumerator_value(entity_index e,
     fundamental_type underlying = fundamental_of(x.type);
     const struct type &record = type_table[x.type.unqualified()];
     if (record.kind == type_kind::enumeration)
-        underlying = entity_table[record.entity].underlying;
+        underlying = entity_table[record.entity].details().underlying;
     if (!fundamental_type_is_signed(tokens.files.behavior, underlying) ||
         static_cast<int64_t>(x.value) >= 0)
         return false;

@@ -144,6 +144,7 @@ typedef struct field {
     uint8_t debug_kind; /* -g, C++: AST_DEBUG_*, what the field is to it */
     ast_qualified_type debug_base; /* AST_DEBUG_BASE: the base class's struct
                                       (ty is bytes where its tail is reused) */
+    ast_qualified_type debug_type; /* the type -g says in place of ty (0) */
     uint32_t loc;
     uint32_t counted_by; /* counted_by(member): its identifier id */
     uint32_t

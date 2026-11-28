@@ -554,14 +554,14 @@ entity_index semantic_analysis::redeclared_member_function(SyntaxElement inner,
         return 0;
     uint32_t cv = function_cv;
     if (m.destructor)
-        return entity_table[s].destructor;
+        return entity_table[s].details().destructor;
     if (conversion)
         /* the conversion function of that type and cv-qualifiers */
         return overload_of_type(own_conversion_functions(s), type, cv);
     entity_index member = 0;
     if (no_type) {
-        for (entity_index o = entity_table[s].first_constructor; o;
-             o = entity_table[o].next_constructor)
+        for (entity_index o = entity_table[s].details().first_constructor; o;
+             o = entity_table[o].details().next_constructor)
             if (same_parameters(type_table, entity_table[o].type.unqualified(),
                                 type.unqualified()))
                 member = o;
@@ -569,7 +569,7 @@ entity_index semantic_analysis::redeclared_member_function(SyntaxElement inner,
     }
     for (entity_index o = entity_table.find(s, tokens.identifier(m.id));
          o && entity_table[o].kind == entity_kind::function;
-         o = entity_table[o].next_overload)
+         o = entity_table[o].details().next_overload)
         if (same_parameters(type_table, entity_table[o].type.unqualified(),
                             type.unqualified()) &&
             entity_table[o].member_cv == cv &&

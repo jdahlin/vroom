@@ -104,17 +104,17 @@ class SyntaxItems;
 class SyntaxRef
 {
   public:
-    SyntaxRef() = default;
+    constexpr SyntaxRef() = default;
     SyntaxRef(syntax_child c)
     {
         if (!c.is_token())
             n = node_index(c.index());
     }
     /* a node of the thread's tree (or none: 0) */
-    SyntaxRef(node_index n) : n(n)
+    constexpr SyntaxRef(node_index n) : n(n)
     {
     }
-    SyntaxRef(decltype(nullptr))
+    constexpr SyntaxRef(decltype(nullptr))
     {
     }
 

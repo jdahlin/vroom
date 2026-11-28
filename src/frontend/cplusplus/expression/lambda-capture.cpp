@@ -332,7 +332,8 @@ analysis_result semantic_analysis::variable_capture(SyntaxRef n,
     /* a structured binding is a local entity too (C++20,
        [basic.pre]/7) */
     bool binding = x.kind == entity_kind::structured_binding &&
-                   x.binding_object && entity_table[x.binding_object].automatic;
+                   x.details().binding_object &&
+                   entity_table[x.details().binding_object].automatic;
     if (!binding && (x.kind != entity_kind::variable || !x.automatic))
         return ill_formed_at_token(name,
                                    "the identifier in a simple-capture "
@@ -478,7 +479,7 @@ analysis_result semantic_analysis::init_capture(InitCapture n,
         each.member = capture_member_of(l.closure, member);
         if (pack)
             each.pack_name = tokens.identifier(name);
-        entity_table[v].capture_member = each.member;
+        entity_table[v].set(&entity_details::capture_member, each.member);
         lambda_captures.append(each);
     }
     /* (an empty pack has no member: its name is bound all the same) */
@@ -868,9 +869,10 @@ analysis_result semantic_analysis::implicit_captures(
             if (x.nonstatic_member) {
                 names_this = true;
             } else {
-                bool binding = x.kind == entity_kind::structured_binding &&
-                               x.binding_object &&
-                               entity_table[x.binding_object].automatic;
+                bool binding =
+                    x.kind == entity_kind::structured_binding &&
+                    x.details().binding_object &&
+                    entity_table[x.details().binding_object].automatic;
                 if (!binding &&
                     (x.kind != entity_kind::variable || !x.automatic))
                     continue;

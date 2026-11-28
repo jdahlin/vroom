@@ -47,13 +47,21 @@ inline void check_element(bool there)
 #endif
 }
 
+/*
+ * Whether a table may hold a T: its bytes may be moved (realloc).  A type
+ * with a copy constructor of its own, whose bytes may still be moved,
+ * specializes this.
+ */
+template <typename T>
+inline constexpr bool relocatable_record = __is_trivially_copyable(T);
+
 /* Index: the type operator[] takes.  In an ASan build every subscript is
    checked, and the room past the last element is poisoned, so a pointer
    from data() that runs past the end is reported too. */
 template <typename T, typename Index = size_t> class owned_array
 {
     /* the elements are moved with realloc and never destroyed */
-    static_assert(__is_trivially_copyable(T) && __is_trivially_destructible(T),
+    static_assert(relocatable_record<T> && __is_trivially_destructible(T),
                   "owned_array<T>: T is not trivially copyable");
 
   public:
@@ -388,14 +396,13 @@ class record_chains
     {
         for (size_t i = next.size(); i < records.size(); i++) {
             size_t k = table_slot(key(records[i]));
-            while (ends.size() <= k)
-                ends.append(chain{0, 0});
+            chain &ends = ends_of(k);
             uint32_t at = static_cast<uint32_t>(i + 1);
-            if (ends[k].last)
-                next[ends[k].last - 1] = at;
+            if (ends.last)
+                next[ends.last - 1] = at;
             else
-                ends[k].first = at;
-            ends[k].last = at;
+                ends.first = at;
+            ends.last = at;
             next.append(0);
         }
     }
@@ -403,8 +410,8 @@ class record_chains
     template <typename Key> uint32_t first(Key key) const
     {
         size_t k = table_slot(key);
-        if (k < ends.size())
-            return ends[k].first;
+        if (k / PAGE < page_of.size() && page_of[k / PAGE])
+            return chains[(page_of[k / PAGE] - 1) * PAGE + k % PAGE].first;
         return 0;
     }
     uint32_t after(uint32_t record) const
@@ -416,7 +423,24 @@ class record_chains
     struct chain {
         uint32_t first, last;
     };
-    owned_array<chain> ends;
+    /* the chains' ends by key, in pages made for the keys that have
+       records: most keys have none, and a table with an end per entity was
+       megabytes of zeros.  page_of: a page's number plus one, 0 none */
+    static constexpr size_t PAGE = 64;
+    chain &ends_of(size_t k)
+    {
+        while (page_of.size() <= k / PAGE)
+            page_of.append(0);
+        if (!page_of[k / PAGE]) {
+            chain *made = chains.extend(PAGE);
+            for (size_t i = 0; i < PAGE; i++)
+                made[i] = chain{0, 0};
+            page_of[k / PAGE] = static_cast<uint32_t>(chains.size() / PAGE);
+        }
+        return chains[(page_of[k / PAGE] - 1) * PAGE + k % PAGE];
+    }
+    owned_array<uint32_t> page_of;
+    owned_array<chain> chains;
     owned_array<uint32_t> next;
 };
 

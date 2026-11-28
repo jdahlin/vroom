@@ -86,6 +86,7 @@ analysis_result semantic_analysis::member_pointer_operator(
         if (object.category == value_category::prvalue &&
             (aggregate_prvalue(object) ||
              entity_table[type_table[object.type.unqualified()].entity]
+                 .details()
                  .destructor))
             return not_supported_because(
                 n, "class.temporary",
@@ -102,7 +103,7 @@ analysis_result semantic_analysis::member_pointer_operator(
     entity_index u = type_table[pointee.unqualified()].entity;
     require_complete(t);
     require_complete(u);
-    if (!entity_table[t].size || !entity_table[u].size)
+    if (!entity_table[t].details().size || !entity_table[u].details().size)
         return not_supported_because(
             n, "expr.mptr.oper",
             ".* or ->* through a base class where a class is incomplete");

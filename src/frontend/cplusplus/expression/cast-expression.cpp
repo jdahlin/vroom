@@ -298,7 +298,7 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
            truncated value cannot be represented in the destination type."
            bool is an integer type here, not [conv.bool]'s: 0.5 is false,
            2.5 has no value (clang 23; CWG1094 changes it later) */
-        if (entity_table[e].underlying == fundamental_type::bool_ &&
+        if (entity_table[e].details().underlying == fundamental_type::bool_ &&
             is_floating(m.type)) {
             convert_arithmetic(m, fundamental_type::long_long_int);
             if (m.evaluation == constness::constant && m.value > 1)
@@ -322,7 +322,7 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
             if (!enumeration_holds(entity_table[e], n))
                 m.evaluation = constness::not_constant;
         }
-        convert_arithmetic(m, entity_table[e].underlying);
+        convert_arithmetic(m, entity_table[e].details().underlying);
         m.type = qualified_type::make(to.unqualified(), cv_none);
         converted(m, conversion_kind::integral);
         return analysis_result::well_formed;
@@ -493,8 +493,8 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
             "a member pointer cast that also changes the member type or cv");
     require_complete(b);
     require_complete(d);
-    if (entity_table[d].size && base_subobjects(d, b) == 0 &&
-        entity_table[b].size && base_subobjects(b, d)) {
+    if (entity_table[d].details().size && base_subobjects(d, b) == 0 &&
+        entity_table[b].details().size && base_subobjects(b, d)) {
         /* [conv.mem]/2; [expr.cast]/4: "a pointer to member of an
            unambiguous non-virtual base class type may be explicitly
            converted to ... a pointer to member of a derived class type"
@@ -517,7 +517,7 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
             member_pointer_qualification(m, to);
         return r;
     }
-    if (!entity_table[d].size || !base_subobjects(d, b))
+    if (!entity_table[d].details().size || !base_subobjects(d, b))
         return not_supported_because(at, "expr.static.cast",
                                      "a member pointer cast between classes "
                                      "not related as derived and base");
@@ -763,7 +763,8 @@ analysis_result semantic_analysis::class_pointer_cast(SyntaxRef at,
                 at, "expr.static.cast",
                 "a cast of a class whose definition was not analysed");
         }
-    if (!entity_table[fp.entity].size || !entity_table[tp.entity].size)
+    if (!entity_table[fp.entity].details().size ||
+        !entity_table[tp.entity].details().size)
         return analysis_result::well_formed;
     bool ambiguous = false;
     bool upward = base_step(fp.entity, tp.entity, ambiguous) != 0;
@@ -847,7 +848,7 @@ analysis_result semantic_analysis::reference_by_conversion_function(
                         referenced.cv() == cv_const;
     if (!const_lvalue) {
         entity_index f = own_conversion_functions(source);
-        if (f && entity_table[f].next_overload)
+        if (f && entity_table[f].details().next_overload)
             return not_supported_because(
                 at, "over.match.ref",
                 "a non-const reference with several conversion functions");

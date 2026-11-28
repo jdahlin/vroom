@@ -194,7 +194,7 @@ uint32_t c_lowering::constant(const semantic_node &n)
             AST_QUALIFIED_TYPE_UNQUALIFIED(t), AST_CAST_NULL_POINTER);
     fundamental_type f = r.fundamental;
     if (r.kind == type_kind::enumeration)
-        f = analysis.entity_table[r.entity].underlying;
+        f = analysis.entity_table[r.entity].details().underlying;
     else if (r.kind != type_kind::fundamental)
         return fail("a constant of this type", n.at);
     if (f == fundamental_type::long_double) {
@@ -551,7 +551,7 @@ uint32_t c_lowering::conversion(const semantic_node &n)
                 return offset_pointer(
                     p,
                     static_cast<int64_t>(
-                        analysis.entity_table[n.entity_b()].offset),
+                        analysis.entity_table[n.entity_b()].details().offset),
                     t);
             }
             /* the pointer read three times: a temporary holds one with
@@ -585,21 +585,21 @@ uint32_t c_lowering::conversion(const semantic_node &n)
         }
         /* [conv.ptr]/3: a base at offset 0 (which analysis makes sure
            of): the same address, a null pointer one too */
-        if (analysis.entity_table[n.entity_b()].offset)
+        if (analysis.entity_table[n.entity_b()].details().offset)
             return null_checked_offset(
                 n,
                 static_cast<int64_t>(
-                    analysis.entity_table[n.entity_b()].offset),
+                    analysis.entity_table[n.entity_b()].details().offset),
                 t);
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
     case conversion_kind::base_to_derived:
         /* [expr.static.cast]/11: "the resulting pointer points to the
            enclosing object of type D": the base's offset subtracted */
-        if (analysis.entity_table[n.entity_b()].offset)
+        if (analysis.entity_table[n.entity_b()].details().offset)
             return null_checked_offset(
                 n,
                 -static_cast<int64_t>(
-                    analysis.entity_table[n.entity_b()].offset),
+                    analysis.entity_table[n.entity_b()].details().offset),
                 t);
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
     case conversion_kind::pointer_to_integral:

@@ -177,7 +177,7 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
    being defined, which is incomplete until its closing } */
 bool semantic_analysis::noexcept_needs_complete_class(SyntaxRef n)
 {
-    if (!defining_class || entity_table[defining_class].size)
+    if (!defining_class || entity_table[defining_class].details().size)
         return false;
     for (token_index t = n.first_token(); t < n.end_token(); t++) {
         if (tokens[t].kind != token_kind::identifier)
@@ -518,13 +518,13 @@ analysis_result semantic_analysis::parameter_scope_noexcept(SyntaxRef n,
          k = entity_table[k].enclosing)
         inside = k == defining_class;
     if (member && defining_class && !inside &&
-        !entity_table[defining_class].size)
+        !entity_table[defining_class].details().size)
         current_scope = defining_class;
     open_parameter_scope();
     analysis_result r = analysis_result::well_formed;
     bool friend_of_class =
         friend_declarator && defining_class &&
-        !entity_table[defining_class].size &&
+        !entity_table[defining_class].details().size &&
         !names_dependent_entity(n.first_token(), n.end_token()) &&
         names_parameter_of_class(n, defining_class);
     if (friend_of_class ||

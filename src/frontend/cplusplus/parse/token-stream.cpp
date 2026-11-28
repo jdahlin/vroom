@@ -58,13 +58,30 @@ void token_stream::resume()
 {
     make_through(token_index{UINT32_MAX - 1});
     has_lookahead = false;
-    preprocessing_tokens.resize(
-        first_piece[token_index{static_cast<uint32_t>(tokens.size() - 1)}]);
-    first_piece.resize(tokens.size() - 1);
+    if (!kept.empty() && kept.back().at.index() == tokens.size() - 1) {
+        preprocessing_tokens.resize(kept.back().first);
+        kept.resize(kept.size() - 1);
+    }
     identifiers.resize(tokens.size() - 1);
     tokens.truncate(tokens.size() - 1);
     complete = false;
 }
+
+namespace
+{
+
+bool same_piece(const preprocessing_token &a, const preprocessing_token &b)
+{
+    return a.kind == b.kind && a.at_start_of_line == b.at_start_of_line &&
+           a.after_white_space == b.after_white_space &&
+           a.spelling_differs == b.spelling_differs && a.raw == b.raw &&
+           a.not_replaceable == b.not_replaceable && a.prefix == b.prefix &&
+           a.op_or_punc == b.op_or_punc && a.location == b.location &&
+           a.extent == b.extent && a.expansion == b.expansion &&
+           a.ud_suffix_offset == b.ud_suffix_offset;
+}
+
+} // namespace
 
 void token_stream::make_more(token_index i)
 {
@@ -83,13 +100,12 @@ void token_stream::make_more(token_index i)
                 token_index{static_cast<uint32_t>(tokens.size())});
             target_change_to.append(target_pragma_before);
         }
-        first_piece.append(static_cast<uint32_t>(preprocessing_tokens.size()));
+        size_t begin = preprocessing_tokens.size();
         preprocessing_tokens.append(first);
         identifiers.append(0);
         if (is_string_literal(first)) {
             /* [lex.phases]/1.6: the string literals that follow are part of
                the same token */
-            size_t begin = preprocessing_tokens.size() - 1;
             for (;;) {
                 preprocessing_token next = read();
                 if (!is_string_literal(next)) {
@@ -128,6 +144,13 @@ void token_stream::make_more(token_index i)
                     made.kind = token_kind::identifier;
             }
         }
+        size_t count = preprocessing_tokens.size() - begin;
+        if (count == 1 && same_piece(first, tokens.back().preprocessing))
+            preprocessing_tokens.resize(begin);
+        else
+            kept.append({token_index{static_cast<uint32_t>(tokens.size() - 1)},
+                         static_cast<uint32_t>(begin),
+                         static_cast<uint32_t>(count)});
         if (first.kind == preprocessing_token_kind::end_of_file)
             complete = true;
     }
@@ -152,11 +175,20 @@ const preprocessing_token *token_stream::pieces(token_index i, size_t *count)
     make_through(i);
     if (i.index() >= tokens.size())
         i = token_index{static_cast<uint32_t>(tokens.size() - 1)};
-    size_t end = preprocessing_tokens.size();
-    if (i.index() + 1 < tokens.size())
-        end = first_piece[i + 1];
-    *count = end - first_piece[i];
-    return preprocessing_tokens.data() + first_piece[i];
+    size_t low = 0, high = kept.size();
+    while (low < high) {
+        size_t middle = low + (high - low) / 2;
+        if (kept[middle].at < i)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    if (low < kept.size() && kept[low].at == i) {
+        *count = kept[low].count;
+        return preprocessing_tokens.data() + kept[low].first;
+    }
+    *count = 1;
+    return &tokens[i].preprocessing;
 }
 
 source_location token_stream::location(token_index i)
