@@ -572,8 +572,9 @@ default there; vcc exits with its arenas mapped) and the default 8 MB stack
 (`ulimit -s unlimited` leaves `vstack_guard_low()` without a stack bottom).  A TSan batch takes
 65-100 s (15-20x the normal build), an ASan suite 12-25 s.  The bump arenas are
 poisoned in ASan builds (`include/common/asan.h`): vregion/varena
-(`region.h`: preprocessor, assembler, object writer), the C front end's heap
-and vlink's regions keep a 1 MB window past the allocation point poisoned and
+(`region.h`: preprocessor, assembler, object writer), the C front end's heap,
+vlink's regions and the C++ front end's type and entity tables
+(`stable-array.h`) keep a 1 MB window past the allocation point poisoned and
 unpoison each allocation as it goes out; a reset or mark goes through
 `vregion_truncate`, and a released job region is unpoisoned.  Not poisoned:
 the text buffers (`text-buffer.h`), VIR's per-thread arrays and the C front

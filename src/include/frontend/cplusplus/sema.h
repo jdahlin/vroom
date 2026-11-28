@@ -20,6 +20,7 @@
 #include "frontend/cplusplus/parse.h"
 #include "frontend/cplusplus/syntax.h"
 #include "frontend/cplusplus/builtin-registry.h"
+#include "frontend/cplusplus/stable-array.h"
 
 namespace cplusplus
 {
@@ -251,8 +252,8 @@ class types
               type_index b) const;
     void grow();
 
-    owned_array<type, type_index> records;
-    owned_array<qualified_type> parameter_lists;
+    stable_array<type, type_index> records;
+    stable_array<qualified_type> parameter_lists;
     /* open addressing: a type's index, 0 for an empty slot */
     owned_array<type_index> slots;
 };
@@ -1171,8 +1172,8 @@ class entities
     }
 
   private:
-    owned_array<entity> records;
-    owned_array<entity_declaration> declarations;
+    stable_array<entity> records;
+    stable_array<entity_declaration> declarations;
     /* the names bound in scopes: open addressing over (scope, name); an
        empty slot has entity 0 */
     struct binding {
