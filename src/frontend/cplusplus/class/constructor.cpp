@@ -2801,6 +2801,11 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                 if (!has_member && base_step(c, k, ambiguous) && !ambiguous)
                     allowed = true;
             }
+            /* [over.match.viable]/3: a constructor whose constraints are
+               not satisfied is not viable, so it is no subobject's default,
+               copy or move constructor (libc++'s atomic()) */
+            if (entity_table[q].constraint_unsatisfied)
+                continue;
             bool usable = allowed && !entity_table[q].deleted;
             bool is_move = false;
             if (copy_or_move_constructor(k, q))
