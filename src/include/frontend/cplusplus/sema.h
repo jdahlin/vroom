@@ -2860,6 +2860,8 @@ class semantic_analysis
        declarator-id: the class or namespace whose member is declared */
     analysis_result declarator_qualifier(SyntaxRef nested,
                                          declarator_meaning &m);
+    bool qualified_or_qualifier(token_index t, token_index first,
+                                token_index end) const;
     void hold_names(SyntaxRef declaration);
     /* e was just held by the declaration being analysed (a template's:
        held_by_template): that declaration gives it its reason when it is
@@ -3525,7 +3527,7 @@ class semantic_analysis
     bool scoped_gnu_function_hint(SyntaxElement n) const;
     token_index scoped_gnu_abi_tag(SyntaxElement n) const;
     bool gnu_attributes_without_effect(SyntaxElement n) const;
-    bool attribute_argument_present(SyntaxElement c) const;
+    bool attribute_arguments_are_messages(SyntaxElement c) const;
     bool class_head_attributes_without_effect(SyntaxElement c) const;
     uint32_t attributes_without_effect_before(SyntaxRef declaration) const;
     bool pack_only_expanded(uint32_t name, token_index first,

@@ -260,7 +260,6 @@ lookup CXX/drs/cwg5xx.cpp -std=c++23 -pedantic-errors: 620:41: `n` finds the var
 lookup CXX/drs/cwg5xx.cpp -std=c++2c -pedantic-errors: 620:41: `n` finds the variable declared at 616:8, clang the one at 618:36
 lookup CXX/drs/cwg5xx.cpp -std=c++98 -pedantic-errors: 620:41: `n` finds the variable declared at 616:8, clang the one at 618:36
 lookup CXX/temp/temp.decls/temp.fct/temp.func.order/p6.cpp -std=c++20: 21:3: `f` finds the function declared at 17:6, clang the one at 18:21
-lookup CXX/temp/temp.spec/func.spec.cpp -std=c++17: 246:10: `stealFunc` finds the function declared at 243:5, clang the one at 239:14
 lookup SemaCXX/builtin-operator-new-delete.cpp -std=c++03: 153:3: `__builtin_operator_new` finds the function declared at 32:7, clang the one at 70:3
 lookup SemaCXX/builtin-operator-new-delete.cpp -std=c++11: 153:3: `__builtin_operator_new` finds the function declared at 32:7, clang the one at 70:3
 lookup SemaCXX/builtin-operator-new-delete.cpp -std=c++1z: 100:3: `__builtin_operator_delete` finds the function declared at 57:6, clang the one at 72:3

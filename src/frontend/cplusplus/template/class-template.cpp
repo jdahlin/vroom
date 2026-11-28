@@ -269,8 +269,8 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         return class_specialization_definition(n, elaborated, list);
     }
     /* the attribute-specifier-seq after the class-key, left out when none
-       changes what vcc generates ([dcl.type.elab]/1), one without an
-       argument (clang checks preferred_name's against the template) */
+       changes what vcc generates ([dcl.type.elab]/1), its arguments
+       messages (clang checks preferred_name's against the template) */
     uint32_t at = 1;
     bool alignment_declared = false;
     if (elaborated.is(syntax_kind::elaborated_type_specifier)) {
@@ -289,7 +289,7 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
             alignment_declared = true;
             at = 2;
         } else if (seq && class_head_attributes_without_effect(seq) &&
-                   (!attribute_argument_present(seq) ||
+                   (attribute_arguments_are_messages(seq) ||
                     preferred_names_valid)) {
             /* (preferred_name's argument is a typedef-name, recorded by
                note_preferred_names above) */
