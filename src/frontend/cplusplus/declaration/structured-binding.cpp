@@ -213,9 +213,9 @@ analysis_result semantic_analysis::array_binding_object(
 
 /* std::NAME, found as [namespace.qual] finds it (in an inline namespace
    of std too) */
-analysis_result semantic_analysis::std_class_template(SyntaxRef n,
-                                                      const char *name,
-                                                      uint32_t &template_index)
+analysis_result
+semantic_analysis::std_class_template(SyntaxRef n, const char *name,
+                                      template_ref &template_index)
 {
     template_index = 0;
     entity_index std_ =
@@ -243,11 +243,11 @@ analysis_result semantic_analysis::std_class_template(SyntaxRef n,
    prvalue of type std::size_t", for the first parameter of the template
    (a non-type one of integral type) */
 analysis_result semantic_analysis::index_argument(SyntaxRef n,
-                                                  uint32_t template_index,
+                                                  template_ref template_index,
                                                   uint32_t i,
                                                   template_argument &out)
 {
-    const function_template ft = function_templates[template_index - 1];
+    const function_template ft = function_templates[template_index];
     if (!ft.parameter_count)
         return not_supported_because(n, "dcl.struct.bind",
                                      "a std trait template with no parameters");
@@ -278,11 +278,11 @@ analysis_result semantic_analysis::tuple_trait_member(
     qualified_type type, const char *member, entity_index &found)
 {
     found = 0;
-    uint32_t ct = 0;
+    template_ref ct = 0;
     analysis_result r = std_class_template(n, trait, ct);
     if (r != analysis_result::well_formed || !ct)
         return r;
-    const function_template ft = function_templates[ct - 1];
+    const function_template ft = function_templates[ct];
     uint32_t count = 1;
     if (indexed)
         count = 2;
@@ -302,7 +302,7 @@ analysis_result semantic_analysis::tuple_trait_member(
     VTRY_SET(r, instantiate_class(n, ct, a, count, c));
     require_complete(c);
     if (entity_table[c].kind != entity_kind::class_type ||
-        !entity_table[c].size)
+        !entity_table[c].details().size)
         return analysis_result::well_formed;
     bool ambiguous = false;
     found = class_member_lookup(
@@ -462,7 +462,7 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
                 first == entity_kind::template_entity)
                 continue;
         }
-        VTRY_SET(r, index_argument(n, g, i, index));
+        VTRY_SET(r, index_argument(n, template_ref::from_number(g), i, index));
         given.append(index);
         owned_array<uint32_t> one;
         one.append(g);
@@ -478,7 +478,7 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
     VTRY_SET(r,
              best_viable_function(n, candidates, nullptr, arguments, chosen));
     const function_template ft =
-        function_templates[candidates[chosen].template_index - 1];
+        function_templates[candidates[chosen].template_index];
     entity_index specialization = 0;
     VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
                             ft.parameter_count, specialization));
@@ -495,9 +495,9 @@ uint32_t semantic_analysis::binding_member_count(entity_index c) const
         if (binding_data_member(m))
             count++;
     }
-    for (uint32_t i = 0; i < x.base_count; i++)
+    for (uint32_t i = 0; i < x.details().base_count; i++)
         count += binding_member_count(
-            type_table[entity_table[class_bases[x.first_base + i]]
+            type_table[entity_table[class_bases[x.details().first_base + i]]
                            .type.unqualified()]
                 .entity);
     return count;
@@ -514,7 +514,8 @@ analysis_result semantic_analysis::binding_members_class(SyntaxRef n,
 {
     require_complete(c);
     const entity &x = entity_table[c];
-    if (x.kind != entity_kind::class_type || !x.size || x.virtual_base_count)
+    if (x.kind != entity_kind::class_type || !x.details().size ||
+        x.details().virtual_base_count)
         return not_supported_because(
             n, "dcl.struct.bind",
             "an incomplete class or one with virtual bases");
@@ -530,10 +531,11 @@ analysis_result semantic_analysis::binding_members_class(SyntaxRef n,
         own++;
     }
     entity_index with_members = 0;
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index b = type_table[entity_table[class_bases[x.first_base + i]]
-                                        .type.unqualified()]
-                             .entity;
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index b =
+            type_table[entity_table[class_bases[x.details().first_base + i]]
+                           .type.unqualified()]
+                .entity;
         if (!binding_member_count(b))
             continue;
         if (own || with_members)
@@ -740,8 +742,8 @@ analysis_result semantic_analysis::structured_binding_declaration(
     }
     if (r != analysis_result::well_formed)
         return give_up(r);
-    entity_table[e].first_binding = first_binding;
-    entity_table[e].binding_count = count;
+    entity_table[e].set(&entity_details::first_binding, first_binding);
+    entity_table[e].set(&entity_details::binding_count, count);
     /* "The type of the id-expression e is called E." */
     qualified_type type = entity_table[e].type;
     const struct type &declared = type_table[type.unqualified()];
@@ -750,7 +752,7 @@ analysis_result semantic_analysis::structured_binding_declaration(
         type = declared.operand;
     const struct type object = type_table[type.unqualified()];
     for (uint32_t k = 0; k < count; k++) {
-        entity_table[first_binding + k].binding_object = e;
+        entity_table[first_binding + k].set(&entity_details::binding_object, e);
         entity_table[first_binding + k].field = k;
     }
     if (object.kind == type_kind::array) {
@@ -808,7 +810,8 @@ analysis_result semantic_analysis::structured_binding_declaration(
                         false, false, false, v);
                 if (r != analysis_result::well_formed)
                     return give_up(r);
-                entity_table[first_binding + k].binding_target = v;
+                entity_table[first_binding + k].set(
+                    &entity_details::binding_target, v);
                 entity_table[first_binding + k].type = element;
             }
             return analysis_result::well_formed;
@@ -842,7 +845,8 @@ analysis_result semantic_analysis::structured_binding_declaration(
                     declaration, "dcl.struct.bind",
                     "static bindings of non-public members"));
             if (k < count)
-                entity_table[first_binding + k].binding_target = x;
+                entity_table[first_binding + k].set(
+                    &entity_details::binding_target, x);
             k++;
         }
         if (k != count)
@@ -861,7 +865,7 @@ analysis_result semantic_analysis::structured_binding_declaration(
         r = structured_binding_use(names[k], b, use);
         if (r != analysis_result::well_formed)
             return give_up(r);
-        entity_index member = entity_table[b].binding_target;
+        entity_index member = entity_table[b].details().binding_target;
         entity_table[b].type = use.type;
         if (member) {
             type_kind kind =
@@ -886,7 +890,7 @@ analysis_result semantic_analysis::structured_binding_use(token_index t,
     const entity x = entity_table[b];
     /* /2: "If the initializer refers to one of the names introduced by
        the structured binding declaration, the program is ill-formed." */
-    if (!x.binding_object)
+    if (!x.details().binding_object)
         return ill_formed_at_token(t,
                                    "the initializer of a structured binding "
                                    "declaration shall not refer to one of the "
@@ -897,7 +901,7 @@ analysis_result semantic_analysis::structured_binding_use(token_index t,
     entity_index s = x.enclosing;
     while (s && entity_table[s].kind == entity_kind::block_scope)
         s = entity_table[s].enclosing;
-    if (entity_table[x.binding_object].automatic &&
+    if (entity_table[x.details().binding_object].automatic &&
         (!function_state.active || s != function_state.function)) {
         /* [expr.prim.lambda.capture]/4 (C++20): a structured binding is a
            local entity, captured as a variable of its type; in a local
@@ -916,14 +920,15 @@ analysis_result semantic_analysis::structured_binding_use(token_index t,
         }
     }
     analysis_result r = analysis_result::well_formed;
-    if (x.binding_target &&
-        entity_table[x.binding_target].kind == entity_kind::variable &&
-        !entity_table[x.binding_target].nonstatic_member) {
-        r = named_entity(t, x.binding_target, m, false);
+    if (x.details().binding_target &&
+        entity_table[x.details().binding_target].kind ==
+            entity_kind::variable &&
+        !entity_table[x.details().binding_target].nonstatic_member) {
+        r = named_entity(t, x.details().binding_target, m, false);
     } else {
-        r = named_entity(t, x.binding_object, m, false);
-        if (r == analysis_result::well_formed && x.binding_target) {
-            r = member_access(t, x.binding_target, m);
+        r = named_entity(t, x.details().binding_object, m, false);
+        if (r == analysis_result::well_formed && x.details().binding_target) {
+            r = member_access(t, x.details().binding_target, m);
         } else if (r == analysis_result::well_formed) {
             r = array_element(current_declaration, t, m, x.field);
         }

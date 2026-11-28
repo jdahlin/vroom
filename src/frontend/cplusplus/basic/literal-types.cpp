@@ -69,8 +69,9 @@ constness semantic_analysis::literal_class(entity_index c) const
        ([dcl.constexpr]/3, C++17's [basic.types]/10.5.1); one with a body
        is constexpr only if declared so ([dcl.constexpr]/1) */
     constness result = constness::constant;
-    if (x.destructor && !entity_table[x.destructor].implicit) {
-        const entity &d = entity_table[x.destructor];
+    if (x.details().destructor &&
+        !entity_table[x.details().destructor].implicit) {
+        const entity &d = entity_table[x.details().destructor];
         bool provided = d.definition && semantics[d.definition].kind ==
                                             semantic_kind::function_body;
         if (provided && !d.constexpr_)
@@ -86,29 +87,30 @@ constness semantic_analysis::literal_class(entity_index c) const
            a constexpr constructor's requirements ([class.default.ctor]/4,
            [class.copy.ctor]/12), which analysis does not check */
         constness constructor = constness::unknown;
-        for (entity_index k = x.first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = x.details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (!entity_table[k].implicit)
                 constructor = constness::not_constant;
-        for (entity_index k = x.first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = x.details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (entity_table[k].constexpr_ && !copy_or_move_constructor(c, k))
                 constructor = constness::constant;
         /* an implicit constructor that is no copy or move one (the
            defaulted default constructor beside user-provided ones) is
            constexpr when it would satisfy [dcl.constexpr]'s rules, which
            analysis does not check: not decided */
-        for (entity_index k = x.first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = x.details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (entity_table[k].implicit && !copy_or_move_constructor(c, k) &&
                 constructor == constness::not_constant)
                 constructor = constness::unknown;
         /* "or constructor template", never a copy or move one: one not
            declared constexpr here is not decided */
-        if (x.constructor_templates && constructor != constness::constant) {
+        if (x.details().constructor_templates &&
+            constructor != constness::constant) {
             constructor = constness::unknown;
             for (const function_template &f : function_templates)
-                if (f.name == x.constructor_templates &&
+                if (f.name == x.details().constructor_templates &&
                     entity_table[f.entity].constexpr_)
                     constructor = constness::constant;
         }
@@ -149,10 +151,11 @@ constness semantic_analysis::literal_class(entity_index c) const
                  members == constness::not_constant)
             members = constness::unknown;
     }
-    for (uint32_t i = 0; i < x.base_count; i++)
+    for (uint32_t i = 0; i < x.details().base_count; i++)
         members = both(
             members,
-            literal_type(entity_table[class_bases[x.first_base + i]].type));
+            literal_type(
+                entity_table[class_bases[x.details().first_base + i]].type));
     return both(result, members);
 }
 

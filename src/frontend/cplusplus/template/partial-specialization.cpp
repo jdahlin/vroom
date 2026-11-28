@@ -63,13 +63,13 @@ analysis_result semantic_analysis::variable_partial_specialization(
     } else {
         template_id_name(id, x, named);
     }
-    uint32_t vt = variable_template_of(named);
+    template_ref vt = variable_template_of(named);
     if (!vt)
         return not_supported_because(
             n, "temp.class.spec",
             "a partial specialization naming no variable template");
-    const function_template primary = function_templates[vt - 1];
-    if (parameters.empty() || function_templates[vt - 1].name != named ||
+    const function_template primary = function_templates[vt];
+    if (parameters.empty() || function_templates[vt].name != named ||
         entity_table[primary.entity].enclosing != outer)
         return not_supported_because(n, "temp.class.spec",
                                      "a variable partial specialization with "
@@ -89,7 +89,8 @@ analysis_result semantic_analysis::variable_partial_specialization(
     /* [temp.class.spec]/9.2: a parameter used only in an expression of
        an argument (<I + 5, I * 2>) is not deducible: not judged */
     for (const template_argument &a : arguments) {
-        if (a.template_entity && entity_table[a.template_entity].expression)
+        if (a.template_entity &&
+            entity_table[a.template_entity].details().expression)
             return not_supported_because(
                 n, "temp.class.spec",
                 "a partial specialization argument that is an expression");
@@ -97,7 +98,7 @@ analysis_result semantic_analysis::variable_partial_specialization(
             continue;
         for (uint32_t k = 0; k < a.count; k++) {
             entity_index d = pack_arguments[a.value + k].template_entity;
-            if (d && entity_table[d].expression)
+            if (d && entity_table[d].details().expression)
                 return not_supported_because(
                     n, "temp.class.spec",
                     "a partial specialization pack argument containing an "
@@ -164,7 +165,7 @@ void semantic_analysis::equivalent_partial_specializations(uint32_t added)
         bool forward = class_at_least_as_specialized(added, k + 1, unknown);
         bool backward = class_at_least_as_specialized(k + 1, added, unknown);
         if (forward && backward && !unknown)
-            function_templates[a.primary - 1].unusable = true;
+            function_templates[a.primary].unusable = true;
     }
 }
 
@@ -259,7 +260,7 @@ bool semantic_analysis::primary_arguments(
    definition is the template<> one), not an implicit instantiation */
 bool semantic_analysis::explicitly_specialized_class(entity_index c) const
 {
-    uint32_t record = entity_table[c].instantiation;
+    uint32_t record = entity_table[c].instantiation.number();
     if (!record)
         return false;
     const instantiation_record &r = instantiations[record - 1];
@@ -309,7 +310,7 @@ bool semantic_analysis::member_class_specialization(SyntaxRef n,
     }
     if (!is_class_entity(ns.entity))
         return false;
-    uint32_t record = entity_table[ns.entity].instantiation;
+    uint32_t record = entity_table[ns.entity].instantiation.number();
     if (!record || instantiations[record - 1].specialization != ns.entity)
         return false;
     /* [temp.expl.spec]/5: the members of an explicitly specialized class
@@ -448,7 +449,7 @@ analysis_result semantic_analysis::class_specialization_definition(
             n, rule,
             "a class specialization whose template-id is not resolved");
     }
-    uint32_t ct = class_template_of(named);
+    template_ref ct = class_template_of(named);
     /* [temp.class.spec]/6, [temp.expl.spec]/3: declared where the
        primary template is, by its name (not an injected-class-name) */
     if (!ct) {
@@ -461,16 +462,16 @@ analysis_result semantic_analysis::class_specialization_definition(
             template_name_detail(template_name.token(), x, named);
         return refused;
     }
-    if (function_templates[ct - 1].name != named)
+    if (function_templates[ct].name != named)
         return not_supported_because(
             n, rule, "the name is a class template's injected-class-name");
     /* ... or in the namespace its inline namespaces are members of
        ([namespace.memdef]/3, [temp.expl.spec]/2) */
-    if (!declared_in_scope_of(function_templates[ct - 1].entity, outer))
+    if (!declared_in_scope_of(function_templates[ct].entity, outer))
         return not_supported_because(
             n, rule,
             "a specialization of a class template declared in another scope");
-    const function_template primary = function_templates[ct - 1];
+    const function_template primary = function_templates[ct];
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
@@ -504,7 +505,8 @@ analysis_result semantic_analysis::class_specialization_definition(
     {
         bool expressions2 = false, deduces = false;
         for (const template_argument &a : arguments) {
-            if (a.template_entity && entity_table[a.template_entity].expression)
+            if (a.template_entity &&
+                entity_table[a.template_entity].details().expression)
                 expressions2 = true;
             else if (a.template_entity || depends_on_template_parameter(a.type))
                 deduces = true;
@@ -810,8 +812,9 @@ bool semantic_analysis::deduce_pack_argument(const template_argument &x,
 }
 
 analysis_result semantic_analysis::matching_specialization(
-    SyntaxRef at, uint32_t class_template, const template_argument *arguments,
-    uint32_t count, uint32_t &pattern, owned_array<template_argument> &deduced)
+    SyntaxRef at, template_ref class_template,
+    const template_argument *arguments, uint32_t count, uint32_t &pattern,
+    owned_array<template_argument> &deduced)
 {
     pattern = 0;
     deduced.clear();
@@ -910,7 +913,8 @@ analysis_result semantic_analysis::matching_specialization(
            satisfy the associated constraints of the partial
            specialization, if any" */
         bool satisfied = true;
-        VTRY(c, template_constraints_satisfied(k + 1, d, satisfied));
+        VTRY(c,
+             template_constraints_satisfied(template_ref::at(k), d, satisfied));
         if (!satisfied)
             continue;
         matches++;
@@ -944,7 +948,10 @@ analysis_result semantic_analysis::matching_specialization(
                 return not_supported_because(
                     at, "temp.class.order",
                     "partial specializations whose ordering is unknown");
-            best = forward && !backward;
+            /* [temp.func.order]/6.2.2: equivalent arguments, the more
+               constrained is more specialized */
+            best = forward && (!backward || more_constrained_specialization(
+                                                found[i], found[j]));
         }
         if (best)
             chosen = i;

@@ -23,14 +23,14 @@ bool semantic_analysis::default_constructed(entity_index c,
                                             entity_index k) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++)
-        if (type_table[entity_table[class_bases[x.first_base + i]]
+    for (uint32_t i = 0; i < x.details().base_count; i++)
+        if (type_table[entity_table[class_bases[x.details().first_base + i]]
                            .type.unqualified()]
                 .entity == k)
             return true;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
-        if (m.base_subobject || m.default_initializer)
+        if (m.base_subobject || m.details().default_initializer)
             continue;
         if (element_class(m.type) == k)
             return true;
@@ -52,11 +52,12 @@ bool semantic_analysis::destructor_deleted(entity_index c) const
     const entity &x = entity_table[c];
     /* an anonymous union's destructor is never invoked: its owner's
        checks its variant members (below) */
-    if (x.anonymous_object && x.union_)
+    if (x.details().anonymous_object && x.union_)
         return false;
-    if (x.destructor && entity_table[x.destructor].deleted)
+    if (x.details().destructor && entity_table[x.details().destructor].deleted)
         return true;
-    if (x.destructor && !entity_table[x.destructor].implicit)
+    if (x.details().destructor &&
+        !entity_table[x.details().destructor].implicit)
         return false;
     /* [class.dtor]/7: a union-like class (a union, or a class with an
        anonymous union) that has a variant member with a non-trivial
@@ -69,7 +70,7 @@ bool semantic_analysis::destructor_deleted(entity_index c) const
         entity_index owner = c;
         const struct type &t = type_table[m.type.unqualified()];
         if (t.kind == type_kind::class_type &&
-            entity_table[t.entity].anonymous_object &&
+            entity_table[t.entity].details().anonymous_object &&
             entity_table[t.entity].union_)
             owner = t.entity;
         if (owner == c && !x.union_)
@@ -126,10 +127,10 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
            default constructor is defined as deleted; any user-declared
            constructor suppresses the implicit one (e.g. U(int = 0) {}) */
         if (!x.defaulted_default_constructor) {
-            if (x.constructor_templates)
+            if (x.details().constructor_templates)
                 return false;
-            for (entity_index k = x.first_constructor; k;
-                 k = entity_table[k].next_constructor)
+            for (entity_index k = x.details().first_constructor; k;
+                 k = entity_table[k].details().next_constructor)
                 if (!entity_table[k].implicit)
                     return false;
         }
@@ -142,7 +143,7 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
             const entity &m = entity_table[class_members[x.first_member + i]];
             if (m.kind != entity_kind::variable || !m.nonstatic_member)
                 continue;
-            if (m.default_initializer)
+            if (m.details().default_initializer)
                 has_default_init = true;
             if (entity_index mc = element_class(m.type))
                 if (!trivial_special_members(mc))
@@ -153,17 +154,17 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
     /* a user-declared constructor (or constructor template) and no
        X() = default: no implicit default constructor ([class.default.ctor]/1) */
     if (!x.defaulted_default_constructor) {
-        if (x.constructor_templates)
+        if (x.details().constructor_templates)
             return false;
-        for (entity_index k = x.first_constructor; k;
-             k = entity_table[k].next_constructor)
+        for (entity_index k = x.details().first_constructor; k;
+             k = entity_table[k].details().next_constructor)
             if (!entity_table[k].implicit)
                 return false;
     }
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
         if (m.kind != entity_kind::variable || !m.nonstatic_member ||
-            m.default_initializer || (m.bit_field && !m.name))
+            m.details().default_initializer || (m.bit_field && !m.name))
             continue;
         qualified_type t = m.type;
         type_kind k = type_table[t.unqualified()].kind;
@@ -228,7 +229,8 @@ bool semantic_analysis::declares_move_assignment(entity_index c)
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
     if (found.unknown || found.ambiguous)
         return true;
-    for (entity_index o = found.entity; o; o = entity_table[o].next_overload) {
+    for (entity_index o = found.entity; o;
+         o = entity_table[o].details().next_overload) {
         if (entity_table[o].kind != entity_kind::function)
             return true;
         if (move_assignment_operator(o, c))
@@ -260,7 +262,7 @@ bool semantic_analysis::copy_assignment_deleted(entity_index c)
     uint32_t eq = operator_name(preprocessing_op_or_punc::EQUAL);
     for (entity_index f = entity_table.find(c, eq);
          f && entity_table[f].enclosing == c;
-         f = entity_table[f].next_overload) {
+         f = entity_table[f].details().next_overload) {
         if (!entity_table[f].implicit && copy_assignment_operator(f, c))
             return entity_table[f].deleted;
     }
@@ -281,10 +283,11 @@ bool semantic_analysis::copy_assignment_deleted(entity_index c)
             k == type_kind::rvalue_reference)
             return true;
     }
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index k = type_table[entity_table[class_bases[x.first_base + i]]
-                                        .type.unqualified()]
-                             .entity;
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index k =
+            type_table[entity_table[class_bases[x.details().first_base + i]]
+                           .type.unqualified()]
+                .entity;
         if (k && entity_table[k].kind == entity_kind::class_type &&
             copy_assignment_deleted(k))
             return true;

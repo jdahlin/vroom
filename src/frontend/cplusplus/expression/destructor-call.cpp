@@ -174,7 +174,7 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
             return not_supported_because(n, "class.pre",
                                          "a destructor call on a class type "
                                          "whose entity is not a class");
-        if (!entity_table[c].size)
+        if (!entity_table[c].details().size)
             return ill_formed(n,
                               "the class type shall be complete unless the "
                               "class member access appears in the "
@@ -326,7 +326,7 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
     result.evaluation = constness::not_constant;
     entity_index destructor = 0;
     if (c && destroys(c)) {
-        destructor = entity_table[c].destructor;
+        destructor = entity_table[c].details().destructor;
         if (!destructor)
             return not_supported_because(
                 n, "class.dtor",

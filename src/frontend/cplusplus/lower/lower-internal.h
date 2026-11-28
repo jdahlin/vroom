@@ -95,6 +95,7 @@ class c_lowering
         debug_enums.resize(analysis.entity_table.size());
         first_enumerator.resize(analysis.entity_table.size());
         next_enumerator.resize(analysis.entity_table.size());
+        data_records.resize(analysis.entity_table.size());
         for (ast_qualified_type &r : debug_enums)
             r = 0;
         for (entity_index &i : first_enumerator)
@@ -102,6 +103,8 @@ class c_lowering
         for (entity_index &i : next_enumerator)
             i = 0;
         for (ast_qualified_type &r : records)
+            r = 0;
+        for (ast_qualified_type &r : data_records)
             r = 0;
         variable_arrays.resize(analysis.type_table.size());
         for (ast_qualified_type &r : variable_arrays)
@@ -149,6 +152,9 @@ class c_lowering
        definitions ([basic.start.term]/1: or registering the destruction
        of a constant-initialized one) */
     owned_array<uint32_t> initializers;
+    /* ... those of constexpr variables, which run before them: a template's
+       static members first (static-storage.cpp) */
+    owned_array<uint32_t> constant_member_initializers, constant_initializers;
     bool global_initializer(entity_index e, bool only_destroy);
     bool dynamic_initialization();
     /* [basic.start.term], [abi:guards]: the run time's functions and
@@ -180,6 +186,9 @@ class c_lowering
     owned_array<uint32_t, entity_index> symbols;
     /* the C struct of each class, 0 until made */
     owned_array<ast_qualified_type, entity_index> records;
+    owned_array<ast_qualified_type, entity_index> data_records;
+    /* the class whose initializer list is such a base's */
+    entity_index data_initialized = 0;
     /* [ext:clang_vla] the C type of each variable length array type (by
        the type's index), made once: its bound is lowered once, where the
        array is first named (its declaration) */
@@ -519,7 +528,11 @@ class c_lowering
     /* types and symbols */
     ast_qualified_type type(qualified_type t, token_index at);
     ast_qualified_type fundamental(fundamental_type f, token_index at);
-    ast_qualified_type class_type(entity_index e, token_index at);
+    ast_qualified_type class_type(entity_index e, token_index at,
+                                  bool data_only = false);
+    /* [abi:pod]: a class without its tail padding, as a base whose tail
+       padding the derived class reuses is held in it */
+    ast_qualified_type data_type(entity_index e, token_index at);
     ast_qualified_type class_tag(entity_index e);
     ast_qualified_type pointee_type(qualified_type t, token_index at);
     ast_qualified_type entity_type(entity_index e, token_index at);
@@ -586,6 +599,10 @@ class c_lowering
                              ast_qualified_type t, uint32_t n,
                              bool through = false);
     bool piecewise_initializer(uint32_t n) const;
+    /* a zeroed class object, set with memset where it is */
+    bool zeroed_in_place(const semantic_node &x, qualified_type object_type);
+    uint32_t zero_in_place(const semantic_node &x, qualified_type object_type,
+                           uint32_t object, ast_qualified_type t);
     uint32_t initialize_list_into(uint32_t object, qualified_type object_type,
                                   ast_qualified_type t, uint32_t n);
     uint32_t scalar_zero(qualified_type object, ast_qualified_type u,
@@ -896,7 +913,11 @@ class c_lowering
     uint32_t vector_lane(const semantic_node &n);
     uint32_t assignment(const semantic_node &n);
     uint32_t call(const semantic_node &n);
+    /* whether n is a __builtin_constant_p whose operand would make
+       temporaries to destroy */
+    bool unevaluated_temporaries(const semantic_node &n);
     uint32_t bind_reference(const semantic_node &n);
+    bool extends_to_static_owner(uint32_t root, const semantic_node &n) const;
     uint32_t initializer_list(const semantic_node &n);
     uint32_t compound_literal(uint32_t n);
     /* the array the initializer list n builds, as a temporary of the

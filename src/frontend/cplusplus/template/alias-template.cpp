@@ -29,12 +29,12 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
         /* a redeclaration of the same tokens (libc++'s __swap_result_t in
            two headers), [ext.clang] as clang accepts it; [temp.alias] has no
            rule for one that differs */
-        uint32_t same = alias_template_of(prior);
-        if (!same || !same_tokens(function_templates[same - 1].declaration, n))
+        template_ref same = alias_template_of(prior);
+        if (!same || !same_tokens(function_templates[same].declaration, n))
             return not_supported_because(
                 n, "temp.alias",
                 "a redeclaration of a name as a different alias template");
-        entity_table.add_declaration(function_templates[same - 1].entity, n);
+        entity_table.add_declaration(function_templates[same].entity, n);
         return analysis_result::well_formed;
     }
     uint32_t index = 0, first = 0;
@@ -57,8 +57,12 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
        where the template named takes a parameter before its pack,
        typename Q<T>::template X<U> of a dependent Q): it is analysed with
        each use's arguments (alias_template_type), as it is anyway, and
-       judged there */
-    if (r == analysis_result::unsupported) {
+       judged there.  Not where it names a template that has no declaration
+       here and a declaration was not parsed: nothing is claimed about it. */
+    if (r == analysis_result::unsupported &&
+        !(declaration_not_parsed_seen &&
+          unsupported.size() > unsupported_before &&
+          !strcmp(unsupported[unsupported_before].subclause, "temp.names"))) {
         unsupported.resize(unsupported_before);
         r = analysis_result::well_formed;
     }
@@ -69,7 +73,7 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].instantiation = index + 1;
+                entity_table[e].template_record = template_ref::at(index);
         }
     }
     function_template record = new_template(
@@ -91,7 +95,7 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
  * sees through).
  */
 analysis_result semantic_analysis::alias_template_type(SyntaxRef id,
-                                                       uint32_t at,
+                                                       template_ref at,
                                                        type_index &type,
                                                        uint32_t *cv)
 {
@@ -100,13 +104,14 @@ analysis_result semantic_analysis::alias_template_type(SyntaxRef id,
     return alias_template_specialization(id, at, arguments, type, cv);
 }
 
-/* the type alias template function_templates[at - 1] denotes with
+/* the type alias template function_templates[at] denotes with
    arguments (one per parameter, a pack's as one) */
 analysis_result semantic_analysis::alias_template_specialization(
-    SyntaxRef id, uint32_t at, const owned_array<template_argument> &arguments,
-    type_index &type, uint32_t *cv)
+    SyntaxRef id, template_ref at,
+    const owned_array<template_argument> &arguments, type_index &type,
+    uint32_t *cv)
 {
-    const function_template ft = function_templates[at - 1];
+    const function_template ft = function_templates[at];
     analysis_result r = analysis_result::well_formed;
     /* an enclosing template's own pack expanded into the alias's pack
        (Numbers... unbound): its elements are not known.  Forwarded whole
@@ -172,18 +177,9 @@ analysis_result semantic_analysis::alias_template_specialization(
                 id, "temp.names",
                 "an alias template-id whose constraints are not satisfied");
     }
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                           entity_table[ft.entity].enclosing);
-    for (uint32_t i = 0; i < ft.parameter_count; i++) {
-        entity_index parameter =
-            template_parameter_entities[ft.first_parameter + i];
-        if (forwarded[i]) {
-            entity_table.bind(scope, entity_table[parameter].name,
-                              forwarded[i]);
-            continue;
-        }
-        bind_template_argument(scope, parameter, arguments[i]);
-    }
+    entity_index scope =
+        argument_scope(ft.first_parameter, ft.parameter_count, arguments.data(),
+                       entity_table[ft.entity].enclosing, forwarded.data());
     entity_index saved_scope = current_scope;
     token_index saved_horizon = lookup_horizon;
     bool saved_expanding = expanding;
@@ -207,7 +203,8 @@ analysis_result semantic_analysis::alias_template_specialization(
         unsupported.resize(refusals_before);
         type = dependent_specialization(ft.entity, arguments);
         if (r == analysis_result::well_formed && !t.cv())
-            entity_table[type_table[type].entity].alias_expansion = t;
+            entity_table[type_table[type].entity].set(
+                &entity_details::alias_expansion, t);
         return analysis_result::well_formed;
     }
     /* [impl.clang] a closure type created by substituting an alias template
@@ -217,7 +214,7 @@ analysis_result semantic_analysis::alias_template_specialization(
     if (r == analysis_result::well_formed &&
         type_table[t.unqualified()].kind == type_kind::class_type) {
         entity_index c = type_table[t.unqualified()].entity;
-        if (entity_table[c].lambda && c.index() >= entities_before) {
+        if (entity_table[c].details().lambda && c.index() >= entities_before) {
             entity_index fn = saved_scope;
             while (fn && entity_table[fn].kind != entity_kind::function)
                 fn = entity_table[fn].enclosing;
@@ -257,8 +254,9 @@ analysis_result semantic_analysis::alias_template_specialization(
                each instantiation, where a failure is the deduction's */
             type = dependent_specialization(ft.entity, arguments);
             /* (the type it denotes, which [impl.clang] clang mangles) */
-            entity_table[type_table[type].entity].alias_expansion =
-                qualified_type::make(t.unqualified(), cv_none);
+            entity_table[type_table[type].entity].set(
+                &entity_details::alias_expansion,
+                qualified_type::make(t.unqualified(), cv_none));
             if (cv)
                 *cv = t.cv();
             return analysis_result::well_formed;

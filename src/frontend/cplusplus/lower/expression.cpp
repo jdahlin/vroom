@@ -62,7 +62,7 @@ uint32_t c_lowering::expression(uint32_t index)
         return statement_expression(void_type, block(items));
     }
     case semantic_kind::entity: {
-        entity_index e = entity_index_in(n.a);
+        entity_index e = n.entity_a();
         const entity &x = analysis.entity_table[e];
         uint32_t s = symbol(e, n.at);
         if (!s)
@@ -299,7 +299,7 @@ uint32_t c_lowering::expression(uint32_t index)
         /* [class.temporary]/4: one with a destructor is destroyed at the
            end of the full-expression */
         if (!n.a && !at_result_object &&
-            analysis.entity_table[record(n.type).entity].destructor)
+            analysis.entity_table[record(n.type).entity].details().destructor)
             return temporary_object(index);
         return construct(n);
     case semantic_kind::new_object:
@@ -351,7 +351,7 @@ uint32_t c_lowering::expression(uint32_t index)
             vtt = vtt_argument(b, n.at);
         if (failure.what)
             return 0;
-        return special_call(entity_index_in(n.b),
+        return special_call(n.entity_b(),
                             address_of(object, pointer_to(type_of(object))),
                             nullptr, 0, n.at, vtt);
     }

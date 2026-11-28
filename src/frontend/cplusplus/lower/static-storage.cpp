@@ -243,7 +243,7 @@ void c_lowering::guarded_initialization(const semantic_node &n,
                                         entity_index destructor,
                                         owned_array<uint32_t> &out)
 {
-    entity_index e = entity_index_in(n.a);
+    entity_index e = n.entity_a();
     entity_index function = enclosing_function(e);
     if (!function) {
         fail("a guarded local static outside a function", n.at);
@@ -440,8 +440,22 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
         ast_builder_type_function(c, void_type, nullptr, 0, 0);
     uint32_t callee = cast(make(AST_NODE_VARIABLE, ft, f, 0, 0, 0, 0),
                            pointer_to(ft), AST_CAST_FUNCTION_DECAY);
-    initializers.append(
-        c_statement(c, make(AST_NODE_CALL, void_type, callee, 0, 0, 0, 0)));
+    /* [basic.start.static]/2: a constexpr variable is constant-initialized,
+       so it holds its value before any dynamic initialization.  Where vcc
+       has no constant data for it, its code runs first: a template's static
+       members, then the other constexpr variables (copies of those), then
+       the rest */
+    uint32_t called =
+        c_statement(c, make(AST_NODE_CALL, void_type, callee, 0, 0, 0, 0));
+    bool member_of_specialization =
+        x.instantiation ||
+        (x.enclosing && analysis.entity_table[x.enclosing].instantiation);
+    if (!x.constexpr_ || only_destroy)
+        initializers.append(called);
+    else if (member_of_specialization)
+        constant_member_initializers.append(called);
+    else
+        constant_initializers.append(called);
     return true;
 }
 
@@ -466,7 +480,14 @@ bool c_lowering::dynamic_initialization()
         vbuffer_append(name.get(), &k, 1);
     }
     uint32_t start = local_function(name.data(), name.size());
-    ast_builder_symbol_body(c, start, block(initializers));
+    owned_array<uint32_t> ordered;
+    for (uint32_t one : constant_member_initializers)
+        ordered.append(one);
+    for (uint32_t one : constant_initializers)
+        ordered.append(one);
+    for (uint32_t one : initializers)
+        ordered.append(one);
+    ast_builder_symbol_body(c, start, block(ordered));
     ast_builder_symbol_flags_add(c, start, AST_SYMBOL_FLAG_DEFINED);
     ast_builder_symbol_constructor(c, start);
     return true;

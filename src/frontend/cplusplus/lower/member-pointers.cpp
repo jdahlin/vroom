@@ -49,11 +49,11 @@ bool c_lowering::holds_data_member_pointer(qualified_type t) const
                     .entity_table[analysis.class_members[x.first_member + i]]
                     .type))
             return true;
-    for (uint32_t i = 0; i < x.virtual_base_count; i++)
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++)
         if (holds_data_member_pointer(
                 analysis
-                    .entity_table
-                        [analysis.class_virtual_bases[x.first_virtual_base + i]]
+                    .entity_table[analysis.class_virtual_bases
+                                      [x.details().first_virtual_base + i]]
                     .type))
             return true;
     return false;
@@ -66,7 +66,7 @@ bool c_lowering::member_pointer_value(uint32_t n, entity_index &member,
     for (;;) {
         const semantic_node &x = node(n);
         if (x.kind == semantic_kind::member_pointer) {
-            member = entity_index_in(x.a);
+            member = x.entity_a();
             return true;
         }
         if (x.kind != semantic_kind::conversion)
@@ -141,15 +141,15 @@ uint32_t c_lowering::member_pointer_constant(qualified_type t,
     ast_qualified_type d = ast_builder_type_ptrdiff(c);
     const entity &f = analysis.entity_table[member];
     if (record(record(t).operand).kind != type_kind::function)
-        return ast_builder_integer(c, d,
-                                   static_cast<int64_t>(f.offset) + adjustment);
+        return ast_builder_integer(
+            c, d, static_cast<int64_t>(f.details().offset) + adjustment);
     ast_qualified_type vp = pointer_to(void_type);
     uint32_t ptr = 0;
     int64_t adj = 2 * adjustment;
     if (f.virtual_) {
         ptr = cast(ast_builder_integer(
                        c, d,
-                       static_cast<int64_t>(f.vtable_slot) *
+                       static_cast<int64_t>(f.details().vtable_slot) *
                            static_cast<int64_t>(analysis.pointer_size())),
                    vp, AST_CAST_INTEGER_TO_POINTER);
         adj |= 1;
@@ -294,19 +294,28 @@ uint32_t c_lowering::member_pointer_object(const semantic_node &n)
     uint32_t offset = expression(n.b);
     if (!object || !offset)
         return 0;
-    if (!side_effect_free(object) && !side_effect_free(offset))
-        /* C's operands are unsequenced */
-        return fail("a pointer to data member applied with effects in both "
-                    "operands",
-                    n.at);
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     ast_qualified_type bytes = pointer_to(byte);
     ast_qualified_type t = type(n.type, n.at);
-    uint32_t at = make(AST_NODE_INDEX, byte,
-                       cast(object, bytes, AST_CAST_POINTER_TO_POINTER),
-                       to_ptrdiff(offset), 0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t base = cast(object, bytes, AST_CAST_POINTER_TO_POINTER);
+    /* C's operands are unsequenced: with effects in both, the object's
+       address is held in a temporary first */
+    uint32_t sequenced = 0;
+    if (!side_effect_free(object) && !side_effect_free(offset)) {
+        if (!collecting)
+            return fail("a pointer to data member applied with effects in "
+                        "both operands outside a statement",
+                        n.at);
+        uint32_t held = full_expression_temporary(bytes);
+        sequenced = assign(bytes, c_variable(c, held, bytes), base);
+        base = c_variable(c, held, bytes);
+    }
+    uint32_t at = make(AST_NODE_INDEX, byte, base, to_ptrdiff(offset), 0, 0,
+                       AST_NODE_FLAG_LVALUE);
     uint32_t address = cast(make(AST_NODE_ADDRESS, bytes, at, 0, 0, 0, 0),
                             pointer_to(t), AST_CAST_POINTER_TO_POINTER);
+    if (sequenced)
+        address = comma(pointer_to(t), sequenced, address);
     return dereference(address, t);
 }
 

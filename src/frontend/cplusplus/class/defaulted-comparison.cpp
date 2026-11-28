@@ -317,7 +317,7 @@ bool semantic_analysis::calls_non_constexpr(uint32_t node) const
             callee = semantics[callee].a;
         if (semantics[callee].kind != semantic_kind::entity)
             return false;
-        const entity &f = entity_table[entity_index_in(semantics[callee].a)];
+        const entity &f = entity_table[semantics[callee].entity_a()];
         return f.kind == entity_kind::function && !f.constexpr_ &&
                !f.instantiation;
     }
@@ -371,7 +371,7 @@ bool semantic_analysis::cannot_throw_comparison(entity_index c)
         !comparison_category(returned))
         return false;
     const entity &x = entity_table[c];
-    if (x.base_count)
+    if (x.details().base_count)
         return false;
     for (uint32_t i = 0; i < x.member_count; i++) {
         qualified_type t = entity_table[class_members[x.first_member + i]].type;
@@ -410,7 +410,7 @@ analysis_result semantic_analysis::defaulted_equality(
     /* a member's first parameter entity is its object */
     bool of_class = entity_table[last_declared].kind == entity_kind::function &&
                     entity_table[last_declared].enclosing == compared;
-    if ((!x.base_count && !x.member_count) || parameters.size() != 2u)
+    if ((!x.details().base_count && !x.member_count) || parameters.size() != 2u)
         return not_supported_because(
             current_declaration, "class.compare.default",
             "a defaulted comparison of a class with no members or without "
@@ -422,7 +422,7 @@ analysis_result semantic_analysis::defaulted_equality(
         return defaulted_inequality(at, parameters, of_class, block);
     /* [class.eq]/3: the expanded list of subobjects: the direct base
        classes in order, then the members ([class.compare.default]/6) */
-    if (x.virtual_base_count)
+    if (x.details().virtual_base_count)
         return not_supported_because(
             current_declaration, "class.compare.default",
             "a defaulted comparison of a class with virtual bases");
@@ -469,16 +469,17 @@ analysis_result semantic_analysis::defaulted_equality(
             function_state.returns = category;
         }
     }
-    for (uint32_t i = 0; i < x.base_count + x.member_count; i++) {
+    for (uint32_t i = 0; i < x.details().base_count + x.member_count; i++) {
         entity_index member = 0, base = 0;
         qualified_type type;
-        if (i < x.base_count) {
-            base = type_table[entity_table[class_bases[x.first_base + i]]
-                                  .type.unqualified()]
-                       .entity;
+        if (i < x.details().base_count) {
+            base =
+                type_table[entity_table[class_bases[x.details().first_base + i]]
+                               .type.unqualified()]
+                    .entity;
             type = entity_table[base].type;
         } else {
-            member = class_members[x.first_member + i - x.base_count];
+            member = class_members[x.first_member + i - x.details().base_count];
             /* an unnamed bit-field is no subobject compared */
             if (!entity_table[member].name && entity_table[member].bit_field)
                 continue;

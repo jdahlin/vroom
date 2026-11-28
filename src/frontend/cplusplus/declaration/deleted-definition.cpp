@@ -81,6 +81,8 @@ analysis_result semantic_analysis::deleted_use(token_index at, entity_index f)
     if (!declared_deleted(f))
         return analysis_result::well_formed;
     /* /2 */
+    deleted_references++;
+    deleted_reference_at = at;
     return ill_formed_at_token(at,
                                "a program that refers to a deleted "
                                "function, other than to declare it, is "

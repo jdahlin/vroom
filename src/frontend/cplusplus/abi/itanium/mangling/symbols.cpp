@@ -26,13 +26,13 @@ bool itanium_mangler::mangled_name(entity_index e)
                       "held by a declaration it did not analyse)");
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
         return refuse("an entity that is neither a function nor a variable");
-    if (x.typeinfo_of)
-        return typeinfo_name(x.typeinfo_of);
+    if (x.details().typeinfo_of)
+        return typeinfo_name(x.details().typeinfo_of);
     /* (a closure type's constructor or destructor has its class's name:
        none) */
     /* (a structured binding declaration's variable e: its bindings'
        names, unqualified_name_without_tags) */
-    bool binding = x.kind == entity_kind::variable && x.binding_count;
+    bool binding = x.kind == entity_kind::variable && x.details().binding_count;
     if (!x.name && x.special == special_member::none && !binding)
         return false;
     size_t length = 0;
@@ -191,7 +191,7 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
        requires-clause: I, the template-args, Q and the requires-clause's
        expression, E; the requires-clause of the template-head */
     SyntaxElement constraint = analysis.template_constraint(pattern_of);
-    bool head_constraint = constraint && !table[scope].lambda;
+    bool head_constraint = constraint && !table[scope].details().lambda;
     bool arguments = false;
     {
         entity_index arguments_template = encoding_template;
@@ -205,6 +205,7 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
     if (!arguments)
         return false;
     if (head_constraint) {
+        scoped_value<bool> in_head(in_head_constraint, true);
         enc.write(terminal::Q_requires_clause);
         if (!expression_of_constraint(pattern_of, constraint))
             return false;
@@ -234,8 +235,9 @@ bool itanium_mangler::encoding_of_specialization(entity_index e)
        requires-clause: Q and its expression, after the parameters (one after its template-parameters
        is the closure type's, closure_type_name) */
     bool trailing = false;
-    if (table[scope].lambda)
-        constraint = analysis.lambda_constraint(table[scope].lambda, &trailing);
+    if (table[scope].details().lambda)
+        constraint = analysis.lambda_constraint(table[scope].details().lambda,
+                                                &trailing);
     else if ((constraint = analysis.template_trailing_constraint(pattern_of)))
         trailing = true;
     if (constraint && trailing) {

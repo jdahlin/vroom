@@ -340,11 +340,29 @@ def darwin_cxx_rows(d):
     return [('darwin c++: <cstdarg> from the SDK\'s libc++',
              lambda: header('/usr/bin/clang++') == header(vd.VPP) == '.sdk/usr/include/c++/v1/cstdarg')]
 
+def native_triple_rows(d):
+    """--target= naming the host's own triple keeps the system headers (x86-64 hosts)"""
+    import platform
+    if platform.system() != 'Linux' or platform.machine() != 'x86_64':
+        return []
+    src = os.path.join(d, 'native.c')
+    open(src, 'w').write('#include <stdint.h>\nuint32_t x;\n')
+
+    def check(target):
+        answers = [run([c, '--target=' + target, '-fsyntax-only'], src)[0]
+                   for c in (vd.CL, vd.VPP)]
+        return answers == [0, 0]
+    return [(f'system headers with --target={t}', lambda t=t: check(t))
+            for t in ('x86_64-linux-gnu', 'x86_64-unknown-linux-gnu',
+                      'x86_64-pc-linux-gnu')]
+
+
 def main():
     verbose = '-v' in sys.argv
     bad = 0
     with tempfile.TemporaryDirectory() as d:
-        drows = diag_rows(d) + return_rows(d) + darwin_cxx_rows(d)
+        drows = (diag_rows(d) + return_rows(d) + darwin_cxx_rows(d) +
+                 native_triple_rows(d))
         for name, fn in drows:
             ok = fn()
             bad += not ok

@@ -123,16 +123,17 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
            Conversions; a scoped enumeration converts implicitly to nothing
            ([dcl.enum]/10) */
         const entity &e = entity_table[f.entity];
-        if (e.underlying == fundamental_type::none)
+        if (e.details().underlying == fundamental_type::none)
             return of_form(sequence::form::unknown);
         if (e.scoped || !arithmetic_type(tf))
             return of_form(sequence::form::bad);
-        if (e.fixed_underlying && tf == e.underlying) {
+        if (e.fixed_underlying && tf == e.details().underlying) {
             s.rank = 1;
             s.to_underlying = true;
-        } else if (e.fixed_underlying && tf == promotion_of(e.underlying)) {
+        } else if (e.fixed_underlying &&
+                   tf == promotion_of(e.details().underlying)) {
             s.rank = 1;
-        } else if (!e.fixed_underlying && tf == e.promoted) {
+        } else if (!e.fixed_underlying && tf == e.details().promoted) {
             s.rank = 1;
         }
         return s;
@@ -215,7 +216,9 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
     if (f.kind != type_kind::pointer) {
         if (maybe_null)
             return of_form(sequence::form::unknown);
-        if (f.kind == type_kind::fundamental)
+        /* ([conv.mem]: a pointer to member converts to no pointer) */
+        if (f.kind == type_kind::fundamental ||
+            f.kind == type_kind::pointer_to_member)
             return of_form(sequence::form::bad);
         return of_form(sequence::form::unknown);
     }
@@ -261,7 +264,7 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
             return of_form(sequence::form::unknown);
         bool ambiguous = false;
         require_complete(fp.entity);
-        if (!entity_table[fp.entity].size || !cv_kept ||
+        if (!entity_table[fp.entity].details().size || !cv_kept ||
             !base_step(fp.entity, tp.entity, ambiguous))
             return of_form(sequence::form::bad);
         if (ambiguous)
@@ -337,7 +340,7 @@ bool semantic_analysis::conversion_functions_yield_class(
         base_has_conversion_functions(s))
         return true;
     for (entity_index f = own_conversion_functions(s); f;
-         f = entity_table[f].next_overload) {
+         f = entity_table[f].details().next_overload) {
         if (!entity_table[f].conversion_function)
             return true;
         if (entity_table[f].explicit_ && !explicit_counts)
@@ -363,7 +366,7 @@ bool semantic_analysis::has_implicit_conversion_functions(entity_index c) const
         base_has_conversion_functions(c))
         return true;
     for (entity_index f = own_conversion_functions(c); f;
-         f = entity_table[f].next_overload)
+         f = entity_table[f].details().next_overload)
         if (!entity_table[f].conversion_function || !entity_table[f].explicit_)
             return true;
     return false;
@@ -400,7 +403,8 @@ bool semantic_analysis::conversion_function_to_class(
         unknown = true;
         return false;
     }
-    entity_index chosen = 0;
+    entity_index chosen = 0, tied = 0;
+    conversion_sequence chosen_object;
     for (entity_index f : candidates) {
         /* [over.match.copy]/1.2: only non-explicit conversion functions are
            candidates for an implicit conversion sequence */
@@ -417,18 +421,40 @@ bool semantic_analysis::conversion_function_to_class(
         }
         if (r.entity != c1 && !base_step(r.entity, c1, ambiguous) && !ambiguous)
             continue;
-        /* a ref-qualified one: [class.copy.elision]/3's first overload
-           resolution takes the returned lvalue as an rvalue, which the
-           sequence of an argument is not told apart from */
-        if (ambiguous || chosen ||
-            (entity_table[f].member_cv & (cv_ref_lvalue | cv_ref_rvalue))) {
+        /* a ref-qualified one for an lvalue: [class.copy.elision]/3's
+           first overload resolution takes the returned lvalue as an
+           rvalue, which the sequence of an argument is not told apart
+           from */
+        if (ambiguous ||
+            (a.category == value_category::lvalue &&
+             (entity_table[f].member_cv & (cv_ref_lvalue | cv_ref_rvalue)))) {
             unknown = true;
             return false;
         }
         /* the implicit object parameter ([over.match.funcs]/4) */
-        if (object_sequence(a, f).kind == sequence::form::bad)
+        conversion_sequence object = object_sequence(a, f);
+        if (object.kind == sequence::form::bad)
             continue;
-        chosen = f;
+        if (!chosen) {
+            chosen = f;
+            chosen_object = object;
+            continue;
+        }
+        /* [over.match.best]/2: the better implicit object argument
+           ([over.ics.rank]/3.2.3: && for an rvalue over const&); two that
+           it does not order are not ranked here */
+        int order = compare_conversions(object, chosen_object);
+        if (order < 0) {
+            chosen = f;
+            chosen_object = object;
+            tied = 0;
+        } else if (!order) {
+            tied = f;
+        }
+    }
+    if (tied) {
+        unknown = true;
+        return false;
     }
     if (!chosen)
         return false;
@@ -463,7 +489,7 @@ semantic_analysis::class_sequence(const expression_meaning &a,
             return s;
         bool ambiguous = false;
         require_complete(c2);
-        if (entity_table[c2].size && base_step(c2, c1, ambiguous)) {
+        if (entity_table[c2].details().size && base_step(c2, c1, ambiguous)) {
             if (ambiguous)
                 return of_form(sequence::form::unknown);
             s.identity = false;
@@ -493,7 +519,7 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         return of_form(sequence::form::bad);
     /* [temp.mem]/1: a constructor template of c1 only declared is a
        candidate too: not analysed */
-    if (entity_table[c1].constructor_template) {
+    if (entity_table[c1].details().constructor_template) {
         sequence cannot_tell = of_form(sequence::form::unknown);
         cannot_tell.user_defined_if_viable = true;
         return cannot_tell;
@@ -504,13 +530,13 @@ semantic_analysis::class_sequence(const expression_meaning &a,
     owned_array<entity_index> constructors;
     /* each one's constructor template (a function_templates index + 1),
        or 0 */
-    owned_array<uint32_t> template_of;
-    for (entity_index k = entity_table[c1].first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    owned_array<template_ref> template_of;
+    for (entity_index k = entity_table[c1].details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
         constructors.append(k);
         template_of.append(0u);
     }
-    if (entity_table[c1].constructor_templates) {
+    if (entity_table[c1].details().constructor_templates) {
         owned_array<overload_candidate> specializations;
         if (constructor_template_candidates(SyntaxRef(), c1, &a, 1, true,
                                             specializations) !=
@@ -535,7 +561,7 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         if (entity_table[k].explicit_)
             continue;
         if (f.parameter_count == 0 ||
-            f.parameter_count - entity_table[k].default_arguments > 1)
+            f.parameter_count - entity_table[k].details().default_arguments > 1)
             continue;
         qualified_type p =
             type_table.parameters(entity_table[k].type.unqualified())[0];
@@ -676,7 +702,8 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
            pair<const string, J>& while J is being defined) */
         if (c1 != c2)
             require_complete(c2);
-        bool related = c1 && c2 && (c1 == c2 || entity_table[c2].size) &&
+        bool related = c1 && c2 &&
+                       (c1 == c2 || entity_table[c2].details().size) &&
                        reference_related(t1, t2, ambiguous);
         if (ambiguous)
             return of_form(sequence::form::unknown);
@@ -737,6 +764,12 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                             fr.entity == c1 && !(res.type.cv() & ~t1.cv())) {
                             if (yields_lvalue && !rvalue_reference)
                                 return found;
+                            /* /5.4.4: an rvalue reference binds no lvalue
+                               the one conversion function yields
+                               (std::reference_wrapper's operator T&
+                               beside f(T&&) = delete) */
+                            if (yields_lvalue)
+                                return of_form(sequence::form::bad);
                             if (!yields_lvalue && binds_rvalues) {
                                 found.reference = true;
                                 found.rvalue_reference = rvalue_reference;
@@ -802,7 +835,8 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                     /* [over.ics.rank]/2: once the source class is complete
                        and known not to be reference-related, any viable
                        conversion here is user-defined. */
-                    cannot_tell.user_defined_if_viable = entity_table[c2].size;
+                    cannot_tell.user_defined_if_viable =
+                        entity_table[c2].details().size;
                     return cannot_tell;
                 }
             }
@@ -898,6 +932,30 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
            conversion to the target type") */
         if (!user_defined)
             return of_form(sequence::form::bad);
+        /* [expr.prim.lambda.closure]/8: a generic lambda without a
+           lambda-capture converts to a pointer to function of its
+           parameter count by the conversion function template */
+        if (p.kind == type_kind::pointer && y.entity &&
+            entity_table[y.entity].details().lambda &&
+            entity_table[y.entity].member_count == 0 &&
+            entity_table[y.entity].details().call_operator) {
+            entity_index call = entity_table[y.entity].details().call_operator;
+            const struct type &to = type_table[p.operand.unqualified()];
+            if (entity_table[call].kind == entity_kind::template_entity &&
+                entity_table[call].template_record &&
+                to.kind == type_kind::function && !to.variadic) {
+                const function_template &f =
+                    function_templates[entity_table[call].template_record];
+                const struct type &pattern =
+                    type_table[entity_table[f.entity].type.unqualified()];
+                if (pattern.kind == type_kind::function && !pattern.variadic &&
+                    pattern.parameter_count == to.parameter_count) {
+                    sequence made = of_form(sequence::form::user_defined);
+                    made.function = call;
+                    return made;
+                }
+            }
+        }
         bool ambiguous = false, unknown = false;
         entity_index f =
             conversion_function_for(a, parameter, false, ambiguous, unknown);
