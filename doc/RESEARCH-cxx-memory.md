@@ -7,13 +7,12 @@ tens of percent; the RSS figures repeat to a few MB.
 
 | file | before | after | clang++ | after / clang |
 |---|---|---|---|---|
-| network/network_command.cpp | 2119 MB | 591 MB | 963 MB | 0.61 |
-| openttd.cpp | 973 MB | 425 MB | 430 MB | 0.99 |
-| window.cpp | 504 MB | 269 MB | 281 MB | 0.96 |
+| network/network_command.cpp | 2119 MB | 529 MB | 962 MB | 0.55 |
+| openttd.cpp | 973 MB | 370 MB | 429 MB | 0.86 |
+| window.cpp | 504 MB | 231 MB | 281 MB | 0.82 |
 
 The objects `vpp -c` writes for the three are byte for byte the same before
-and after.  The target of using significantly less than clang is met for the largest
-file; the other two are about even with it.
+and after.  All three are below clang: the largest file by 45 %, the others by 14-18 %.
 
 ## Where it went (network_command.cpp, before)
 
@@ -61,11 +60,25 @@ main for all the changes here.
   every entity, about 40 MB in network_command.cpp.  This also took
   cxx-fe-bench from +0.28 % to -6.6 % instructions against main.
 
+## Attributing every resident page
+
+An `LD_PRELOAD` interposer recording `malloc` and `mmap` call sites, with
+`mincore` for large blocks, run under gdb to the end of the analysis, found:
+
+- each token stored twice (`token::preprocessing` and again in
+  `token_stream`), about 35 MB in openttd.cpp: only pieces that differ are
+  kept now;
+- most writes of a detail member wrote the value it had, a default, which
+  allocated the 272 bytes, or copied them after a snapshot of the entity
+  (`const entity x = ...`) had shared them: `entity::set` writes only a
+  changed value, about 20 MB.
+
 ## What is left
 
-openttd.cpp at the previous step (463 MB resident): the core entities 82 MB,
-the details 55 MB, tokens 51 MB and preprocessing tokens 31 MB (both stay for
-the whole unit), the semantic tree 38 MB, the name binding slots 17 MB, the
-syntax tree about 23 MB, instantiation records 10 MB.  No single part is
-large any more; the candidates are details per kind, 32-bit indexes for the
-details pointer, the two token arrays, and `semantic_node` (48 bytes).
+openttd.cpp, 370 MB resident, after these: the entity table (records,
+details, declarations) 101 MB, tokens about 61 MB, the semantic tree 38 MB,
+the name binding slots 17 MB, the syntax tree about 23 MB, source files and
+the texts the preprocessor makes about 30 MB, instantiation records 10 MB,
+then many tables under 10 MB.  Candidates, none measured: a smaller
+`token` (40 bytes) and `semantic_node` (48), `binding` (16 bytes a slot),
+details per kind, and freeing the syntax of what analysis is done with.
