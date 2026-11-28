@@ -621,11 +621,9 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
             cmp = 1;
         else if (x.instantiation && entity_table[best].instantiation) {
             /* [over.match.best]/2.5: the more specialized template */
-            entity_index t1 =
-                instantiations[x.instantiation - 1].template_entity;
-            entity_index t2 =
-                instantiations[entity_table[best].instantiation - 1]
-                    .template_entity;
+            entity_index t1 = instantiations[x.instantiation].template_entity;
+            entity_index t2 = instantiations[entity_table[best].instantiation]
+                                  .template_entity;
             if (t1 != t2)
                 cmp = -conversion_template_order(t1, t2);
         }

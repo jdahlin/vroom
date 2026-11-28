@@ -1156,9 +1156,9 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
         if (entity_table[e].kind == entity_kind::class_type &&
             !entity_table[e].size && entity_table[e].instantiation &&
             e != defining_class && !entity_table[e].defined) {
-            uint32_t k = entity_table[e].instantiation - 1;
+            uint32_t k = entity_table[e].instantiation.index();
             entity_index t_ent = instantiations[k].template_entity;
-            uint32_t ct = entity_table[t_ent].template_record;
+            uint32_t ct = entity_table[t_ent].template_record.number();
             if (ct && !instantiations[k].defining) {
                 entity_index done = e;
                 /* (a copy: instantiate_class may grow template_arguments) */
@@ -1180,7 +1180,7 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             /* (one that waits for the class being defined, named in its
                member-specification: its members are needed now, [impl.clang] clang
                instantiates it here) */
-            uint32_t record = entity_table[e].instantiation;
+            uint32_t record = entity_table[e].instantiation.number();
             if (record && !entity_table[e].defined && !entity_table[e].size &&
                 !instantiations[record - 1].defining &&
                 instantiations[record - 1].specialization == e) {
@@ -1237,7 +1237,7 @@ bool semantic_analysis::undefined_specialization(entity_index c) const
     if (x.kind != entity_kind::class_type || !x.instantiation || x.defined ||
         x.size)
         return false;
-    const instantiation_record &record = instantiations[x.instantiation - 1];
+    const instantiation_record &record = instantiations[x.instantiation];
     if (record.defining || record.lazy || record.has_failure || record.pattern)
         return false;
     uint32_t t = class_template_of(c);

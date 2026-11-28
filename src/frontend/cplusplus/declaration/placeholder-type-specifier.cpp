@@ -703,11 +703,11 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
            specialization occurs when its definition is instantiated, even
            in an unevaluated operand */
         if (entity_table[e].instantiation) {
-            uint32_t idx = entity_table[e].instantiation - 1;
+            uint32_t idx = entity_table[e].instantiation.index();
             instantiation_record &rec = instantiations[idx];
             const entity tmpl = entity_table[rec.template_entity];
             const function_template ft =
-                function_templates[tmpl.template_record - 1];
+                function_templates[tmpl.template_record];
             if (!rec.defined && !rec.defining && ft.definition) {
                 rec.quiet = quiet_member_bodies != 0;
                 if (!instantiation_depth && !rec.wanted_by && !unevaluated &&

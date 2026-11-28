@@ -630,7 +630,7 @@ analysis_result semantic_analysis::overloaded_operator(
                 entity_table[e.entity].kind == entity_kind::function &&
                 entity_table[e.entity].instantiation) {
                 const instantiation_record &q =
-                    instantiations[entity_table[e.entity].instantiation - 1];
+                    instantiations[entity_table[e.entity].instantiation];
                 for (uint32_t i = 0; i < q.argument_count; i++)
                     if (template_arguments[q.first_argument + i].kind ==
                         template_argument::kind_t::type)

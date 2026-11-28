@@ -259,7 +259,7 @@ bool semantic_analysis::primary_arguments(
    definition is the template<> one), not an implicit instantiation */
 bool semantic_analysis::explicitly_specialized_class(entity_index c) const
 {
-    uint32_t record = entity_table[c].instantiation;
+    uint32_t record = entity_table[c].instantiation.number();
     if (!record)
         return false;
     const instantiation_record &r = instantiations[record - 1];
@@ -309,7 +309,7 @@ bool semantic_analysis::member_class_specialization(SyntaxRef n,
     }
     if (!is_class_entity(ns.entity))
         return false;
-    uint32_t record = entity_table[ns.entity].instantiation;
+    uint32_t record = entity_table[ns.entity].instantiation.number();
     if (!record || instantiations[record - 1].specialization != ns.entity)
         return false;
     /* [temp.expl.spec]/5: the members of an explicitly specialized class

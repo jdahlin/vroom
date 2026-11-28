@@ -382,7 +382,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             }
             uint32_t record = 0;
             if (v)
-                record = entity_table[ns.entity].instantiation;
+                record = entity_table[ns.entity].instantiation.number();
             if (record &&
                 instantiations[record - 1].specialization == ns.entity &&
                 entity_table[v].kind == entity_kind::variable && !lead &&
@@ -656,8 +656,9 @@ semantic_analysis::record_instantiation(const function_template &ft,
     if (ft.outer_instantiation) {
         const instantiation_record &ox =
             instantiations[ft.outer_instantiation - 1];
-        function_template oof = function_templates
-            [entity_table[ox.template_entity].template_record - 1];
+        function_template oof =
+            function_templates[entity_table[ox.template_entity]
+                                   .template_record];
         uint32_t first = ox.first_argument;
         if (ox.pattern) {
             oof = function_templates[ox.pattern - 1];
@@ -1307,12 +1308,12 @@ analysis_result semantic_analysis::named_specialization(
        takes (explicit_instantiation_verdict) */
     if (!specialization && !extern_) {
         explicit_instantiation_record(e, n);
-        uint32_t at = entity_table[e].instantiation - 1;
+        uint32_t at = entity_table[e].instantiation.index();
         if (!instantiations[at].defined && !instantiations[at].pending &&
             !instantiations[at].defining)
             want_definition(instantiations[at], at);
     }
-    index = entity_table[e].instantiation - 1;
+    index = entity_table[e].instantiation.index();
     if (specialization) {
         /* [temp.expl.spec]/12: "An explicit specialization of a function
            or variable template is inline only if it is declared with the
@@ -1482,8 +1483,8 @@ analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
         return not_supported_because(n, "temp.explicit",
                                      "an explicit instantiation of a union");
     if (!member_class) {
-        entity_index t = instantiations[k.instantiation - 1].template_entity;
-        const instantiation_record record = instantiations[k.instantiation - 1];
+        entity_index t = instantiations[k.instantiation].template_entity;
+        const instantiation_record record = instantiations[k.instantiation];
         /* [temp.expl.spec]: an explicit specialization's class is no
            instantiation */
         if (record.pattern &&
@@ -1605,7 +1606,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
             n, "temp.explicit",
             "a member instantiation not of a specialization in an enclosed "
             "namespace");
-    const instantiation_record record = instantiations[c.instantiation - 1];
+    const instantiation_record record = instantiations[c.instantiation];
     if (record.pattern &&
         !function_templates[record.pattern - 1].parameter_count)
         return not_supported_because(

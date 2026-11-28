@@ -69,7 +69,7 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].template_record = index + 1;
+                entity_table[e].template_record = template_ref::at(index);
         }
     }
     function_template record = new_template(

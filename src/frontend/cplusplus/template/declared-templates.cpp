@@ -488,9 +488,9 @@ bool semantic_analysis::is_template_template_parameter(entity_index e) const
     const entity &named = entity_table[e];
     return named.kind == entity_kind::template_entity &&
            named.template_record &&
-           named.template_record <= function_templates.size() &&
-           function_templates[named.template_record - 1].is_parameter &&
-           function_templates[named.template_record - 1].entity == e;
+           named.template_record.number() <= function_templates.size() &&
+           function_templates[named.template_record].is_parameter &&
+           function_templates[named.template_record].entity == e;
 }
 
 /* [temp.param]/1's template template-parameter e: a class template of its
@@ -517,7 +517,7 @@ analysis_result semantic_analysis::template_template_record(SyntaxRef n,
     record.is_class = true;
     record.is_parameter = true;
     VTRY(r, declare_template_parameters(n, inner, inner_scope, own, 0));
-    entity_table[e].template_record = own + 1;
+    entity_table[e].template_record = template_ref::at(own);
     function_templates.append(record);
     return analysis_result::well_formed;
 }
@@ -657,7 +657,7 @@ analysis_result semantic_analysis::declare_template_parameters(
         entity_table[e].value = i;
         entity_table[e].defined = true;
         if (!form.template_template)
-            entity_table[e].template_record = index + 1;
+            entity_table[e].template_record = template_ref::at(index);
         if (name)
             entity_table.bind(scope, name, e);
         set_template_parameter_entity(first + static_cast<uint32_t>(i), e);
@@ -668,7 +668,7 @@ analysis_result semantic_analysis::declare_template_parameters(
     for (size_t i = 0; i < parameters.size(); i++) {
         entity_index e = template_parameter_entities[first + i];
         if (entity_table[e].kind != entity_kind::template_entity)
-            entity_table[e].template_record = index + 1;
+            entity_table[e].template_record = template_ref::at(index);
     }
     return analysis_result::well_formed;
 }
@@ -832,7 +832,7 @@ uint32_t semantic_analysis::class_template_of(entity_index e) const
        specialization" */
     if (entity_table[e].kind == entity_kind::class_type &&
         entity_table[e].instantiation)
-        return entity_table[specialized_template(e)].template_record;
+        return entity_table[specialized_template(e)].template_record.number();
     return template_of_form(e, &function_template::is_class);
 }
 
@@ -902,7 +902,7 @@ type_index semantic_analysis::dependent_specialization(
                           entity_table[t].name, entity_table[t].enclosing);
     entity_table[e].type = qualified_type::make(
         type_table.of_entity(type_kind::dependent, e), cv_none);
-    entity_table[e].instantiation = index + 1;
+    entity_table[e].instantiation = instantiation_ref::at(index);
     entity_table[e].linkage_of_name = entity_table[t].linkage_of_name;
     record.specialization = e;
     instantiations.append(record);
@@ -1109,7 +1109,7 @@ bool semantic_analysis::depends_on_parameter_from(qualified_type t,
         entity_table[r.entity].kind == entity_kind::template_specialization &&
         entity_table[r.entity].instantiation) {
         const instantiation_record &x =
-            instantiations[entity_table[r.entity].instantiation - 1];
+            instantiations[entity_table[r.entity].instantiation];
         auto depends_on = [&](const template_argument &a) {
             if (a.kind == template_argument::kind_t::type)
                 return depends_on_parameter_from(a.type, from);
@@ -1274,7 +1274,7 @@ uint32_t semantic_analysis::bound_template_template_of(SyntaxRef id) const
         const bound_template_template &b = bound_template_templates[i - 1];
         if (b.target != named)
             continue;
-        uint32_t record = entity_table[b.parameter].template_record;
+        uint32_t record = entity_table[b.parameter].template_record.number();
         if (!record)
             continue;
         const function_template &formal = function_templates[record - 1];
@@ -1704,10 +1704,8 @@ bool semantic_analysis::same_template_parameters(uint32_t first,
         }
         if (a.kind == entity_kind::template_entity) {
             /* template template-parameters: their own parameters */
-            const function_template x =
-                function_templates[a.template_record - 1];
-            const function_template y =
-                function_templates[b.template_record - 1];
+            const function_template x = function_templates[a.template_record];
+            const function_template y = function_templates[b.template_record];
             if (x.parameter_count != y.parameter_count ||
                 !same_template_parameters(x.first_parameter, y.first_parameter,
                                           x.parameter_count))
@@ -1744,12 +1742,12 @@ semantic_analysis::new_template(uint32_t name, entity_index outer, SyntaxRef n,
         for (uint32_t i = 0; i < count; i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].template_record = index + 1;
+                entity_table[e].template_record = template_ref::at(index);
         }
     }
     entity_index t =
         entity_table.make(entity_kind::template_entity, name, outer);
-    entity_table[t].template_record = index + 1;
+    entity_table[t].template_record = template_ref::at(index);
     entity_table[t].linkage_of_name = linkage::external;
     if (within_unnamed_namespace(outer))
         entity_table[t].linkage_of_name = linkage::internal;

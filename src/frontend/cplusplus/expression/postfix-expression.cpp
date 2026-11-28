@@ -1011,7 +1011,7 @@ bool semantic_analysis::copy_candidate_wins(uint32_t ct)
         }
         if (g.implicit_guide) {
             if (k->kind == type_kind::dependent) {
-                uint32_t i = entity_table[k->entity].instantiation;
+                uint32_t i = entity_table[k->entity].instantiation.number();
                 if (!i || instantiations[i - 1].template_entity != primary)
                     continue;
                 /* a constructor template naming the template with another

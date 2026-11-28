@@ -73,7 +73,7 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
             !entity_table[c].instantiation)
             return true;
         const instantiation_record &inst =
-            instantiations[entity_table[c].instantiation - 1];
+            instantiations[entity_table[c].instantiation];
         if (inst.argument_count < 1 ||
             template_arguments[inst.first_argument].kind !=
                 template_argument::kind_t::type)

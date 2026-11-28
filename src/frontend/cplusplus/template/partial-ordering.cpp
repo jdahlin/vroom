@@ -389,9 +389,9 @@ int semantic_analysis::conversion_template_order(entity_index t1,
                                                  entity_index t2)
 {
     const function_template ft1 =
-        function_templates[entity_table[t1].template_record - 1];
+        function_templates[entity_table[t1].template_record];
     const function_template ft2 =
-        function_templates[entity_table[t2].template_record - 1];
+        function_templates[entity_table[t2].template_record];
     qualified_type o1 = type_table[entity_table[t1].type.unqualified()].operand;
     qualified_type o2 = type_table[entity_table[t2].type.unqualified()].operand;
     unsigned cv1 = 0, cv2 = 0;

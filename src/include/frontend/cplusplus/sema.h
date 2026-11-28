@@ -1001,11 +1001,11 @@ struct entity {
     fundamental_type promoted = fundamental_type::none;
     /* a specialization ([temp.spec]): its instantiation record
        (semantic_analysis::instantiations) plus one */
-    uint32_t instantiation = 0;
+    instantiation_ref instantiation;
     /* a template (template_entity) or a template parameter: its
        function_template record (semantic_analysis::function_templates)
        plus one */
-    uint32_t template_record = 0;
+    template_ref template_record;
     /* a function template's specialization, a member function of a class
        template's specialization or such a class: the subject of an
        explicit instantiation ([temp.explicit]/2) declaration (extern) or
@@ -5871,7 +5871,7 @@ class semantic_analysis
         bool guides_made = false;
     };
     entity_index template_lexical_outer(const function_template &ft) const;
-    owned_array<function_template> function_templates;
+    record_table<function_template, template_ref> function_templates;
     /* function_templates by the held entity (name) and by its identifier,
        instantiations by template_entity: made as they are asked for */
     mutable record_chains templates_by_held, templates_by_identifier,
@@ -6771,7 +6771,7 @@ class semantic_analysis
     bool has_pack_expansion(SyntaxElement list) const;
     owned_array<constant_value> instantiation_values;
     owned_array<instantiation_input> instantiation_inputs;
-    owned_array<instantiation_record> instantiations;
+    record_table<instantiation_record, instantiation_ref> instantiations;
     /* the explicit specializations (function_templates indexes, one-based)
        that an explicit instantiation named: a second is not judged */
     owned_array<uint32_t> specializations_instantiated;
@@ -7045,8 +7045,7 @@ class semantic_analysis
        template and its arguments, for its name ([abi:mangle.name]) */
     entity_index specialized_template(entity_index e) const
     {
-        return instantiations[entity_table[e].instantiation - 1]
-            .template_entity;
+        return instantiations[entity_table[e].instantiation].template_entity;
     }
     /* [abi:mangle.requires-clause]: the requires-clause of the function
        template t's template-head (none: no bits), its template parameter
@@ -7093,7 +7092,7 @@ class semantic_analysis
     uint32_t template_parameter_name(entity_index t, uint32_t i) const
     {
         const function_template &f =
-            function_templates[entity_table[t].template_record - 1];
+            function_templates[entity_table[t].template_record];
         return entity_table[template_parameter_entities[f.first_parameter + i]]
             .name;
     }
@@ -7138,7 +7137,7 @@ class semantic_analysis
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
     {
-        return function_templates[entity_table[t].template_record - 1]
+        return function_templates[entity_table[t].template_record]
             .parameter_count;
     }
     /* the form of template-parameter i of template entity t: a type
@@ -7214,7 +7213,7 @@ class semantic_analysis
                                        bool arguments = false) const;
     uint32_t specialization_argument_count(entity_index e) const
     {
-        return instantiations[entity_table[e].instantiation - 1].argument_count;
+        return instantiations[entity_table[e].instantiation].argument_count;
     }
     qualified_type specialization_argument(entity_index e, uint32_t i,
                                            uint32_t element = 0) const
@@ -7297,7 +7296,7 @@ class semantic_analysis
                                      uint32_t element = 0) const
     {
         const instantiation_record &x =
-            instantiations[entity_table[e].instantiation - 1];
+            instantiations[entity_table[e].instantiation];
         const template_argument &a = template_arguments[x.first_argument + i];
         if (!element)
             return a;

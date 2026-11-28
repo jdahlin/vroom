@@ -526,7 +526,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             entity_table[c].linkage_of_name = linkage::internal;
         entity_table[c].type = qualified_type::make(
             type_table.of_entity(type_kind::class_type, c), cv_none);
-        entity_table[c].instantiation = specialization;
+        entity_table[c].instantiation =
+            instantiation_ref::from_number(specialization);
         instantiation_record &record = instantiations[specialization - 1];
         record.specialization = c;
         /* [class.pre]/2: "The class-name is also bound in the scope of the
@@ -534,8 +535,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            injected-class-name."  The template-parameters' names with it,
            each its argument ([temp.arg.type]) */
         entity_table.bind(c, name, c);
-        const function_template &ft = function_templates
-            [entity_table[record.template_entity].template_record - 1];
+        const function_template &ft =
+            function_templates[entity_table[record.template_entity]
+                                   .template_record];
         if (record.pattern) {
             /* a partial specialization's parameters, each the argument
                matching deduced */
@@ -1612,7 +1614,8 @@ bool semantic_analysis::accessible_here(entity_index member,
        instantiated friend function template has the access of the class
        that declares it [impl.clang] */
     if (function_state.active) {
-        uint32_t i = entity_table[function_state.function].instantiation;
+        uint32_t i =
+            entity_table[function_state.function].instantiation.number();
         if (i) {
             entity_index t = instantiations[i - 1].template_entity;
             for (const function_template &f : function_templates)
@@ -2647,7 +2650,7 @@ analysis_result semantic_analysis::member_declarator(
             entity_table[record.entity].kind == entity_kind::class_type &&
             entity_table[record.entity].instantiation &&
             !entity_table[record.entity].defined &&
-            !instantiations[entity_table[record.entity].instantiation - 1]
+            !instantiations[entity_table[record.entity].instantiation]
                  .defining) {
             /* [temp.inst]/2: a member of class template specialization type
                needs a completely-defined type, so the specialization is
@@ -2656,7 +2659,7 @@ analysis_result semantic_analysis::member_declarator(
                function bodies instantiated only when used, /4) */
             entity_index done = 0;
             analysis_result r2 = define_class_outside(
-                SyntaxRef(), entity_table[record.entity].instantiation - 1,
+                SyntaxRef(), entity_table[record.entity].instantiation.index(),
                 done);
             if (r2 != analysis_result::well_formed)
                 return r2;
@@ -2674,7 +2677,7 @@ analysis_result semantic_analysis::member_declarator(
                        record.fundamental == fundamental_type::void_;
         if (record.kind == type_kind::class_type &&
             entity_table[record.entity].kind != entity_kind::class_type) {
-            uint32_t inst = entity_table[record.entity].instantiation;
+            uint32_t inst = entity_table[record.entity].instantiation.number();
             if (inst && instantiations[inst - 1].has_failure) {
                 unsupported.append(instantiations[inst - 1].failure);
                 return analysis_result::unsupported;

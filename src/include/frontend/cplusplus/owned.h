@@ -210,6 +210,21 @@ template <typename T, typename Index = size_t> class owned_array
     size_t count = 0, capacity = 0;
 };
 
+/* an owned_array whose records also go by a Ref (record_ref) */
+template <typename T, typename Ref> class record_table : public owned_array<T>
+{
+  public:
+    using owned_array<T>::operator[];
+    T &operator[](Ref r)
+    {
+        return (*this)[static_cast<size_t>(r.index())];
+    }
+    const T &operator[](Ref r) const
+    {
+        return (*this)[static_cast<size_t>(r.index())];
+    }
+};
+
 /*
  * A vbuffer whose storage is freed with the owner.  The first bytes are in
  * the owner itself (VBUFFER_INLINE): most buffers hold one spelling or one

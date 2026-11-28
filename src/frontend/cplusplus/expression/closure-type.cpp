@@ -123,7 +123,7 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
        function template specialization, give __invoke and the conversion
        operator their template specialization records so Itanium mangling
        matches clang's __invoke<T...>(T...) and operator auto(*)(T...)<T...>() */
-    if (uint32_t call_inst = entity_table[call].instantiation) {
+    if (uint32_t call_inst = entity_table[call].instantiation.number()) {
         const instantiation_record orig = instantiations[call_inst - 1];
         entity_index call_tmpl = orig.template_entity;
         qualified_type pat_type = entity_table[call_tmpl].type;
@@ -138,7 +138,7 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
         inv_rec.specialization = invoke;
         instantiations.append(inv_rec);
         entity_table[invoke].instantiation =
-            static_cast<uint32_t>(instantiations.size());
+            instantiation_ref::at(instantiations.size() - 1);
 
         qualified_type pat_ptr =
             qualified_type::make(type_table.pointer_to(pat_type), cv_none);
@@ -157,7 +157,7 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
         conv_rec.specialization = conversion;
         instantiations.append(conv_rec);
         entity_table[conversion].instantiation =
-            static_cast<uint32_t>(instantiations.size());
+            instantiation_ref::at(instantiations.size() - 1);
     }
     if (entity_index existing = entity_table.find(c, conversion_name)) {
         entity_table[conversion].next_overload =
@@ -292,7 +292,7 @@ analysis_result semantic_analysis::generic_closure_conversion(
             at, "expr.prim.lambda.closure",
             "a generic lambda converted to no non-variadic function pointer");
     entity_index call_tpl = entity_table[c].call_operator;
-    uint32_t ft = entity_table[call_tpl].template_record;
+    uint32_t ft = entity_table[call_tpl].template_record.number();
     if (!ft)
         return not_supported_because(
             at, "expr.prim.lambda.closure",

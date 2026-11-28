@@ -1127,7 +1127,7 @@ uint32_t semantic_analysis::shown_template_arguments(entity_index c)
     uint32_t count = specialization_argument_count(c);
     entity_index t = specialized_template(c);
     /* (a template entity's record: function_templates' index plus one) */
-    uint32_t ct = entity_table[t].template_record;
+    uint32_t ct = entity_table[t].template_record.number();
     if (!ct || entity_table[c].kind != entity_kind::class_type ||
         !function_templates[ct - 1].is_class ||
         function_templates[ct - 1].parameter_count != count)

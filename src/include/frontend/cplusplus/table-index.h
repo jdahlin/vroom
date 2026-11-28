@@ -105,6 +105,52 @@ template <typename Tag> constexpr size_t table_slot(table_index<Tag> i)
     return i.index();
 }
 
+/*
+ * A record of one of the front end's append-only tables, or none: the
+ * record's index plus one, so that 0 is none, as a type of its own for each
+ * table.  record_table (owned.h) takes it as a subscript.
+ */
+template <typename Tag> class record_ref
+{
+  public:
+    constexpr record_ref() = default;
+    constexpr record_ref(decltype(nullptr))
+    {
+    }
+    /* the record at index (0-based) */
+    static constexpr record_ref at(size_t index)
+    {
+        return from_number(static_cast<uint32_t>(index + 1));
+    }
+    /* from number(), as a word that holds it gives it back */
+    static constexpr record_ref from_number(uint32_t number)
+    {
+        record_ref r;
+        r.value = number;
+        return r;
+    }
+    constexpr uint32_t number() const
+    {
+        return value;
+    }
+    /* the record's index in its table; not of none */
+    constexpr uint32_t index() const
+    {
+        return value - 1;
+    }
+    explicit constexpr operator bool() const
+    {
+        return value != 0;
+    }
+    friend constexpr bool operator==(record_ref, record_ref) = default;
+
+  private:
+    uint32_t value = 0;
+};
+
+using template_ref = record_ref<struct function_template_tag>;
+using instantiation_ref = record_ref<struct instantiation_tag>;
+
 } // namespace cplusplus
 
 #endif

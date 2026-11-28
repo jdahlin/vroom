@@ -820,7 +820,7 @@ entity_index semantic_analysis::dependent_variable_specialization(
         entity_table[s].type = qualified_type::make(
             type_table.of_entity(type_kind::dependent, s), cv_none);
         entity_table[s].instantiation =
-            static_cast<uint32_t>(instantiations.size()) + 1;
+            instantiation_ref::at(instantiations.size());
         record.specialization = s;
         instantiations.append(record);
     }
@@ -1451,10 +1451,8 @@ bool semantic_analysis::template_parameters_match(
         if (x.kind == entity_kind::none)
             return x.type == y.type;
         if (x.kind == entity_kind::template_entity) {
-            const function_template p =
-                function_templates[x.template_record - 1];
-            const function_template q =
-                function_templates[y.template_record - 1];
+            const function_template p = function_templates[x.template_record];
+            const function_template q = function_templates[y.template_record];
             return p.parameter_count == q.parameter_count &&
                    same_template_parameters(
                        p.first_parameter, q.first_parameter, p.parameter_count);
@@ -1572,7 +1570,7 @@ analysis_result semantic_analysis::template_template_argument(
             "a template argument naming no primary class or alias template");
     const function_template given = function_templates[a - 1];
     const function_template wanted =
-        function_templates[entity_table[parameter].template_record - 1];
+        function_templates[entity_table[parameter].template_record];
     if (!template_parameters_match(wanted, given))
         return not_supported_because(
             at, "temp.arg.template",

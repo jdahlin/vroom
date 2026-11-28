@@ -133,9 +133,9 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                deduced as A's template when their parameters match
                ([temp.arg.template]/3) */
             const function_template x =
-                function_templates[entity_table[pt].template_record - 1];
+                function_templates[entity_table[pt].template_record];
             const function_template y =
-                function_templates[entity_table[at].template_record - 1];
+                function_templates[entity_table[at].template_record];
             uint64_t k = entity_table[pt].value;
             bool x_has_pack = x.parameter_count > 0 &&
                               template_parameter_is_pack(x.first_parameter +
@@ -754,9 +754,10 @@ bool semantic_analysis::class_parameter_of_guide(qualified_type t) const
     if (r.kind != type_kind::template_parameter)
         return false;
     const entity &e = entity_table[r.entity];
-    if (!e.template_record || e.template_record > function_templates.size())
+    if (!e.template_record ||
+        e.template_record.number() > function_templates.size())
         return false;
-    const function_template &guide = function_templates[e.template_record - 1];
+    const function_template &guide = function_templates[e.template_record];
     if (!guide.implicit_guide)
         return false;
     return e.value < function_templates[guide.guide_of - 1].parameter_count;

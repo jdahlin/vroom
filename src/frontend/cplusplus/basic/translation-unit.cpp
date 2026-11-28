@@ -200,7 +200,7 @@ bool semantic_analysis::unit_local(entity_index e) const
         }
         if (!x.instantiation)
             continue;
-        const instantiation_record &made = instantiations[x.instantiation - 1];
+        const instantiation_record &made = instantiations[x.instantiation];
         for (uint32_t i = 0; i < made.argument_count; i++)
             if (argument_unit_local(
                     template_arguments[made.first_argument + i]))
@@ -250,8 +250,7 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
            class other translation units name too (visible_local_class) is
            no weaker */
         if (arguments && x.kind == entity_kind::class_type && x.instantiation) {
-            const instantiation_record &made =
-                instantiations[x.instantiation - 1];
+            const instantiation_record &made = instantiations[x.instantiation];
             for (uint32_t i = 0; i < made.argument_count; i++)
                 if (argument_unit_local(
                         template_arguments[made.first_argument + i]))
@@ -732,9 +731,9 @@ analysis_result semantic_analysis::declare(
                 /* [temp.inst]/2: a class template specialization named before
                    its template was defined (e.g. through a typedef) is
                    implicitly instantiated when an object of it is defined */
-                uint32_t k = entity_table[record.entity].instantiation - 1;
+                uint32_t k = entity_table[record.entity].instantiation.index();
                 entity_index t = instantiations[k].template_entity;
-                uint32_t ct = entity_table[t].template_record;
+                uint32_t ct = entity_table[t].template_record.number();
                 if (ct && !instantiations[k].defining) {
                     entity_index done = record.entity;
                     /* (a copy: instantiate_class may grow template_arguments) */
@@ -757,9 +756,9 @@ analysis_result semantic_analysis::declare(
                 analysis_result refused =
                     not_supported(declaration, "class.pre");
                 if (c.instantiation &&
-                    instantiations[c.instantiation - 1].has_failure)
+                    instantiations[c.instantiation].has_failure)
                     instantiation_detail(
-                        instantiations[c.instantiation - 1].failure);
+                        instantiations[c.instantiation].failure);
                 return refused;
             }
             /* [basic.def]/5 */

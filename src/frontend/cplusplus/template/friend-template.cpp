@@ -366,7 +366,7 @@ analysis_result semantic_analysis::dependent_member_friend(
    are declared. */
 void semantic_analysis::member_friends_of(entity_index s, bool complete)
 {
-    uint32_t i = entity_table[s].instantiation;
+    uint32_t i = entity_table[s].instantiation.number();
     if (!i || member_friends.empty())
         return;
     entity_index t = instantiations[i - 1].template_entity;
@@ -387,7 +387,7 @@ void semantic_analysis::member_friends_of(entity_index s, bool complete)
 void semantic_analysis::befriend_member(uint32_t k, entity_index s)
 {
     member_friend f = member_friends[k];
-    uint32_t record = entity_table[s].instantiation - 1;
+    uint32_t record = entity_table[s].instantiation.index();
     uint32_t first_argument = instantiations[record].first_argument;
     uint32_t argument_count = instantiations[record].argument_count;
     if (argument_count != f.pattern_count)
@@ -552,7 +552,7 @@ bool semantic_analysis::constraint_names_enclosing_parameter(
 {
     owned_array<uint32_t> names;
     for (entity_index k = c; !is_namespace(k); k = entity_table[k].enclosing) {
-        uint32_t i = entity_table[k].instantiation;
+        uint32_t i = entity_table[k].instantiation.number();
         if (!i || entity_table[k].kind != entity_kind::class_type)
             continue;
         /* the primary template's record: its parameters' names */
