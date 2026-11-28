@@ -71,11 +71,32 @@ void ast_builder_location_describer(
 /* the location the nodes ast_builder_node makes from now on get; returns the
    one before */
 uint32_t ast_builder_location(cc *c, uint32_t location);
+/* whether there is a describer: the debug setters do something */
+bool ast_builder_debugging(cc *c);
 /* one node's */
 void ast_builder_node_location(cc *c, uint32_t n, uint32_t location);
 /* the source's identifier of a symbol named by its linkage name, for the
    function's debug entry */
 void ast_builder_symbol_debug_kind(cc *c, uint32_t s, int kind);
+/* a member function or static data member of the class whose struct is record */
+void ast_builder_symbol_debug_class(cc *c, uint32_t s,
+                                    ast_qualified_type record);
+/* -g, where C's type of a declaration lost what C++'s says (an enumeration
+   lowered to its underlying type): the type a debugger is told instead, of a
+   variable, a function's result or a field */
+void ast_builder_symbol_debug_type(cc *c, uint32_t s, ast_qualified_type t);
+void ast_builder_type_record_debug_type(cc *c, ast_qualified_type record,
+                                        uint32_t field, ast_qualified_type t);
+/* an enumeration for -g alone, its enumerators made with
+   ast_builder_debug_enumerator; scoped: enum class */
+ast_qualified_type ast_builder_type_debug_enum(cc *c, const char *name,
+                                               size_t length, const char *scope,
+                                               size_t scope_length,
+                                               ast_qualified_type underlying,
+                                               const uint32_t *enumerators,
+                                               uint32_t count, bool scoped);
+uint32_t ast_builder_debug_enumerator(cc *c, const char *name, size_t length,
+                                      int64_t value);
 /* the namespaces a symbol is in, outermost first, "a::b"; an unnamed one is
    "?" */
 void ast_builder_symbol_debug_scope(cc *c, uint32_t s, const char *scope,

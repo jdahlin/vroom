@@ -281,6 +281,7 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         *slot = s;
         if (is_reference(x.type))
             ast_builder_symbol_debug_kind(c, s, reference_debug_kind(x.type));
+        ast_builder_symbol_debug_type(c, s, debug_type(x.type, at));
         gnu_attributes(e, s);
         return s;
     }
@@ -344,6 +345,10 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     s = ast_builder_symbol(c, kind, name.data(), name.size(), t, storage, flags,
                            0);
     *slot = s;
+    qualified_type declared = x.type;
+    if (x.kind == entity_kind::function)
+        declared = record(x.type).operand;
+    ast_builder_symbol_debug_type(c, s, debug_type(declared, at));
     if (x.kind == entity_kind::variable && is_reference(x.type))
         ast_builder_symbol_debug_kind(c, s, reference_debug_kind(x.type));
     /* (a member's scope is its class, which entries do not nest in yet) */
@@ -353,8 +358,16 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         debug_scope(e, scope.get());
         ast_builder_symbol_debug_scope(c, s, scope.data(), scope.size());
     }
+    /* -g: a class's member is declared in its class (complete: type()) */
+    if (ast_builder_debugging(c) && x.enclosing &&
+        analysis.entity_table[x.enclosing].kind == entity_kind::class_type &&
+        analysis.entity_table[x.enclosing].defined)
+        ast_builder_symbol_debug_class(
+            c, s, type(analysis.entity_table[x.enclosing].type, at));
     if (x.name) {
         owned_buffer identifier;
+        if (x.special == special_member::destructor)
+            vbuffer_string_append(identifier.get(), "~");
         spelling(e, identifier);
         ast_builder_symbol_debug_name(c, s, identifier.data(),
                                       identifier.size());
