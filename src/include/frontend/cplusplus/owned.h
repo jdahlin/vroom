@@ -22,7 +22,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common/asan.h"
 #include "common/buffer.h"
+#include "common/fail.h"
 
 namespace cplusplus
 {
@@ -34,7 +36,20 @@ inline size_t table_slot(size_t i)
     return i;
 }
 
-/* Index: the type operator[] takes */
+/* an element asked for that is not there: only the ASan build asks */
+inline void check_element(bool there)
+{
+#if VCC_ASAN
+    if (!there)
+        VBUG("index out of an array's bounds");
+#else
+    (void)there;
+#endif
+}
+
+/* Index: the type operator[] takes.  In an ASan build every subscript is
+   checked, and the room past the last element is poisoned, so a pointer
+   from data() that runs past the end is reported too. */
 template <typename T, typename Index = size_t> class owned_array
 {
     /* the elements are moved with realloc and never destroyed */
@@ -78,12 +93,15 @@ template <typename T, typename Index = size_t> class owned_array
             grown = capacity * 2;
         if (grown < n)
             grown = n;
+        /* (realloc copies the whole block) */
+        unpoison_room();
         T *p = static_cast<T *>(
             ::realloc(static_cast<void *>(elements), grown * sizeof(T)));
         if (!p)
             abort();
         elements = p;
         capacity = grown;
+        poison_room();
     }
     /* value may be one of this array's own elements, which reserve moves:
        copied before (std::vector's push_back allows the same) */
@@ -91,6 +109,7 @@ template <typename T, typename Index = size_t> class owned_array
     {
         T copy = value;
         reserve(count + 1);
+        unpoison(count, count + 1);
         elements[count] = copy;
         return elements[count++];
     }
@@ -98,6 +117,7 @@ template <typename T, typename Index = size_t> class owned_array
     T *extend(size_t n)
     {
         reserve(count + n);
+        unpoison(count, count + n);
         T *first = elements + count;
         count += n;
         return first;
@@ -106,27 +126,34 @@ template <typename T, typename Index = size_t> class owned_array
     void resize(size_t n)
     {
         reserve(n);
+        unpoison(count, n);
         count = n;
+        poison_room();
     }
     void clear()
     {
         count = 0;
+        poison_room();
     }
 
     T &operator[](Index i)
     {
+        check_element(table_slot(i) < count);
         return elements[table_slot(i)];
     }
     const T &operator[](Index i) const
     {
+        check_element(table_slot(i) < count);
         return elements[table_slot(i)];
     }
     T &back()
     {
+        check_element(count);
         return elements[count - 1];
     }
     const T &back() const
     {
+        check_element(count);
         return elements[count - 1];
     }
     T *data()
@@ -163,6 +190,22 @@ template <typename T, typename Index = size_t> class owned_array
     }
 
   private:
+    /* elements [from, to) may be used */
+    void unpoison(size_t from, size_t to)
+    {
+        if (to > from)
+            VASAN_UNPOISON(elements + from, (to - from) * sizeof(T));
+    }
+    void unpoison_room()
+    {
+        unpoison(count, capacity);
+    }
+    void poison_room()
+    {
+        if (capacity > count)
+            VASAN_POISON(elements + count, (capacity - count) * sizeof(T));
+    }
+
     T *elements = nullptr;
     size_t count = 0, capacity = 0;
 };

@@ -68,10 +68,12 @@ template <typename T, typename Index = size_t> class stable_array
 
     T &operator[](Index i)
     {
+        check_element(table_slot(i) < count);
         return elements[table_slot(i)];
     }
     const T &operator[](Index i) const
     {
+        check_element(table_slot(i) < count);
         return elements[table_slot(i)];
     }
     const T *data() const
