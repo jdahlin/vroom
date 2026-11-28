@@ -1226,10 +1226,11 @@ entity_index semantic_analysis::lexical_parent(entity_index s) const
 
 bool semantic_analysis::defined_by_friend(entity_index f) const
 {
-    for (const friend_definition &d : friend_definitions)
-        if (d.function == f)
-            return true;
-    return false;
+    friends_by_function.update(friend_definitions,
+                               [](const friend_definition &d) {
+                                   return static_cast<size_t>(d.function);
+                               });
+    return friends_by_function.first(f) != 0;
 }
 
 /* the function a friend definition n in class c defines (a class

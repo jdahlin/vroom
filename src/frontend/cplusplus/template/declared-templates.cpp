@@ -278,8 +278,15 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
          s.is(s[1 + gnu], syntax_kind::declarator)))
         return function_template_definition(t, s);
     char shape[160];
-    snprintf(shape, sizeof shape, "%u parts, part 1 is %s", s.size(),
-             syntax_kind_name(s[1 + gnu].kind()));
+    /* (that part may be missing, or a token, which has no kind) */
+    const char *part = "none";
+    if (1 + gnu < s.size()) {
+        if (s[1 + gnu].is_token())
+            part = "a token";
+        else
+            part = syntax_kind_name(s[1 + gnu].kind());
+    }
+    snprintf(shape, sizeof shape, "%u parts, part 1 is %s", s.size(), part);
     return not_supported_because(t, "temp.class", shape);
 }
 
@@ -562,7 +569,7 @@ analysis_result semantic_analysis::declare_template_parameters(
         if (form.template_template) {
             e = entity_table.make(entity_kind::template_entity, name, scope);
             template_templates.append(static_cast<uint32_t>(i));
-            template_parameter_entities[first + i] = e;
+            set_template_parameter_entity(first + static_cast<uint32_t>(i), e);
             VTRY(rr, template_template_record(n, node, e, scope));
         } else if (form.type) {
             e = entity_table.make(entity_kind::typedef_name, name, scope);
@@ -652,7 +659,7 @@ analysis_result semantic_analysis::declare_template_parameters(
             entity_table[e].instantiation = index + 1;
         if (name)
             entity_table.bind(scope, name, e);
-        template_parameter_entities[first + i] = e;
+        set_template_parameter_entity(first + static_cast<uint32_t>(i), e);
     }
     if (template_templates.empty())
         return analysis_result::well_formed;
@@ -1507,11 +1514,13 @@ uint32_t semantic_analysis::own_pack_parameter(uint32_t name) const
     for (entity_index s = current_scope;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
         if (e) {
-            for (size_t i = template_parameter_entities.size(); i-- > 0;)
-                if (template_parameter_entities[i] == e &&
-                    template_parameter_is_pack(static_cast<uint32_t>(i)))
-                    return static_cast<uint32_t>(i + 1);
-            return 0;
+            /* the last slot holding e that is a pack's */
+            uint32_t found = 0;
+            for (uint32_t k = first_parameter_slot(e); k;
+                 k = parameter_slot_next[k - 1])
+                if (k > found && template_parameter_is_pack(k - 1))
+                    found = k;
+            return found;
         }
         if (!s)
             return 0;
