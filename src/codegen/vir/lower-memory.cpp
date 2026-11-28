@@ -14,7 +14,6 @@ VPRIV void virbuild_slot(codegen_context *e, int64_t off, uint64_t size,
     virbuild_context *V = e->vir_builder;
     uint32_t n = 0;
 
-    (void)kind;
     if (!size)
         size = 1;
     /* the new slot owns [off, off+size): earlier owners of an overlapping range are no longer current */
@@ -30,6 +29,10 @@ VPRIV void virbuild_slot(codegen_context *e, int64_t off, uint64_t size,
     V->slots[V->slot_count] =
         VCC_LITERAL(virbuild_preir_slot, off, size, align ? align : 1, 0, 0, 0,
                     VIRBUILD_BLOCK_NONE, 0, 0);
+    /* -O0: a local's or parameter's value is where a debugger looks for it, so its slot is
+       never promoted, forwarded from or written less than the source does */
+    V->slots[V->slot_count].is_pinned =
+        !e->unit->options->opt && kind == WALK_SLOT_LOCAL;
     VIRBUILD_ARRAY_GROW(V->active_slots, V->active_slot_count,
                         V->active_slot_capacity, 1);
     V->active_slots[V->active_slot_count++] = V->slot_count++;
@@ -179,8 +182,9 @@ VPRIV void virbuild_load(codegen_context *e, int rd, const codegen_lvalue *l,
         size = 4, ty = VIR_TYPE_F32;
         a = virbuild_address_make(e, l, 4, &slot, &rel);
     }
-    if (slot != VIRBUILD_BLOCK_NONE &&
-        !e->volatile_untag_depth) { /* the value last stored here, in this block (not volatile) */
+    if (slot != VIRBUILD_BLOCK_NONE && !e->volatile_untag_depth &&
+        !V->slots[slot]
+             .is_pinned) { /* the value last stored here, in this block (not volatile) */
         for (uint32_t i = V->store_count; i-- > 0;) {
             virbuild_store_entry *s = &V->stores[i];
 
@@ -709,7 +713,9 @@ VPRIV bool virbuild_local(codegen_context *e, uint32_t s, codegen_lvalue *l)
     ast_qualified_type t = c->syms[s].ty;
     uint32_t ty, inst = e->walk_state->instance, lj;
 
-    if (!em_local_eligible(e, s))
+    /* -O0: every local and parameter stays in its frame slot, as clang's (a debugger finds
+       it there, doc/PLAN-debuginfo.md) */
+    if (!e->unit->options->opt || !em_local_eligible(e, s))
         return false;
     if (codegen_type_is_pointer(c, t))
         ty = VIR_TYPE_PTR;
