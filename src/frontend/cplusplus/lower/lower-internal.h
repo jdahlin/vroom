@@ -511,6 +511,8 @@ class c_lowering
     ast_qualified_type pointee_type(qualified_type t, token_index at);
     ast_qualified_type entity_type(entity_index e, token_index at);
     bool is_reference(qualified_type t) const;
+    /* -g: AST_DEBUG_REFERENCE or AST_DEBUG_RVALUE_REFERENCE */
+    int reference_debug_kind(qualified_type t) const;
     bool without_linkage(qualified_type t) const;
     /* the function whose definition a block-scope entity is in, 0 if none */
     entity_index enclosing_function(entity_index e) const

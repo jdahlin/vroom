@@ -77,6 +77,13 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
     }
 }
 
+int c_lowering::reference_debug_kind(qualified_type t) const
+{
+    if (record(t).kind == type_kind::rvalue_reference)
+        return AST_DEBUG_RVALUE_REFERENCE;
+    return AST_DEBUG_REFERENCE;
+}
+
 bool c_lowering::is_reference(qualified_type t) const
 {
     type_kind k = record(t).kind;
@@ -482,6 +489,22 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
     ast_builder_type_record_complete(
         c, made, fields.data(), names.data(), lengths.data(), aligned.data(),
         packed.data(), widths.data(), static_cast<uint32_t>(fields.size()));
+    /* -g: what the lowering made up (padding, virtual bases' bytes) is no
+       member; then each member says what it is */
+    for (uint32_t f = 0; f < fields.size(); f++)
+        ast_builder_type_record_debug_kind(c, made, f, AST_DEBUG_HIDDEN, 0);
+    for (uint32_t i = 0; i < member_order.size(); i++) {
+        const entity &m = analysis.entity_table[member_order[i]];
+        int kind = AST_DEBUG_PLAIN;
+        ast_qualified_type base = 0;
+        if (m.base_subobject) {
+            kind = AST_DEBUG_BASE;
+            base = type(m.type, at);
+        } else if (is_reference(m.type))
+            kind = reference_debug_kind(m.type);
+        ast_builder_type_record_debug_kind(c, made, c_fields[member_order[i]],
+                                           kind, base);
+    }
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
         const entity &m = analysis.entity_table[member];
