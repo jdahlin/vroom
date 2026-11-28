@@ -89,6 +89,7 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_ffsll", signature, 3, integer),
     ROW("__builtin_ffs", library, 3, integer),
     ROW("__builtin_expect", signature, 11, integer),
+    ROW("__builtin_assume", signature, 0, assume),
     ROW("__builtin_expect_with_probability", signature, 11, integer),
     ROW("__builtin_abs", library, 10, integer),
     ROW("__builtin_labs", library, 10, integer),

@@ -98,6 +98,8 @@ enum vfold_op {
     /* the overflow checks and the add-with-carry */
     vfold_overflow,
     vfold_add_carry,
+    /* clang's __builtin_assume: no value, the argument not evaluated */
+    vfold_assume,
 };
 
 /* the languages that evaluate a row (VFOLD_NEITHER: a builtin that is

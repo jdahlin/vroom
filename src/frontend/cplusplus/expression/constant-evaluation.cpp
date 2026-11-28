@@ -4059,6 +4059,11 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
             return evaluate_floating_builtin(state, called, x, v);
         case builtin_fold::identity:
             return evaluate_node(state, semantics.items(x.first)[0], v);
+        case builtin_fold::assume:
+            /* [ext:gnu_library_builtins] a constant expression whatever the
+               condition says: clang does not evaluate the argument */
+            v = constant_value();
+            return constness::constant;
         case builtin_fold::bswap:
             return evaluate_bswap(state, x, v);
         case builtin_fold::stdc_bits:

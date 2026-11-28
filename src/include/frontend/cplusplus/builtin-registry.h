@@ -99,6 +99,8 @@ enum class builtin_fold : uint8_t {
     /* __builtin_align_up, _down, is_aligned of an integer (which as the
        align form) */
     align,
+    /* __builtin_assume: a void constant expression */
+    assume,
 };
 
 /* the operations of the stdc_bits form, [stdbit.h.syn] (C23 7.18): the
