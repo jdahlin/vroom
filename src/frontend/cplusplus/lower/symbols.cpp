@@ -339,6 +339,13 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     *slot = s;
     if (x.kind == entity_kind::variable && is_reference(x.type))
         ast_builder_symbol_debug_kind(c, s, reference_debug_kind(x.type));
+    /* (a member's scope is its class, which entries do not nest in yet) */
+    if (x.enclosing && analysis.entity_table[x.enclosing].kind ==
+                           entity_kind::namespace_entity) {
+        owned_buffer scope;
+        debug_scope(e, scope.get());
+        ast_builder_symbol_debug_scope(c, s, scope.data(), scope.size());
+    }
     if (x.name) {
         owned_buffer identifier;
         spelling(e, identifier);

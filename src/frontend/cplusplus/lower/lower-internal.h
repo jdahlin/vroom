@@ -511,6 +511,11 @@ class c_lowering
     ast_qualified_type pointee_type(qualified_type t, token_index at);
     ast_qualified_type entity_type(entity_index e, token_index at);
     bool is_reference(qualified_type t) const;
+    /* -g (debug-names.cpp) */
+    void debug_scope(entity_index e, vbuffer *out) const;
+    void debug_class_name(entity_index e, vbuffer *out);
+    void debug_type_name(qualified_type t, vbuffer *out);
+    void debug_value_name(qualified_type t, uint64_t value, vbuffer *out) const;
     /* -g: AST_DEBUG_REFERENCE or AST_DEBUG_RVALUE_REFERENCE */
     int reference_debug_kind(qualified_type t) const;
     bool without_linkage(qualified_type t) const;

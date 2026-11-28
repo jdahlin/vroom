@@ -40,10 +40,12 @@ registers; D3 changes that and measures run time and compile time.
 - **D4a, C++ variables** (done): the C entries for C++ too: parameters,
   `this`, locals and globals at `-O0`; classes with members, base classes
   (`DW_TAG_inheritance`) and references.
-- **D4b, C++ names and types**: namespaces and classes as scopes (a global is
-  found by its unqualified name only), template arguments in class names
-  (every `Box<T>` is `Box`), enumerations (now their integer type), member
-  functions and static members in their class, virtual bases.
+- **D4b, C++ names** (done): namespaces as `DW_TAG_namespace` around
+  functions, globals and classes; a class's name with its template arguments
+  (types, integers and packs of them; other arguments are `?`) and the
+  classes around it.
+- **D4c**: enumerations (now their integer type), member functions and static
+  members in their class, virtual bases.
 - **D5, optimized code**: location lists at `-O1` and up; until then a
   variable there is optimized out.
 

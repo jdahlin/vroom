@@ -263,6 +263,13 @@ ast_qualified_type c_lowering::class_tag(entity_index e)
         vbuffer_append(name.get(), s, length);
     }
     records[e] = ast_builder_type_record(c, name.data(), name.size(), x.union_);
+    ast_qualified_type made = records[e];
+    owned_buffer described, scope;
+    debug_class_name(e, described.get());
+    debug_scope(e, scope.get());
+    ast_builder_type_record_debug_name(c, made, described.data(),
+                                       described.size(), scope.data(),
+                                       scope.size());
     return records[e];
 }
 

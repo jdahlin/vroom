@@ -76,6 +76,14 @@ void ast_builder_node_location(cc *c, uint32_t n, uint32_t location);
 /* the source's identifier of a symbol named by its linkage name, for the
    function's debug entry */
 void ast_builder_symbol_debug_kind(cc *c, uint32_t s, int kind);
+/* the namespaces a symbol is in, outermost first, "a::b"; an unnamed one is
+   "?" */
+void ast_builder_symbol_debug_scope(cc *c, uint32_t s, const char *scope,
+                                    size_t length);
+/* a class's name with its template arguments, and its namespaces */
+void ast_builder_type_record_debug_name(cc *c, ast_qualified_type record,
+                                        const char *name, size_t length,
+                                        const char *scope, size_t scope_length);
 void ast_builder_type_record_debug_kind(cc *c, ast_qualified_type record,
                                         uint32_t field, int kind,
                                         ast_qualified_type base);

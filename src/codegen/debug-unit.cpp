@@ -29,6 +29,7 @@ enum {
     DEBUG_TAG_ENUMERATOR = 0x28,
     DEBUG_TAG_SUBPROGRAM = 0x2e,
     DEBUG_TAG_VARIABLE = 0x34,
+    DEBUG_TAG_NAMESPACE = 0x39,
     DEBUG_TAG_VOLATILE_TYPE = 0x35,
     DEBUG_TAG_RESTRICT_TYPE = 0x37,
     DEBUG_TAG_UNSPECIFIED_TYPE = 0x3b,
@@ -268,6 +269,41 @@ static void debug_children_end(debug_writer *w)
     vtext_string_append(w->b, "\t.byte\t0\n");
 }
 
+/* opens the namespace entries of scope ("a::b", an unnamed one "?"; 0: none), returning how many
+   to close after the entry inside them */
+static uint32_t debug_scope_open(debug_writer *w, uint32_t scope)
+{
+    const char *p;
+    uint32_t depth = 0;
+
+    if (!scope)
+        return 0;
+    p = w->c->strs[scope - 1].s;
+    while (*p) {
+        const char *end = strstr(p, "::");
+        size_t length = strlen(p);
+
+        if (end)
+            length = (size_t)(end - p);
+        debug_die d = debug_die_new(DEBUG_TAG_NAMESPACE, true);
+
+        if (!(length == 1 && *p == '?'))
+            debug_die_text(&d, DEBUG_AT_NAME, p, length);
+        debug_die_write(w, &d);
+        depth++;
+        p += length;
+        if (end)
+            p += 2;
+    }
+    return depth;
+}
+
+static void debug_scope_close(debug_writer *w, uint32_t depth)
+{
+    while (depth--)
+        debug_children_end(w);
+}
+
 /* the source's name of a variable: C++'s identifier where its symbol is mangled */
 static void debug_die_source_name(cc *c, debug_die *d, uint32_t s)
 {
@@ -424,7 +460,11 @@ static void debug_record_write(debug_writer *w, ast_qualified_type t)
         kind = DEBUG_TAG_UNION_TYPE;
     debug_die d = debug_die_new(kind, complete);
 
-    debug_die_identifier(&d, r->name);
+    if (r->debug_name)
+        debug_die_text(&d, DEBUG_AT_NAME, c->strs[r->debug_name - 1].s,
+                       strlen(c->strs[r->debug_name - 1].s));
+    else
+        debug_die_identifier(&d, r->name);
     if (complete)
         debug_die_number(&d, DEBUG_AT_BYTE_SIZE, DEBUG_FORM_UDATA, r->size);
     else
@@ -618,6 +658,7 @@ static void debug_global_write(debug_writer *w, uint32_t s, bool coff)
     debug_die d = debug_die_new(DEBUG_TAG_VARIABLE, false);
 
     const attrs *a = codegen_symbol_attributes(c, s);
+    uint32_t depth = debug_scope_open(w, a->debug_scope);
 
     debug_die_source_name(c, &d, s);
     debug_die_declared(w, &d, y->ty, debug_typedef_of(c, y->tdef, y->ty),
@@ -626,6 +667,7 @@ static void debug_global_write(debug_writer *w, uint32_t s, bool coff)
                      y->sc != AST_STORAGE_STATIC);
     debug_die_number(&d, DEBUG_AT_LOCATION, DEBUG_FORM_SYMBOL, s);
     debug_die_write(w, &d);
+    debug_scope_close(w, depth);
 }
 
 /* the entries of every type referred to, those they refer to too */
@@ -634,9 +676,18 @@ static void debug_types_write(debug_writer *w)
     for (uint32_t i = 0; i < w->type_count; i++) {
         debug_type t = w->types[i];
 
+        const ctype *y = T(w->c, t.type);
+        uint32_t depth = 0;
+
+        /* (a class's entry is in its namespaces, its label on the entry) */
+        if (!t.reference && !t.tdef && !AST_QUALIFIED_TYPE_QUALIFIERS(t.type) &&
+            !(y->flags & AST_TYPE_FLAG_ATOMIC) &&
+            (y->kind == AST_TYPE_STRUCT || y->kind == AST_TYPE_UNION))
+            depth = debug_scope_open(w, w->c->tags[y->aux].debug_scope);
         vtext_format_append(w->b, ".Ldbg_t%u:\n", i + 1);
         w->writing = i;
         debug_type_write(w, t.type, t.tdef);
+        debug_scope_close(w, depth);
     }
 }
 
@@ -747,6 +798,8 @@ static void debug_function_append(debug_writer *w, uint32_t function,
     if (frame)
         debug_die_number(&d, DEBUG_AT_FRAME_BASE, DEBUG_FORM_FRAME_REGISTER,
                          frame->frame_register);
+    uint32_t depth = debug_scope_open(w, a->debug_scope);
+
     debug_die_write(w, &d);
     for (uint32_t i = 0; i < parameters; i++)
         debug_object_write(w, DEBUG_TAG_FORMAL_PARAMETER,
@@ -763,6 +816,7 @@ static void debug_function_append(debug_writer *w, uint32_t function,
                                frame);
     if (d.children)
         debug_children_end(w);
+    debug_scope_close(w, depth);
 }
 
 VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
