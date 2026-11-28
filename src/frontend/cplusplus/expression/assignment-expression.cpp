@@ -381,7 +381,7 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
             n, "class.pre",
             "an assignment to a class type whose entity is not a class");
     require_complete(c);
-    if (!entity_table[c].size)
+    if (!entity_table[c].details().size)
         return ill_formed(n,
                           "if the left operand is of class type, the class "
                           "shall be complete",

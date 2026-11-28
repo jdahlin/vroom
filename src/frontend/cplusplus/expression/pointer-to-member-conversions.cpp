@@ -84,7 +84,7 @@ analysis_result semantic_analysis::member_pointer_conversion(
          !qualification_convertible(via, to)) ||
         entity_table[d].kind != entity_kind::class_type ||
         entity_table[b].kind != entity_kind::class_type ||
-        !entity_table[d].size)
+        !entity_table[d].details().size)
         return not_supported_because(at, "conv.mem",
                                      "a member pointer conversion to another "
                                      "member type or incomplete class");
@@ -147,7 +147,7 @@ analysis_result semantic_analysis::member_pointer_along_path(
     owned_array<entity_index> steps;
     VTRY(r, accessible_path(at, derived, base, access, "conv.mem", steps));
     for (entity_index step : steps)
-        offset += entity_table[step].offset;
+        offset += entity_table[step].details().offset;
     m.type = qualified_type::make(type.unqualified(), cv_none);
     if (m.evaluation == constness::constant)
         m.evaluation = constness::unknown;

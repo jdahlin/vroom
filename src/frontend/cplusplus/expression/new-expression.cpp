@@ -241,7 +241,7 @@ analysis_result semantic_analysis::allocation_functions(
     uint32_t name = allocation_function_name(kind);
     in_class = false;
     require_complete(c);
-    if (c && !class_complete && !entity_table[c].size &&
+    if (c && !class_complete && !entity_table[c].details().size &&
         allocation_names_spelled() != allocation_declarations_analysed)
         /* Before its layout, the class may declare one analysis has not
            followed. A class with a size has had its members and bases
@@ -268,7 +268,7 @@ analysis_result semantic_analysis::allocation_functions(
                 return not_supported_because(
                     n, "class.free",
                     "a member allocation function name that is not a function");
-            if (entity_table[found.entity].member_templates) {
+            if (entity_table[found.entity].details().member_templates) {
                 /* [class.free]/1: its member function templates are
                    candidates too ([expr.new]/21), by deduction from the
                    arguments of the new-expression; not for a delete */
@@ -483,9 +483,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                           "destructor of the elements is deleted",
                           "class.dtor");
     bool elements =
-        value_initialized ||
-        (array && c &&
-         (entity_table[c].first_constructor || destroys(c) || cookie));
+        value_initialized || (array && c &&
+                              (entity_table[c].details().first_constructor ||
+                               destroys(c) || cookie));
     if (array && bound) {
         /* [expr.new]/9: "If the expression in a noptr-new-declarator is
            present, it is implicitly converted to std::size_t." */
@@ -651,7 +651,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         /* [temp.inst]/4: the specialization chosen is referenced: its
            definition is instantiated */
         const struct function_template ft =
-            function_templates[candidates[chosen].template_index - 1];
+            function_templates[candidates[chosen].template_index];
         VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
                                 ft.parameter_count, function));
     }
@@ -695,7 +695,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             return not_supported_because(n, "class.default.ctor",
                                          "a default-initialized new of a class "
                                          "with a deleted default constructor");
-        if (c && entity_table[c].first_constructor) {
+        if (c && entity_table[c].details().first_constructor) {
             r = construct(n, type, none, object.node, value);
         } else if (type.cv() & cv_const) {
             bool constructible = c && const_default_constructible(c);
@@ -735,8 +735,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             VTRY_SET(r, list_initialization(written[0], type, false, value));
         } else if (braced &&
                    (!c ||
-                    (!entity_table[c].first_constructor &&
-                     !entity_table[c].constructor_templates) ||
+                    (!entity_table[c].details().first_constructor &&
+                     !entity_table[c].details().constructor_templates) ||
                     is_aggregate(c) ||
                     (list.size() == 1 &&
                      written[0].end_token() <= written[0].first_token() + 2 &&
@@ -751,7 +751,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             /* [dcl.init]/11: "An object whose initializer is an empty set
                of parentheses, i.e., (), shall be value-initialized."; /8:
                (8.3) "Otherwise, the object is zero-initialized." */
-            if (c && entity_table[c].first_constructor) {
+            if (c && entity_table[c].details().first_constructor) {
                 VTRY_SET(r, construct(n, type, none, object.node, value));
                 semantic_node &initialization = semantics[value.node];
                 if (initialization.kind != semantic_kind::construct &&
@@ -763,10 +763,10 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                 /* [dcl.init]/8.2: value-initialization zeroes the object
                    before calling a non-user-provided default constructor. */
                 if (initialization.kind == semantic_kind::construct &&
-                    (entity_table[entity_index_in(initialization.b)].implicit ||
+                    (entity_table[initialization.entity_b()].implicit ||
                      entity_table[c].defaulted_default_constructor))
                     initialization.op = 1;
-            } else if (c && (entity_table[c].constructor_templates ||
+            } else if (c && (entity_table[c].details().constructor_templates ||
                              abstract_class(type))) {
                 return not_supported_because(
                     n, "dcl.init",
@@ -784,8 +784,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             /* (a class whose constructors are templates only, as one
                whose implicit copy constructor is not declared:
                libc++'s __shared_ptr_emplace) */
-            if (c && (entity_table[c].first_constructor ||
-                      entity_table[c].constructor_templates))
+            if (c && (entity_table[c].details().first_constructor ||
+                      entity_table[c].details().constructor_templates))
                 r = construct(n, type, list, object.node, value, false,
                               &written);
             else if (list.size() == 1)

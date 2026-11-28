@@ -72,6 +72,37 @@ name_kind parser::declared_kind(name_kind plain)
 }
 
 /*
+ * [temp.names]/3: whether the < at lookahead i is the operator, as the token
+ * before it names no template: after a literal, as in
+ * R<0 < N<T>::value, T>; after a ')' that is not operator()'s, as in
+ * C<sizeof(T) < 4>; after an unqualified name declared as a variable or
+ * enumerator, as in C<x < 4>.
+ */
+bool parser::less_than_operator(unsigned i)
+{
+    const token &before = peek(i - 1);
+    if (before.kind == token_kind::literal)
+        return true;
+    if (is_operator(before, preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+        return !(i >= 3 &&
+                 is_operator(peek(i - 2),
+                             preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+                 at(standard_keyword::operator_, i - 3));
+    if (!at_identifier(i - 1))
+        return false;
+    if (i >= 2 &&
+        (is_operator(peek(i - 2), preprocessing_op_or_punc::COLON_COLON) ||
+         is_operator(peek(i - 2), preprocessing_op_or_punc::DOT) ||
+         is_operator(peek(i - 2), preprocessing_op_or_punc::ARROW) ||
+         at(standard_keyword::template_, i - 2)))
+        return false;
+    uint32_t name = tokens.identifier(position + i - 1);
+    return names.lookup_unqualified(name) == name_kind::other &&
+           !names.declared_as_member_template(name) &&
+           !names.declared_as_member_variable_template(name);
+}
+
+/*
  * The lookahead after a template-argument-list's '>', without parsing it:
  * its '<' and '>' counted outside the brackets nested in it, a '>>' as two
  * '>' ([temp.names]/3) from C++11 on.  This is how far a name that is a
@@ -94,9 +125,7 @@ unsigned parser::angle_group_end(unsigned ahead)
             return 0;
         const token &t = peek(i);
         if (is_operator(t, preprocessing_op_or_punc::LESS)) {
-            /* a < after a literal is the less-than operator, as in
-               R<0 < N<T>::value, T>: it opens no group */
-            if (i == ahead || peek(i - 1).kind != token_kind::literal)
+            if (i == ahead || !less_than_operator(i))
                 depth++;
         } else if (is_operator(t, preprocessing_op_or_punc::GREATER)) {
             if (!--depth)

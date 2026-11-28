@@ -309,7 +309,7 @@ entity_index semantic_analysis::value_parameter_named(SyntaxElement e)
     if (!named)
         named = x.unknown_entity;
     if (named && entity_table[named].kind == entity_kind::none &&
-        entity_table[named].instantiation &&
+        entity_table[named].template_record &&
         !entity_table[named].held_by_template)
         return named;
     return 0;
@@ -428,7 +428,8 @@ uint32_t semantic_analysis::expression_structure(SyntaxElement e)
             return expression_node_make(tag_parameter,
                                         entity_table[named].value, 0, 0);
         lookup_result x = lookup_unqualified(identifier, lookup_filter::any);
-        if (x.entity && !entity_table[x.entity].instantiation)
+        if (x.entity && !entity_table[x.entity].instantiation &&
+            !entity_table[x.entity].template_record)
             return expression_node_make(tag_entity, 0, x.entity.index(), 0);
         return expression_node_make(tag_identifier, 0, identifier, 0);
     }
@@ -660,7 +661,7 @@ semantic_analysis::variable_length_declaration(SyntaxRef declaration,
         /* the elements would be constructed and destroyed in a loop at
            run time */
         if (!is_class_entity(record) || destroys(record) ||
-            (entity_table[record].first_constructor &&
+            (entity_table[record].details().first_constructor &&
              !trivial_defaulted_default_constructor(record)))
             return not_supported_because(
                 declaration, "dcl.init",
@@ -1170,7 +1171,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                 entity_table.make(entity_kind::none, name, current_scope);
             entity_table[e].held_by_template = by_template;
             note_held(e);
-            entity_table[e].hidden_type = found;
+            entity_table[e].set(&entity_details::hidden_type, found);
             entity_table.bind(current_scope, name, e);
             continue;
         }
@@ -1242,7 +1243,7 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
     }
     require_complete(scope.entity);
     const entity &c = entity_table[scope.entity];
-    if (c.kind != entity_kind::class_type || !c.size)
+    if (c.kind != entity_kind::class_type || !c.details().size)
         return not_supported_because(
             nested, "basic.lookup.qual",
             "a declarator qualified by an incomplete or non-class type");
@@ -1341,10 +1342,6 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             /* [temp.expl.spec]/1: a variable template's specialization
                named by a qualified template-id */
             VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
-            if (!m.qualified_namespace)
-                return not_supported_because(
-                    n, "dcl.meaning",
-                    "a template-id not qualified by a namespace");
             declarator_template_id = false;
             m.template_id = q[1];
             m.has_id = true;

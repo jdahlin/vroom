@@ -72,6 +72,30 @@ static triviality assignment_triviality(const semantic_analysis &a,
     return triviality::trivial;
 }
 
+/* [class.copy.assign]/12, [dcl.stc]/9: a mutable member of a const source
+   is not const, so a template operator=(T &) of its class binds it better
+   than the implicit X &operator=(const X &) does: no trivial assignment */
+bool semantic_analysis::mutable_member_assigns_by_template(entity_index c)
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (!m.mutable_member)
+            continue;
+        entity_index k = element_class(m.type);
+        if (!k)
+            continue;
+        lookup_result found =
+            lookup_qualified(k, operator_name(preprocessing_op_or_punc::EQUAL),
+                             lookup_filter::any);
+        /* (a member template, and a name analysis does not follow, are
+           lookup's unknown entity) */
+        if (found.unknown_entity)
+            return true;
+    }
+    return false;
+}
+
 /* ( type-id , type-id ): which is 0 __is_assignable, 1
    __is_nothrow_assignable, 2 __is_trivially_assignable */
 analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
@@ -103,7 +127,7 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
     if (!void_operand && !unassignable) {
         if (lk.kind == type_kind::class_type) {
             require_complete(lk.entity);
-            if (!entity_table[lk.entity].size)
+            if (!entity_table[lk.entity].details().size)
                 return not_supported_because(n, "expr.ass",
                                              "an assignability trait whose "
                                              "left operand class has no size");
@@ -136,7 +160,12 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
                         n, "meta.unary.prop",
                         "a trivial-assignment trait whose assignment's "
                         "triviality is unknown");
-                value = k == triviality::trivial;
+                value = k == triviality::trivial &&
+                        !(lk.kind == type_kind::class_type &&
+                          left.type.unqualified() == right.type.unqualified() &&
+                          type_table[u.unqualified()].kind ==
+                              type_kind::lvalue_reference &&
+                          mutable_member_assigns_by_template(lk.entity));
             }
         } else if (which == 2 && lk.kind == type_kind::class_type &&
                    left.type.unqualified() == right.type.unqualified() &&
@@ -196,15 +225,16 @@ semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
             type_table[from.type.unqualified()].kind == type_kind::class_type) {
             require_complete(type_table[from.type.unqualified()].entity);
             entity_index uc = type_table[from.type.unqualified()].entity;
-            if (!entity_table[uc].size)
+            if (!entity_table[uc].details().size)
                 return not_supported_because(n, "dcl.init.ref",
                                              "a reference-temporary trait from "
                                              "a class that has no size");
             /* before C++17 a class prvalue is copied or moved: not
                followed for a class that cannot be */
             if (!u_reference)
-                for (entity_index k = entity_table[uc].first_constructor; k;
-                     k = entity_table[k].next_constructor)
+                for (entity_index k =
+                         entity_table[uc].details().first_constructor;
+                     k; k = entity_table[k].details().next_constructor)
                     if (entity_table[k].deleted &&
                         copy_or_move_constructor(uc, k))
                         return not_supported_because(
@@ -217,7 +247,7 @@ semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
             qualified_type target_referred =
                 type_table[t.unqualified()].operand;
             for (entity_index f = own_conversion_functions(uc); f;
-                 f = entity_table[f].next_overload) {
+                 f = entity_table[f].details().next_overload) {
                 if (which != 2 && entity_table[f].explicit_) {
                     qualified_type ret =
                         type_table[entity_table[f].type.unqualified()].operand;

@@ -50,6 +50,11 @@ node_index parser::typename_specifier()
        dependent nested-name-specifier clang requires template ([temp.names]
        /4 of C++20; P1787R6 later assumes it) */
     bool arguments = template_keyword;
+    /* what a name the parser can look up names: a typedef-name of this
+       type names its members too (typedef typename std::list<V> List;) */
+    scope_index region = 0;
+    if (known)
+        names.lookup_qualified(scope, tokens.identifier(name_first), &region);
     if (!arguments && at(preprocessing_op_or_punc::LESS)) {
         if (!known)
             return violates("template before a dependent template-name",
@@ -68,6 +73,7 @@ node_index parser::typename_specifier()
     /* the type is one the parser cannot look into: a dependent one, as far
        as what follows is concerned */
     names.dependent_found++;
+    last_type_region = region;
     return finish_node(syntax_kind::typename_specifier, mark, first);
 }
 

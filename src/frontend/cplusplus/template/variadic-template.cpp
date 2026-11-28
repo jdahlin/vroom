@@ -142,8 +142,8 @@ bool semantic_analysis::template_head_list(
 bool semantic_analysis::template_template_parameter(entity_index e) const
 {
     const entity &x = entity_table[e];
-    return x.kind == entity_kind::template_entity && x.instantiation &&
-           function_templates[x.instantiation - 1].is_parameter;
+    return x.kind == entity_kind::template_entity && x.template_record &&
+           function_templates[x.template_record].is_parameter;
 }
 
 /* [temp.param]/18: "If a template-parameter is a type-parameter with an
@@ -161,8 +161,7 @@ semantic_analysis::template_parameter_kind(entity_index t, uint32_t i,
                                            qualified_type &value_type) const
 {
     uint32_t index =
-        function_templates[entity_table[t].instantiation - 1].first_parameter +
-        i;
+        function_templates[entity_table[t].template_record].first_parameter + i;
     pack = template_parameter_is_pack(index);
     entity_index e = template_parameter_entities[index];
     value_type = qualified_type();
@@ -180,12 +179,12 @@ bool semantic_analysis::template_argument_declaration(
 {
     declared = 0;
     entity_index parameter = template_parameter_entities
-        [function_templates[entity_table[t].instantiation - 1].first_parameter +
+        [function_templates[entity_table[t].template_record].first_parameter +
          i];
     const entity &p = entity_table[parameter];
     const entity &a = entity_table[named];
-    if (p.kind != entity_kind::template_entity || !p.instantiation ||
-        a.kind != entity_kind::template_entity || !a.instantiation)
+    if (p.kind != entity_kind::template_entity || !p.template_record ||
+        a.kind != entity_kind::template_entity || !a.template_record)
         return false;
     uint32_t count = template_parameter_count(parameter);
     bool same = count == template_parameter_count(named);
@@ -576,8 +575,8 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
     }
     /* [over.match.oper]/1: operands of class or enumeration type may call
        operator functions, each step of the fold as a binary expression;
-       not for the comma, an assignment, or a comparison ([impl.clang]
-       rejects some of those by default) */
+       the comma's own step below; not for an assignment or a comparison ([impl.clang] rejects some of
+       those by default) */
     bool as_binary =
         !comma &&
         compound_assignment_operator(op) == preprocessing_op_or_punc::count &&
@@ -591,7 +590,7 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
     auto followed = [&](const expression_meaning &x) {
         type_kind k = type_table[x.type.unqualified()].kind;
         if (k == type_kind::class_type || k == type_kind::enumeration)
-            return as_binary;
+            return as_binary || comma;
         return k != type_kind::none;
     };
     for (const expression_meaning &x : operands)
@@ -640,6 +639,17 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
             return binary_of(n, at, op, pattern, lhs, pattern, rhs, out);
         if (!comma)
             return builtin_binary(n, at, op, lhs, rhs, out);
+        /* [over.match.oper]/9: an operator, with no viable function is
+           the built-in one */
+        bool handled = false;
+        VTRY(overloaded, binary_operator_function(n, at, op, pattern, lhs,
+                                                  pattern, rhs, handled, out));
+        if (handled)
+            return analysis_result::well_formed;
+        if (!unevaluated && destroyed_temporary(lhs))
+            return not_supported_because(n, "class.temporary",
+                                         "a comma whose discarded left operand "
+                                         "is a destroyed temporary");
         /* [expr.comma]/1: "the lhs expression is a discarded-value
            expression"; the result is the rhs operand's */
         out = rhs;

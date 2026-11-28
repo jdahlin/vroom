@@ -140,6 +140,29 @@ static SyntaxElement last_component(SyntaxElement nested, bool &earlier_id)
     return last;
 }
 
+/* template<...> friend class-key C<...>::identifier ; where C's arguments
+   name no parameter of the head: the member class template of C */
+analysis_result
+semantic_analysis::friend_member_template(entity_index c, TemplateDeclaration n,
+                                          SyntaxElement elaborated)
+{
+    nominated_scope ns;
+    VTRY(r, nested_name_specifier(elaborated[1].index(), ns));
+    entity_index prior = 0;
+    if (ns.entity && !ns.dependent && elaborated.size() == 3 &&
+        elaborated[2].is_identifier() &&
+        entity_table[ns.entity].kind == entity_kind::class_type)
+        prior = entity_table.find(ns.entity,
+                                  tokens.identifier(elaborated[2].token()));
+    if (!prior || !class_template_of(prior))
+        return not_supported_because(n, "temp.friend",
+                                     "a friend member template of a class "
+                                     "that declares no class template of its "
+                                     "name");
+    befriend_template(c, function_templates[class_template_of(prior)].entity);
+    return analysis_result::well_formed;
+}
+
 /*
  * template<...> friend class-key nested-name-specifier identifier ;
  *
@@ -198,7 +221,7 @@ analysis_result semantic_analysis::qualified_friend_class_template(
             found = q.unknown_entity;
         if (found && class_template_of(found)) {
             befriend_template(
-                c, function_templates[class_template_of(found) - 1].entity);
+                c, function_templates[class_template_of(found)].entity);
             return analysis_result::well_formed;
         }
     }
@@ -246,7 +269,7 @@ analysis_result semantic_analysis::dependent_member_friend(
         return not_supported_because(n, "temp.friend",
                                      "a friend member of a dependent type with "
                                      "an unresolved template-id");
-    uint32_t ct = class_template_of(named);
+    template_ref ct = class_template_of(named);
     if (!ct)
         return not_supported_because(
             n, "temp.friend",
@@ -277,16 +300,23 @@ analysis_result semantic_analysis::dependent_member_friend(
             written.append(id[i]);
             expansion.append(false);
         }
+    /* [ext.clang] no parameter of the template-head named in C: the head
+       is a member template's own, and C names the class it is a member of
+       (libc++'s template <bool> friend class transform_view<_View,
+       _Fn>::__iterator;) */
+    size_t unused = 0;
+    bool unnamed = false;
     for (SyntaxRef parameter : parameters) {
         token_index name_at = 0;
         for (token_index t = parameter.first_token();
              t < tree[parameter].end_token; t++)
             if (tokens[t].kind == token_kind::identifier)
                 name_at = t;
-        if (!name_at)
-            return not_supported_because(
-                n, "temp.friend",
-                "a friend template with an unnamed template parameter");
+        if (!name_at) {
+            unnamed = true;
+            unused++;
+            continue;
+        }
         bool named_in_c = false;
         for (size_t a = 0; a < written.size(); a++) {
             /* a pack expansion: an ellipsis after the argument, or ending
@@ -307,12 +337,20 @@ analysis_result semantic_analysis::dependent_member_friend(
                     named_in_c = true;
         }
         if (!named_in_c)
-            return ill_formed(parameter,
-                              "the template parameters of a friend member "
-                              "of a dependent type shall be deducible from "
-                              "its class",
-                              "temp.friend");
+            unused++;
     }
+    if (unused == parameters.size() &&
+        declaration.is(syntax_kind::elaborated_type_specifier))
+        return friend_member_template(c, n, declaration);
+    if (unnamed)
+        return not_supported_because(
+            n, "temp.friend",
+            "a friend template with an unnamed template parameter");
+    if (unused)
+        return ill_formed(n,
+                          "the template parameters of a friend member of a "
+                          "dependent type shall be deducible from its class",
+                          "temp.friend");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY(sr, template_parameter_scope(n, parameters, enclosing_namespace(c), 0,
@@ -327,7 +365,7 @@ analysis_result semantic_analysis::dependent_member_friend(
         return r;
     member_friend f;
     f.granting = c;
-    f.template_entity = function_templates[ct - 1].entity;
+    f.template_entity = function_templates[ct].entity;
     f.declaration = n;
     f.member = declaration;
     f.first_parameter = first;
@@ -366,7 +404,7 @@ analysis_result semantic_analysis::dependent_member_friend(
    are declared. */
 void semantic_analysis::member_friends_of(entity_index s, bool complete)
 {
-    uint32_t i = entity_table[s].instantiation;
+    uint32_t i = entity_table[s].instantiation.number();
     if (!i || member_friends.empty())
         return;
     entity_index t = instantiations[i - 1].template_entity;
@@ -387,7 +425,7 @@ void semantic_analysis::member_friends_of(entity_index s, bool complete)
 void semantic_analysis::befriend_member(uint32_t k, entity_index s)
 {
     member_friend f = member_friends[k];
-    uint32_t record = entity_table[s].instantiation - 1;
+    uint32_t record = entity_table[s].instantiation.index();
     uint32_t first_argument = instantiations[record].first_argument;
     uint32_t argument_count = instantiations[record].argument_count;
     if (argument_count != f.pattern_count)
@@ -516,14 +554,14 @@ entity_index semantic_analysis::redeclared_member_function(SyntaxElement inner,
         return 0;
     uint32_t cv = function_cv;
     if (m.destructor)
-        return entity_table[s].destructor;
+        return entity_table[s].details().destructor;
     if (conversion)
         /* the conversion function of that type and cv-qualifiers */
         return overload_of_type(own_conversion_functions(s), type, cv);
     entity_index member = 0;
     if (no_type) {
-        for (entity_index o = entity_table[s].first_constructor; o;
-             o = entity_table[o].next_constructor)
+        for (entity_index o = entity_table[s].details().first_constructor; o;
+             o = entity_table[o].details().next_constructor)
             if (same_parameters(type_table, entity_table[o].type.unqualified(),
                                 type.unqualified()))
                 member = o;
@@ -531,7 +569,7 @@ entity_index semantic_analysis::redeclared_member_function(SyntaxElement inner,
     }
     for (entity_index o = entity_table.find(s, tokens.identifier(m.id));
          o && entity_table[o].kind == entity_kind::function;
-         o = entity_table[o].next_overload)
+         o = entity_table[o].details().next_overload)
         if (same_parameters(type_table, entity_table[o].type.unqualified(),
                             type.unqualified()) &&
             entity_table[o].member_cv == cv &&
@@ -552,7 +590,7 @@ bool semantic_analysis::constraint_names_enclosing_parameter(
 {
     owned_array<uint32_t> names;
     for (entity_index k = c; !is_namespace(k); k = entity_table[k].enclosing) {
-        uint32_t i = entity_table[k].instantiation;
+        uint32_t i = entity_table[k].instantiation.number();
         if (!i || entity_table[k].kind != entity_kind::class_type)
             continue;
         /* the primary template's record: its parameters' names */

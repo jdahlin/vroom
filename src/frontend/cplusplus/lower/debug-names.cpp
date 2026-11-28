@@ -40,7 +40,7 @@ void c_lowering::debug_class_name(entity_index e, vbuffer *out)
     }
     uint32_t name = x.name;
     if (!name)
-        name = x.linkage_name;
+        name = x.details().linkage_name;
     if (!name)
         return;
     size_t length = 0;
@@ -142,7 +142,7 @@ ast_qualified_type c_lowering::debug_enum_type(entity_index e, token_index at)
         if (debug_enums[i] == e)
             return debug_enum_types[i];
     const entity x = analysis.entity_table[e];
-    ast_qualified_type underlying = fundamental(x.underlying, at);
+    ast_qualified_type underlying = fundamental(x.details().underlying, at);
     owned_array<uint32_t> enumerators;
     for (uint32_t i = 1; i < analysis.entity_table.size(); i++) {
         const entity &y = analysis.entity_table[entity_index(i)];
@@ -177,7 +177,7 @@ ast_qualified_type c_lowering::debug_type(qualified_type t, token_index at)
     ast_qualified_type made = 0;
     switch (r.kind) {
     case type_kind::enumeration:
-        if (analysis.entity_table[r.entity].underlying ==
+        if (analysis.entity_table[r.entity].details().underlying ==
             fundamental_type::none)
             return 0;
         made = debug_enum_type(r.entity, at);

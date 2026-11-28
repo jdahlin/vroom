@@ -285,7 +285,8 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
             return not_supported_because(
                 n, "stmt.ranged",
                 "a begin or end member that is no plain function");
-        for (entity_index fn = e; fn; fn = entity_table[fn].next_overload)
+        for (entity_index fn = e; fn;
+             fn = entity_table[fn].details().next_overload)
             if (contains_placeholder(
                     type_table[entity_table[fn].type.unqualified()].operand))
                 deduce_member_body_now(fn);
@@ -300,7 +301,7 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
                 n, "stmt.ranged",
                 "a begin or end member that gives no bound call");
         object = semantics[f.node].a;
-        chosen = entity_index_in(semantics[f.node].b);
+        chosen = semantics[f.node].entity_b();
         overload_set(chosen, set);
     } else {
         /* "where begin and end are looked up in the associated namespaces
@@ -333,7 +334,7 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
     if (set.size() > 1) {
         VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
         if (member)
-            chosen = entity_index_in(semantics[f.node].b);
+            chosen = semantics[f.node].entity_b();
     }
     return call_with(n, f, f.type, object, chosen, arguments, early, m);
 }
@@ -439,7 +440,7 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
         if (std_ns)
             ilist_tmpl = entity_table.find(
                 std_ns, tokens.pp.identifier("initializer_list", 16) + 1);
-        uint32_t ct = 0;
+        template_ref ct = 0;
         if (ilist_tmpl)
             ct = class_template_of(ilist_tmpl);
         if (!ct)
@@ -513,7 +514,7 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
             entity_index c = record.entity;
             require_complete(c);
             if (entity_table[c].kind != entity_kind::class_type ||
-                !entity_table[c].size)
+                !entity_table[c].details().size)
                 return failed(not_supported_because(
                     n, "stmt.ranged",
                     "a range of an incomplete or unanalysed class"));

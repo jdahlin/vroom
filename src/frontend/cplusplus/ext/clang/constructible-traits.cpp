@@ -31,9 +31,9 @@ bool semantic_analysis::class_destructible(entity_index c, bool &throws,
                                            bool subobject)
 {
     const entity &x = entity_table[c];
-    if (x.destructor) {
-        const entity &d = entity_table[x.destructor];
-        if (d.deleted || (!subobject && !accessible(x.destructor)))
+    if (x.details().destructor) {
+        const entity &d = entity_table[x.details().destructor];
+        if (d.deleted || (!subobject && !accessible(x.details().destructor)))
             return false;
         if (!d.implicit) {
             if (!type_table[d.type.unqualified()].non_throwing)
@@ -55,7 +55,7 @@ bool semantic_analysis::class_destructible(entity_index c, bool &throws,
    uses it was defined; false when it was not analysed or has no rule */
 bool semantic_analysis::default_initializer_throws(entity_index e, bool &throws)
 {
-    switch (entity_table[e].initializer_throws) {
+    switch (entity_table[e].details().initializer_throws) {
     case initializer_exception::cannot_throw:
         throws = false;
         return true;
@@ -67,23 +67,50 @@ bool semantic_analysis::default_initializer_throws(entity_index e, bool &throws)
     }
 }
 
+/* whether class k's default-initialization may call a constructor template or
+   one with default arguments, which subobject_constructor_throws does not
+   look into */
+bool semantic_analysis::default_through_other_form(entity_index k) const
+{
+    if (entity_table[k].details().constructor_templates)
+        return true;
+    for (entity_index e = entity_table[k].details().first_constructor; e;
+         e = entity_table[e].details().next_constructor) {
+        const struct type &f = type_table[entity_table[e].type.unqualified()];
+        if (f.parameter_count &&
+            f.parameter_count == entity_table[e].details().default_arguments)
+            return true;
+    }
+    return false;
+}
+
 /* [except.spec]/8-9: whether the implicit constructor f of its class
    (default, or copy: one parameter) can throw, one of its subobjects'
    constructors it calls being potentially-throwing; known is false when a
    default member initializer or an overload would have to be analysed */
 bool semantic_analysis::implicit_constructor_throws(entity_index f, bool &known)
 {
-    if (entity_table[f].inherited_constructor) {
-        /* [except.spec]/8: the inherited constructor's specification and
-           the other subobjects' default initialization: not analysed */
-        known = false;
-        return false;
-    }
     entity_index c = entity_table[f].enclosing;
     type_index ft = entity_table[f].type.unqualified();
     bool copy = type_table[ft].parameter_count != 0;
     bool move = false;
-    if (copy) {
+    /* [except.spec]/8: an inheriting constructor invokes the inherited one
+       and default-initializes the other subobjects */
+    entity_index inherited = entity_table[f].details().inherited_constructor;
+    entity_index from = 0;
+    if (inherited) {
+        from = entity_table[inherited].enclosing;
+        if (entity_table[inherited].implicit) {
+            if (implicit_constructor_throws(inherited, known))
+                return true;
+            if (!known)
+                return false;
+        } else if (!type_table[entity_table[inherited].type.unqualified()]
+                        .non_throwing) {
+            return true;
+        }
+        copy = false;
+    } else if (copy) {
         const struct type &p =
             type_table[type_table.parameters(ft)[0].unqualified()];
         move = p.kind == type_kind::rvalue_reference;
@@ -91,7 +118,7 @@ bool semantic_analysis::implicit_constructor_throws(entity_index f, bool &known)
     const entity x = entity_table[c];
     for (uint32_t i = 0; !copy && i < x.member_count; i++) {
         entity_index e = class_members[x.first_member + i];
-        if (!entity_table[e].default_initializer)
+        if (!entity_table[e].details().default_initializer)
             continue;
         bool throws = false;
         if (!default_initializer_throws(e, throws)) {
@@ -104,8 +131,12 @@ bool semantic_analysis::implicit_constructor_throws(entity_index f, bool &known)
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes) {
-        if (!copy && !default_constructed(c, k))
+        if (k == from || (!copy && !default_constructed(c, k)))
             continue;
+        if (inherited && default_through_other_form(k)) {
+            known = false;
+            return false;
+        }
         if (subobject_constructor_throws(k, copy, known, move))
             return true;
         if (!known)
@@ -121,8 +152,8 @@ bool semantic_analysis::subobject_constructor_throws(entity_index k, bool copy,
 {
     entity_index found = 0;
     entity_index found_move = 0;
-    for (entity_index e = entity_table[k].first_constructor; e;
-         e = entity_table[e].next_constructor) {
+    for (entity_index e = entity_table[k].details().first_constructor; e;
+         e = entity_table[e].details().next_constructor) {
         const struct type &f = type_table[entity_table[e].type.unqualified()];
         if (!copy && f.parameter_count == 0)
             found = e;
@@ -160,7 +191,7 @@ bool semantic_analysis::default_initializer_pending(entity_index c) const
     bool has = false;
     for (uint32_t i = 0; i < x.member_count && !has; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
-        if (m.default_initializer)
+        if (m.details().default_initializer)
             has = true;
     }
     if (!has)
@@ -168,7 +199,7 @@ bool semantic_analysis::default_initializer_pending(entity_index c) const
     for (entity_index e = x.enclosing;
          e && entity_table[e].kind == entity_kind::class_type;
          e = entity_table[e].enclosing)
-        if (!entity_table[e].size)
+        if (!entity_table[e].details().size)
             return true;
     return false;
 }
@@ -216,15 +247,18 @@ analysis_result semantic_analysis::aggregate_paren_initialization(
 {
     value = false;
     const entity x = entity_table[c];
-    if (x.base_count || x.virtual_base_count)
-        return not_supported_because(n, "dcl.init.aggr",
-                                     "a constructibility trait: parenthesized "
-                                     "aggregate init of a class with bases");
+    if (x.details().virtual_base_count)
+        /* [dcl.init.aggr]/1: no aggregate */
+        return analysis_result::well_formed;
     owned_array<entity_index> elements;
+    /* [dcl.init.aggr]/2: the direct base classes first, in order */
+    for (uint32_t i = 0; i < x.details().base_count; i++)
+        elements.append(class_bases[x.details().first_base + i]);
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index e = class_members[x.first_member + i];
         const entity &m = entity_table[e];
-        if (m.kind != entity_kind::variable || !m.nonstatic_member)
+        if (m.kind != entity_kind::variable || !m.nonstatic_member ||
+            m.base_subobject)
             continue;
         if (m.bit_field || !m.name)
             return not_supported_because(n, "dcl.init.aggr",
@@ -250,7 +284,7 @@ analysis_result semantic_analysis::aggregate_paren_initialization(
                 kind == type_kind::rvalue_reference)
                 return analysis_result::well_formed;
             if ((kind == type_kind::class_type || kind == type_kind::array) &&
-                !m.default_initializer) {
+                !m.details().default_initializer) {
                 bool one = false;
                 VTRY(r,
                      constructible_types(n, m.type, nullptr, 0, nothrow, one));
@@ -259,7 +293,7 @@ analysis_result semantic_analysis::aggregate_paren_initialization(
                 continue;
             }
             if (kind == type_kind::class_type || kind == type_kind::array ||
-                (m.default_initializer && nothrow))
+                (m.details().default_initializer && nothrow))
                 return not_supported_because(
                     n, "dcl.init.aggr",
                     "a constructibility trait: aggregate member left to "
@@ -322,8 +356,8 @@ semantic_analysis::aggregate_value_initialization(SyntaxRef n, entity_index c,
     value = !default_constructor_deleted(c);
     if (!value || !nothrow)
         return analysis_result::well_formed;
-    for (entity_index k = entity_table[c].first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    for (entity_index k = entity_table[c].details().first_constructor; k;
+         k = entity_table[k].details().next_constructor) {
         if (!entity_table[k].implicit ||
             type_table[entity_table[k].type.unqualified()].parameter_count)
             continue;
@@ -396,14 +430,15 @@ analysis_result semantic_analysis::constructible_types(
         /* [temp.inst]/2: one that waits for the class being defined is
            required complete here (libc++'s allocator of a container's
            element) */
-        uint32_t record = entity_table[c].instantiation;
-        if (record && !entity_table[c].defined && !entity_table[c].size &&
+        uint32_t record = entity_table[c].instantiation.number();
+        if (record && !entity_table[c].defined &&
+            !entity_table[c].details().size &&
             !instantiations[record - 1].defining &&
             instantiations[record - 1].specialization == c) {
             entity_index done = c;
             VTRY(defined, define_class_outside(n, record - 1, done));
         }
-        if (!entity_table[c].size)
+        if (!entity_table[c].details().size)
             return not_supported_because(
                 n, "dcl.init",
                 "a constructibility trait of a class that has no size");
@@ -453,7 +488,8 @@ analysis_result semantic_analysis::constructible_types(
         }
         /* no constructor takes these: no object is made, unless a
            conversion function of the argument's class gives one */
-        if (!entity_table[c].first_constructor && count && !one_of_its_own) {
+        if (!entity_table[c].details().first_constructor && count &&
+            !one_of_its_own) {
             if (count == 1 &&
                 type_table[arguments[0].type.unqualified()].kind ==
                     type_kind::class_type &&

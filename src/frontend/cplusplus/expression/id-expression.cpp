@@ -416,7 +416,8 @@ node_index parser::id_expression(bool member)
                                  syntax_kind::simple_template_id);
                 if (failed())
                     return 0;
-            } else if ((member || (!known && !dependent_qualifier)) &&
+            } else if ((member || !known ||
+                        (qualifier && kind == name_kind::not_declared)) &&
                        !dependent_qualifier &&
                        (!member || member_name_may_be_template(
                                        name, qualifier != 0, known, scope))) {
@@ -424,8 +425,9 @@ node_index parser::id_expression(bool member)
                     member && names.declared_as_member_variable_template(name);
                 if (angle_group_follows_call() ||
                     (maybe_var && angle_group_end(0))) {
-                    /* a member's name and a name of a class the parser does not
-                       know may be a template's: the tokens are a template-id
+                    /* a member's name, a name of a class the parser does not
+                       know and one a known class does not declare (a partial
+                       specialization may) may be a template's: the tokens are a template-id
                        when they parse as one and a call, a '::', or (for a
                        member variable template) an operator/punctuator follows.
                        The token scan first: a speculative parse per '<' of
@@ -751,7 +753,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
        used without a call (a call weighs them: member_template_call): the
        function its target selects, template arguments deduced
        ([temp.deduct.funcaddr]), is not analysed */
-    if (entity_table[e].member_templates)
+    if (entity_table[e].details().member_templates)
         return not_supported_because(
             current_declaration, "over.over",
             "a member function template named without a call");
@@ -761,7 +763,8 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
         e = overload_target_choice;
     /* [over.over]/1 (below): an overload set's name names no one function */
     if ((entity_table[e].kind != entity_kind::function ||
-         !entity_table[e].next_overload || t == overloaded_callee || chosen) &&
+         !entity_table[e].details().next_overload || t == overloaded_callee ||
+         chosen) &&
         record_use)
         used(t, e);
     if (entity_table[e].kind == entity_kind::enumerator)
@@ -782,7 +785,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
        a specific function that is chosen from a set of functions selected
        from S determined based on the target type required in the context":
        not analysed; the name of a function called is [over.call.func]'s */
-    if (x.kind == entity_kind::function && x.next_overload &&
+    if (x.kind == entity_kind::function && x.details().next_overload &&
         t != overloaded_callee && !chosen)
         return not_supported_because(
             current_declaration, "over.over",
@@ -790,7 +793,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     /* [dcl.fct.def.delete]/2 (of an overload set or unqualified call subject
        to ADL: the function chosen, resolve_call / call_function) */
     if (x.kind == entity_kind::function &&
-        ((!x.next_overload && t != overloaded_callee) || chosen)) {
+        ((!x.details().next_overload && t != overloaded_callee) || chosen)) {
         VTRY(r, deleted_use(t, e));
     }
     if (x.kind == entity_kind::variable) {
@@ -857,8 +860,10 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
                expressions is not odr-used: the name designates the
                variable it is bound to (unless the lambda captures it by
                name) */
-            if (x.constant_referent && !forced_odr_use && !captured_by_name(e))
-                return named_entity(t, x.constant_referent, m, record_use);
+            if (x.details().constant_referent && !forced_odr_use &&
+                !captured_by_name(e))
+                return named_entity(t, x.details().constant_referent, m,
+                                    record_use);
             bool plain = false;
             VTRY(r, captured_entity(t, e, m, deferred_use, plain));
             if (!plain)
@@ -879,8 +884,8 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
         }
         /* [expr.prim.lambda.capture]/6: an init-capture's name designates
            its member */
-        if (x.capture_member)
-            return closure_member(t, x.capture_member, m);
+        if (x.details().capture_member)
+            return closure_member(t, x.details().capture_member, m);
         /* in the lambda-declarator, of the lambda-expression in the body
            of which the name will be a member's: the type as captured */
         if (declaring_lambda && unevaluated && s == function_state.function) {
@@ -983,7 +988,7 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
            in its enclosing scope (enum_specifier) */
         entity_index e = entity_table.find(c, name);
         if (!e || entity_table[e].kind != entity_kind::enumerator) {
-            if (entity_table[c].underlying == fundamental_type::none)
+            if (entity_table[c].details().underlying == fundamental_type::none)
                 return not_supported_because(
                     n, "dcl.enum",
                     "an enumerator not found in an enum without a fixed "
@@ -1059,7 +1064,7 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
                                    "nominates",
                                    "basic.lookup.qual");
     if (entity_table[e].kind != entity_kind::function ||
-        !entity_table[e].next_overload || t == overloaded_callee)
+        !entity_table[e].details().next_overload || t == overloaded_callee)
         used(t, e);
     if (entity_table[e].kind == entity_kind::enumerator) {
         if (!accessible(e))
@@ -1073,13 +1078,13 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         return enumerator_value(t, e, m);
     }
     const entity &x = entity_table[e];
-    if (x.member_templates)
+    if (x.details().member_templates)
         /* [over.over]/1 (named_entity) */
         return not_supported_because(
             n, "over.over",
             "a qualified name of a member function template without a call");
     /* [over.over]/1, [dcl.fct.def.delete]/2 (named_entity) */
-    if (x.kind == entity_kind::function && x.next_overload &&
+    if (x.kind == entity_kind::function && x.details().next_overload &&
         t != overloaded_callee)
         return not_supported_because(
             n, "over.over",
@@ -1120,13 +1125,13 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
         entity_index named = x.entity;
         if (!named)
             named = x.unknown_entity;
-        if (uint32_t ct = concept_of(named))
+        if (template_ref ct = concept_of(named))
             return concept_id(id, ct, m);
-        if (uint32_t vt = variable_template_of(named))
+        if (template_ref vt = variable_template_of(named))
             return variable_template_id_of(id, vt, m);
         /* [namespace.qual] N::f<A>: a function template's specialization,
            as f<A> (function_template_id_value) */
-        if (uint32_t ft = function_template_of(x.unknown_entity))
+        if (template_ref ft = function_template_of(x.unknown_entity))
             return function_template_id_value(n, ft, m);
         return not_supported_because(
             n, "expr.prim.id.qual",
@@ -1140,12 +1145,12 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
                                        lookup_filter::any);
     entity_index held = 0;
     if (x.unknown && !x.entity && !x.ambiguous) {
-        if (uint32_t vt = variable_template_of(x.unknown_entity))
+        if (template_ref vt = variable_template_of(x.unknown_entity))
             return variable_template_id_of(id.index(), vt, m);
         if (member_function_template_of(x.unknown_entity))
             held = x.unknown_entity;
     } else if (x.entity && !x.ambiguous &&
-               entity_table[x.entity].member_templates)
+               entity_table[x.entity].details().member_templates)
         held = member_templates_of(x.entity);
     owned_array<uint32_t> group;
     if (held)
@@ -1161,11 +1166,11 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
         return not_supported_because(
             n, "over.over",
             "a member template-id naming no template or several");
-    uint32_t ft = group[0];
+    template_ref ft = template_ref::from_number(group[0]);
     owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     VTRY_SET(r, written_arguments_of(id, written, expansion));
-    const function_template &of = function_templates[ft - 1];
+    const function_template &of = function_templates[ft];
     uint32_t parameters = of.parameter_count;
     bool trailing_pack = parameters && template_parameter_is_pack(
                                            of.first_parameter + parameters - 1);
@@ -1229,9 +1234,8 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
         specified.append(rest);
     }
     entity_index e = 0;
-    VTRY_SET(r,
-             instantiate(n, function_templates[ft - 1].entity, specified.data(),
-                         static_cast<uint32_t>(specified.size()), e));
+    VTRY_SET(r, instantiate(n, function_templates[ft].entity, specified.data(),
+                            static_cast<uint32_t>(specified.size()), e));
     used(t, e);
     return class_member_value(n, t, e, m);
 }
@@ -1252,7 +1256,7 @@ analysis_result semantic_analysis::class_member_value(SyntaxRef n,
                                                       expression_meaning &m)
 {
     const entity &x = entity_table[e];
-    if (x.kind == entity_kind::function && !x.next_overload) {
+    if (x.kind == entity_kind::function && !x.details().next_overload) {
         VTRY(r, deleted_use(t, e));
     }
     if (contains_placeholder(x.type)) {
@@ -1286,8 +1290,8 @@ analysis_result semantic_analysis::class_member_value(SyntaxRef n,
                                    "class.access");
     /* [basic.def.odr]/5: a reference usable in constant expressions is not
        odr-used: the name designates the entity it is bound to */
-    if (x.constant_referent && !forced_odr_use)
-        return named_entity(t, x.constant_referent, m);
+    if (x.details().constant_referent && !forced_odr_use)
+        return named_entity(t, x.details().constant_referent, m);
     /* [expr.prim.id.qual]/2: "The result is the member ... The result is
        an lvalue if the member is a static member function or a data
        member" */

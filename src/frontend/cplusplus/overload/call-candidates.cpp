@@ -42,6 +42,8 @@ void semantic_analysis::function_candidates(
         c.function = f;
         c.type = entity_table[f].type;
         c.member = member;
+        c.late =
+            late_candidates_in && declared_past_horizon(f, late_candidates_in);
         candidates.append(c);
         if (first_arguments)
             first_arguments->append(0);
@@ -296,18 +298,18 @@ semantic_analysis::resolve_call(SyntaxRef n,
     if (implicit_this && !static_with_object) {
         selected.kind = semantic_kind::bound_member_function;
         selected.a = implicit_this;
-        selected.b = c.index();
+        selected.set_entity_b(c);
         selected.c = 0;
     } else if (static_with_object) {
         selected.kind = semantic_kind::entity;
-        selected.a = c.index();
+        selected.set_entity_a(c);
         selected.b = 0;
         selected.c = 0;
         f.entity = c;
     } else if (bound) {
-        selected.b = c.index();
+        selected.set_entity_b(c);
     } else {
-        selected.a = c.index();
+        selected.set_entity_a(c);
         f.entity = c;
     }
     f.type = x.type;

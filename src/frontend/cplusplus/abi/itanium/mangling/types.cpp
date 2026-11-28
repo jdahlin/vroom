@@ -287,8 +287,9 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
        (void_t<T>): that type.  In a dependent value (And<void_t<T>>::value)
        clang has the value too, which the analysis does not: not mangled
        there */
-    if (r.kind == type_kind::dependent &&
-        analysis.entity_table[r.entity].alias_expansion.unqualified()) {
+    if (r.kind == type_kind::dependent && analysis.entity_table[r.entity]
+                                              .details()
+                                              .alias_expansion.unqualified()) {
         if (dependent_value_depth && !alias_value_trial) {
             alias_value_refused = true;
             return refuse("an alias template's specialization of dependent "
@@ -296,7 +297,8 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
                           "value-dependent template argument (clang "
                           "evaluates it)");
         }
-        qualified_type x = analysis.entity_table[r.entity].alias_expansion;
+        qualified_type x =
+            analysis.entity_table[r.entity].details().alias_expansion;
         return type(qualified_type::make(x.unqualified(), x.cv() | t.cv()),
                     member_class);
     }
@@ -309,6 +311,24 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
         return builtin_type(r.fundamental);
     if (r.kind == type_kind::placeholder && !t.cv())
         return placeholder_type(r);
+    /* (a leveled parameter is a candidate of its own, not the type the
+       specialization's T_ names) */
+    /* (an enclosing template's parameter in a constraint's type: T_ as
+       the specialization names it) */
+    if (!t.cv() && r.kind == type_kind::template_parameter)
+        for (const auto &o : analysis.outer_parameters)
+            if (o.stand_in == r.entity) {
+                scoped_value<entity_index> unleveled(leveled_template, 0);
+                return type(analysis.entity_table[o.parameter].type);
+            }
+    if (!t.cv() && r.kind == type_kind::template_parameter &&
+        leveled_template) {
+        entity_index own = analysis.constraint_own_type_parameter(
+            leveled_template, analysis.entity_table[r.entity].value);
+        if (!own)
+            return refuse("a template parameter in a constraint's type");
+        return template_param_of_constraint(leveled_template, own);
+    }
     /* [abi:mangling-type] <type> ::= <substitution> */
     if (substitution(t, member_class))
         return true;
@@ -316,14 +336,6 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
     if (!qualified && r.kind == type_kind::dependent &&
         analysis.entity_table[r.entity].kind == entity_kind::dependent_written)
         return type_of_written(t, member_class);
-    if (!qualified && r.kind == type_kind::template_parameter &&
-        leveled_template) {
-        entity_index own = analysis.constraint_own_type_parameter(
-            leveled_template, analysis.entity_table[r.entity].value);
-        if (!own || t.cv())
-            return refuse("a template parameter in a constraint's type");
-        return template_param_of_constraint(leveled_template, own);
-    }
     if (!type_alternative(t, member_class))
         return refuse(type_kind_description(r.kind));
     add_candidate(t, member_class);

@@ -110,11 +110,11 @@ entity_index semantic_analysis::declared_in(entity_index scope, uint32_t name,
     case lookup_filter::types:
         if (is_type)
             return e;
-        return entity_table[e].hidden_type;
+        return entity_table[e].details().hidden_type;
     case lookup_filter::scopes:
         if (is_type || is_namespace_name)
             return e;
-        return entity_table[e].hidden_type;
+        return entity_table[e].details().hidden_type;
     case lookup_filter::namespaces:
         if (is_namespace_name)
             return e;
@@ -140,8 +140,8 @@ semantic_analysis::unknown_name_subclause(entity_index e,
     /* a name a refused declaration held: that declaration's reason (a
        use of it must not hide it), else, for a template's name, [temp.names]/1: "A
        template specialization ... can be referred to by a template-id" */
-    if (e && entity_table[e].held_because)
-        return entity_table[e].held_because;
+    if (e && entity_table[e].details().held_because)
+        return entity_table[e].details().held_because;
     if (e && entity_table[e].held_by_template)
         return "temp.names";
     return otherwise;
@@ -152,10 +152,10 @@ void semantic_analysis::note_held(entity_index e)
     held_pending.append(e);
     /* a local declaration refused inside a body: the names after it need
        the reason now, not when the whole declaration ends */
-    if (!entity_table[e].held_because &&
+    if (!entity_table[e].details().held_because &&
         unsupported.size() > declaration_refusals)
-        entity_table[e].held_because =
-            unsupported[declaration_refusals].subclause;
+        entity_table[e].set(&entity_details::held_because,
+                            unsupported[declaration_refusals].subclause);
 }
 
 /* scope's names are not all known from now on, for the reason the
@@ -164,10 +164,10 @@ void semantic_analysis::note_unknown_scope(entity_index scope)
 {
     entity_table[scope].unknown_names = true;
     unknown_scopes_pending.append(scope);
-    if (!entity_table[scope].unknown_because &&
+    if (!entity_table[scope].details().unknown_because &&
         unsupported.size() > declaration_refusals)
-        entity_table[scope].unknown_because =
-            unsupported[declaration_refusals].subclause;
+        entity_table[scope].set(&entity_details::unknown_because,
+                                unsupported[declaration_refusals].subclause);
 }
 
 /* a name that the member function templates, or the constructor
@@ -198,8 +198,8 @@ void semantic_analysis::mark_unknown(lookup_result &r, const char *because,
    that made them so, else the using-directive's */
 const char *semantic_analysis::unknown_scope_subclause(entity_index s) const
 {
-    if (entity_table[s].unknown_because)
-        return entity_table[s].unknown_because;
+    if (entity_table[s].details().unknown_because)
+        return entity_table[s].details().unknown_because;
     return "namespace.udir";
 }
 
@@ -207,7 +207,7 @@ const char *semantic_analysis::unknown_scope_subclause(entity_index s) const
    being instantiated */
 bool semantic_analysis::all_past_horizon(entity_index e) const
 {
-    for (entity_index o = e; o; o = entity_table[o].next_overload) {
+    for (entity_index o = e; o; o = entity_table[o].details().next_overload) {
         uint32_t d = entity_table[o].first_declaration;
         if (entity_table[o].kind != entity_kind::function || !d ||
             entity_table.declaration(d).node.first_token() <= lookup_horizon)
@@ -235,7 +235,7 @@ void semantic_analysis::found_also(lookup_result &r, entity_index e,
         r.unknown = true;
         if (!r.unknown_entity) {
             r.unknown_entity = e;
-            r.unknown_by = entity_table[e].held_by;
+            r.unknown_by = entity_table[e].details().held_by;
         }
         return;
     }
@@ -393,8 +393,9 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
                 if (e)
                     found_also(r, e, v.nominated);
                 else if (entity_table[v.nominated].unknown_names)
-                    mark_unknown(r, unknown_scope_subclause(v.nominated),
-                                 entity_table[v.nominated].unknown_by);
+                    mark_unknown(
+                        r, unknown_scope_subclause(v.nominated),
+                        entity_table[v.nominated].details().unknown_by);
             }
         } else if (entity_table[s].kind == entity_kind::class_type) {
             if (filter == lookup_filter::non_members) {
@@ -442,7 +443,7 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
            far may be among them */
         if (!r.entity && entity_table[s].unknown_names)
             mark_unknown(r, unknown_scope_subclause(s),
-                         entity_table[s].unknown_by);
+                         entity_table[s].details().unknown_by);
         if (r.entity || r.unknown || r.ambiguous || !s)
             break;
     }
@@ -456,7 +457,8 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
        of instantiation, [temp.dep.candidate], is not told apart) */
     if (lookup_horizon && r.entity && is_namespace(r.found_in)) {
         bool late = false, early = false, functions = true;
-        for (entity_index o = r.entity; o; o = entity_table[o].next_overload) {
+        for (entity_index o = r.entity; o;
+             o = entity_table[o].details().next_overload) {
             uint32_t d = entity_table[o].first_declaration;
             if (d &&
                 entity_table.declaration(d).node.first_token() > lookup_horizon)
@@ -570,8 +572,9 @@ semantic_analysis::lookup_in_namespace(entity_index n, uint32_t name,
             entity_index e = declared_in(searched[i], name, filter);
             if (!e) {
                 if (entity_table[searched[i]].unknown_names)
-                    mark_unknown(r, unknown_scope_subclause(searched[i]),
-                                 entity_table[searched[i]].unknown_by);
+                    mark_unknown(
+                        r, unknown_scope_subclause(searched[i]),
+                        entity_table[searched[i]].details().unknown_by);
                 continue;
             }
             found_also(r, e, searched[i]);
@@ -750,11 +753,12 @@ bool semantic_analysis::associated_with(qualified_type t,
                 classes.append(x);
             add_namespace(entity_table[x].enclosing);
             const entity &cx = entity_table[x];
-            for (uint32_t i = 0; i < cx.base_count; i++)
+            for (uint32_t i = 0; i < cx.details().base_count; i++)
                 work.append(
-                    type_table[entity_table[class_bases[cx.first_base + i]]
-                                   .type.unqualified()]
-                        .entity);
+                    type_table
+                        [entity_table[class_bases[cx.details().first_base + i]]
+                             .type.unqualified()]
+                            .entity);
         }
         /* "the class of which it is a member, if any" */
         entity_index outer = entity_table[c].enclosing;
@@ -932,7 +936,7 @@ bool semantic_analysis::argument_dependent_lookup(
             continue;
         for (entity_index o =
                  entity_table.find(entity_table[e].enclosing, name);
-             o; o = entity_table[o].next_overload)
+             o; o = entity_table[o].details().next_overload)
             if (o == e)
                 visible = false;
         for (entity_index other : found)
@@ -1053,21 +1057,28 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                 qualified = true;
                 continue;
             }
+            /* [class.qual], [expr.prim.id.qual]/1: an enumeration's
+               scope, its enumerators' names */
+            if (st.kind == type_kind::enumeration) {
+                scope.entity = st.entity;
+                scope.global = false;
+                qualified = true;
+                continue;
+            }
             if (st.kind != type_kind::class_type) {
-                if (st.kind != type_kind::dependent &&
-                    st.kind != type_kind::enumeration)
+                if (st.kind != type_kind::dependent)
                     return ill_formed(n,
                                       "a nested-name-specifier shall name a "
                                       "class, enumeration, or namespace",
                                       "basic.lookup.qual");
                 return not_supported_because(n, "temp.res",
                                              "a nested-name-specifier naming a "
-                                             "dependent type or enumeration");
+                                             "dependent type");
             }
             require_complete(st.entity);
             const entity &x = entity_table[st.entity];
-            if (!incomplete_allowed && !x.size && st.entity != defining_class &&
-                !x.defined) {
+            if (!incomplete_allowed && !x.details().size &&
+                st.entity != defining_class && !x.defined) {
                 /* a specialization of a class template that has no
                    definition for it (no primary definition, no matching
                    partial specialization) is incomplete: a name looked up
@@ -1154,11 +1165,11 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
         if (entity_table[e].kind == entity_kind::class_type)
             require_complete(e);
         if (entity_table[e].kind == entity_kind::class_type &&
-            !entity_table[e].size && entity_table[e].instantiation &&
+            !entity_table[e].details().size && entity_table[e].instantiation &&
             e != defining_class && !entity_table[e].defined) {
-            uint32_t k = entity_table[e].instantiation - 1;
+            uint32_t k = entity_table[e].instantiation.index();
             entity_index t_ent = instantiations[k].template_entity;
-            uint32_t ct = entity_table[t_ent].instantiation;
+            template_ref ct = entity_table[t_ent].template_record;
             if (ct && !instantiations[k].defining) {
                 entity_index done = e;
                 /* (a copy: instantiate_class may grow template_arguments) */
@@ -1180,8 +1191,9 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             /* (one that waits for the class being defined, named in its
                member-specification: its members are needed now, [impl.clang] clang
                instantiates it here) */
-            uint32_t record = entity_table[e].instantiation;
-            if (record && !entity_table[e].defined && !entity_table[e].size &&
+            uint32_t record = entity_table[e].instantiation.number();
+            if (record && !entity_table[e].defined &&
+                !entity_table[e].details().size &&
                 !instantiations[record - 1].defining &&
                 instantiations[record - 1].specialization == e) {
                 entity_index done = e;
@@ -1192,8 +1204,8 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
         if (x.kind == entity_kind::class_type) {
             /* [basic.lookup.qual]/1 with [class.qual]: the class's members
                are looked up, so it is complete or being defined */
-            if (!incomplete_allowed && !x.size && e != defining_class &&
-                !x.defined)
+            if (!incomplete_allowed && !x.details().size &&
+                e != defining_class && !x.defined)
                 return not_supported_because(
                     n, "basic.lookup.qual",
                     "a member lookup in a class that is not yet defined");
@@ -1235,15 +1247,16 @@ bool semantic_analysis::undefined_specialization(entity_index c) const
 {
     const entity &x = entity_table[c];
     if (x.kind != entity_kind::class_type || !x.instantiation || x.defined ||
-        x.size)
+        x.details().size)
         return false;
-    const instantiation_record &record = instantiations[x.instantiation - 1];
-    if (record.defining || record.lazy || record.has_failure || record.pattern)
+    const instantiation_record &record = instantiations[x.instantiation];
+    if (record.defining || record.lazy || record.has_failure ||
+        record.pattern || record.unmatched)
         return false;
-    uint32_t t = class_template_of(c);
+    template_ref t = class_template_of(c);
     if (!t)
         return false;
-    return !function_templates[t - 1].definition;
+    return !function_templates[t].definition;
 }
 
 } // namespace cplusplus

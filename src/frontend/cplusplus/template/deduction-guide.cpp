@@ -90,10 +90,10 @@ semantic_analysis::deduction_guide_candidate(TemplateDeclaration t,
     entity_index outer = current_scope;
     lookup_result x = lookup_unqualified(
         tokens.identifier(guide_parts_of(n).name), lookup_filter::any);
-    uint32_t ct = class_template_of(x.unknown_entity);
+    template_ref ct = class_template_of(x.unknown_entity);
     /* a template-name of a class template, which the guide's simple-template-id
        names too ([temp.deduct.guide]/3) */
-    if (!ct || function_templates[ct - 1].is_alias)
+    if (!ct || function_templates[ct].is_alias)
         return not_supported_because(
             t, "temp.deduct.guide",
             "a deduction guide for a name that is no class template");
@@ -117,7 +117,7 @@ semantic_analysis::deduction_guide_candidate(TemplateDeclaration t,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].instantiation = index + 1;
+                entity_table[e].template_record = template_ref::at(index);
         }
     }
     function_template record =
@@ -159,9 +159,9 @@ analysis_result semantic_analysis::deduction_guide_type(SyntaxRef guide,
  * injected-class-name of the copy constructor) makes no guide.  The class
  * template's pack and template template-parameters make none.
  */
-void semantic_analysis::implicit_deduction_guides(uint32_t ct)
+void semantic_analysis::implicit_deduction_guides(template_ref ct)
 {
-    function_template &rec = function_templates[ct - 1];
+    function_template &rec = function_templates[ct];
     if (rec.guides_made)
         return;
     rec.guides_made = true;
@@ -194,10 +194,10 @@ void semantic_analysis::implicit_deduction_guides(uint32_t ct)
     }
 }
 
-analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
+analysis_result semantic_analysis::implicit_guide_member(template_ref ct,
                                                          SyntaxElement mem)
 {
-    const function_template c = function_templates[ct - 1];
+    const function_template c = function_templates[ct];
     uint32_t class_name = entity_table[c.entity].name;
     owned_array<SyntaxRef> parameters;
     for (uint32_t i = 0; i < c.parameter_count; i++)
@@ -231,6 +231,12 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
     if (!ctor.direct || !ctor.id.is_identifier() ||
         tokens.identifier(ctor.id.token()) != class_name || !ctor.parameters())
         return analysis_result::unsupported;
+    /* [dcl.fct]/22: an abbreviated constructor template's invented
+       template-parameters follow */
+    size_t written = parameters.size();
+    if (!abbreviated_clause(SyntaxElement(ctor.parameters()), parameters))
+        return analysis_result::unsupported;
+    bool abbreviated = parameters.size() != written;
     entity_index outer = entity_table[c.entity].enclosing;
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -267,16 +273,21 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
         } else if (m.is(syntax_kind::member_declaration) && m.size() >= 2 &&
                    m[0].is(syntax_kind::decl_specifier_seq) &&
                    syntax_parser.keyword_of(tokens[m[0].first_token()]) ==
-                       standard_keyword::typedef_ &&
-                   m[1].is(syntax_kind::member_declarator_list) &&
-                   m[1].size() == 1 && m[1][0].is_token() &&
-                   tokens[m[1][0].token()].kind == token_kind::identifier) {
+                       standard_keyword::typedef_) {
+            /* typedef T name; the declarator alone, or in a list of one */
+            SyntaxElement declared_name = m[1];
+            if (declared_name.is(syntax_kind::member_declarator_list) &&
+                declared_name.size() == 1)
+                declared_name = declared_name[0];
+            if (!declared_name.is_token() ||
+                tokens[declared_name.token()].kind != token_kind::identifier)
+                continue;
             size_t u = unsupported.size();
             specified ds;
             if (decl_specifier_seq(m[0].index(), ds, false) ==
                     analysis_result::well_formed &&
                 ds.typedef_ && ds.type.unqualified()) {
-                uint32_t td_name = tokens.identifier(m[1][0].token());
+                uint32_t td_name = tokens.identifier(declared_name.token());
                 entity_index td = entity_table.make(entity_kind::typedef_name,
                                                     td_name, scope);
                 entity_table[td].type = ds.type;
@@ -292,7 +303,7 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].instantiation = index + 1;
+                entity_table[e].template_record = template_ref::at(index);
         }
     }
     function_template record =
@@ -302,7 +313,8 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
     record.guide_of = ct;
     record.implicit_guide = true;
     record.explicit_guide = is_explicit;
-    record.guide_of_template = mem.is(syntax_kind::template_declaration);
+    record.guide_of_template =
+        mem.is(syntax_kind::template_declaration) || abbreviated;
     entity_table[record.entity].type = type;
     if (!is_namespace(outer))
         entity_table[record.entity].inline_ = true;
@@ -315,10 +327,10 @@ semantic_analysis::implicit_guide_type(const function_template &ft,
                                        const template_argument *arguments,
                                        SyntaxRef at, qualified_type &type)
 {
-    uint32_t ct = ft.guide_of;
+    template_ref ct = ft.guide_of;
     entity_index c = 0;
     VTRY(r, instantiate_class(at, ct, arguments,
-                              function_templates[ct - 1].parameter_count, c));
+                              function_templates[ct].parameter_count, c));
     type = entity_table[c].type;
     function_cv = 0;
     function_parameters.clear();

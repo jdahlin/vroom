@@ -254,11 +254,11 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
                !copies_bytes(object.entity) &&
                !declares_copy_constructor(object.entity) &&
                !entity_table[object.entity].defaulted_copy_constructor &&
-               !entity_table[object.entity].user_copy_assignments &&
+               !entity_table[object.entity].details().user_copy_assignments &&
                !entity_table[object.entity].defaulted_copy_assignment &&
                !declares_move_assignment(object.entity) &&
-               !(entity_table[object.entity].destructor &&
-                 !entity_table[entity_table[object.entity].destructor]
+               !(entity_table[object.entity].details().destructor &&
+                 !entity_table[entity_table[object.entity].details().destructor]
                       .implicit)) {
         /* the move constructor the class may declare implicitly
            ([class.copy.ctor]/8), a function other than its copy

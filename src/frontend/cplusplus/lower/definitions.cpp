@@ -8,9 +8,9 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
 {
     const entity &x = analysis.entity_table[e];
     const semantic_node &body = node(x.definition);
-    if (x.target_features) {
+    if (x.details().target_features) {
         const char *features = reinterpret_cast<const char *>(
-            analysis.target_strings.data() + x.target_features - 1);
+            analysis.target_strings.data() + x.details().target_features - 1);
         ast_builder_symbol_target(c, s, features, strlen(features));
     }
     labels.clear();
@@ -355,7 +355,7 @@ bool c_lowering::translation_unit()
            analysed and left the placeholder undeduced: a use of it
            reports why (symbol) */
         if (x.kind == entity_kind::function &&
-            (!x.defined || x.unsupported_body)) {
+            (!x.defined || x.details().unsupported_body)) {
             bool undeduced = !x.defined && x.placeholder_return;
             qualified_type rt =
                 analysis.type_table[x.type.unqualified()].operand;
@@ -429,7 +429,9 @@ bool c_lowering::translation_unit()
                 return false;
         }
     }
-    if (!initializers.empty() && !dynamic_initialization())
+    if (!(initializers.empty() && constant_initializers.empty() &&
+          constant_member_initializers.empty()) &&
+        !dynamic_initialization())
         return false;
     /* [abi:vague-vtable]: the virtual table of each class whose key
        function this translation unit defines */

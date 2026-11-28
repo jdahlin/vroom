@@ -51,7 +51,7 @@ analysis_result semantic_analysis::closure_class(entity_index c, SyntaxRef n,
     SyntaxRef declaration = current_declaration;
     /* (a generic lambda's conversion function template is not
        declared) */
-    entity_index call = entity_table[c].call_operator;
+    entity_index call = entity_table[c].details().call_operator;
     if (!has_capture && entity_table[call].kind == entity_kind::function)
         r = closure_conversion(c, call, n);
     if (r == analysis_result::well_formed)
@@ -123,7 +123,7 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
        function template specialization, give __invoke and the conversion
        operator their template specialization records so Itanium mangling
        matches clang's __invoke<T...>(T...) and operator auto(*)(T...)<T...>() */
-    if (uint32_t call_inst = entity_table[call].instantiation) {
+    if (uint32_t call_inst = entity_table[call].instantiation.number()) {
         const instantiation_record orig = instantiations[call_inst - 1];
         entity_index call_tmpl = orig.template_entity;
         qualified_type pat_type = entity_table[call_tmpl].type;
@@ -131,14 +131,14 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
         entity_index inv_tmpl =
             entity_table.make(entity_kind::template_entity, invoke_name, c);
         entity_table[inv_tmpl].type = pat_type;
-        entity_table[inv_tmpl].instantiation =
-            entity_table[call_tmpl].instantiation;
+        entity_table[inv_tmpl].template_record =
+            entity_table[call_tmpl].template_record;
         instantiation_record inv_rec = orig;
         inv_rec.template_entity = inv_tmpl;
         inv_rec.specialization = invoke;
         instantiations.append(inv_rec);
         entity_table[invoke].instantiation =
-            static_cast<uint32_t>(instantiations.size());
+            instantiation_ref::at(instantiations.size() - 1);
 
         qualified_type pat_ptr =
             qualified_type::make(type_table.pointer_to(pat_type), cv_none);
@@ -150,19 +150,20 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
         entity_table[conv_tmpl].nonstatic_member = true;
         entity_table[conv_tmpl].member_cv = cv_const;
         entity_table[conv_tmpl].conversion_function = true;
-        entity_table[conv_tmpl].instantiation =
-            entity_table[call_tmpl].instantiation;
+        entity_table[conv_tmpl].template_record =
+            entity_table[call_tmpl].template_record;
         instantiation_record conv_rec = orig;
         conv_rec.template_entity = conv_tmpl;
         conv_rec.specialization = conversion;
         instantiations.append(conv_rec);
         entity_table[conversion].instantiation =
-            static_cast<uint32_t>(instantiations.size());
+            instantiation_ref::at(instantiations.size() - 1);
     }
     if (entity_index existing = entity_table.find(c, conversion_name)) {
-        entity_table[conversion].next_overload =
-            entity_table[existing].next_overload;
-        entity_table[existing].next_overload = conversion;
+        entity_table[conversion].set(
+            &entity_details::next_overload,
+            entity_table[existing].details().next_overload);
+        entity_table[existing].set(&entity_details::next_overload, conversion);
     } else {
         entity_table.bind(c, conversion_name, conversion);
     }
@@ -291,13 +292,13 @@ analysis_result semantic_analysis::generic_closure_conversion(
         return not_supported_because(
             at, "expr.prim.lambda.closure",
             "a generic lambda converted to no non-variadic function pointer");
-    entity_index call_tpl = entity_table[c].call_operator;
-    uint32_t ft = entity_table[call_tpl].instantiation;
+    entity_index call_tpl = entity_table[c].details().call_operator;
+    template_ref ft = entity_table[call_tpl].template_record;
     if (!ft)
         return not_supported_because(
             at, "expr.prim.lambda.closure",
             "a generic lambda whose call operator is not a template");
-    const function_template f = function_templates[ft - 1];
+    const function_template f = function_templates[ft];
     const struct type pat_fn =
         type_table[entity_table[f.entity].type.unqualified()];
     if (pat_fn.kind != type_kind::function || pat_fn.variadic ||
