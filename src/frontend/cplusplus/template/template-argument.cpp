@@ -200,6 +200,40 @@ void semantic_analysis::bind_template_argument(entity_index scope,
     entity_table.bind(scope, name, e);
 }
 
+size_t semantic_analysis::argument_scope_slot(uint32_t hash,
+                                              uint32_t first_word,
+                                              uint32_t words) const
+{
+    size_t mask = argument_scope_slots.size() - 1;
+    size_t i = hash & mask;
+    for (; argument_scope_slots[i]; i = (i + 1) & mask) {
+        const argument_scope_record &r =
+            argument_scopes[argument_scope_slots[i] - 1];
+        if (r.hash == hash && r.words == words &&
+            memcmp(argument_scope_keys.data() + r.first_word,
+                   argument_scope_keys.data() + first_word,
+                   words * sizeof(uint64_t)) == 0)
+            break;
+    }
+    return i;
+}
+
+void semantic_analysis::grow_argument_scopes()
+{
+    size_t size = 64;
+    if (!argument_scope_slots.empty())
+        size = argument_scope_slots.size() * 2;
+    argument_scope_slots.resize(size);
+    for (uint32_t &slot : argument_scope_slots)
+        slot = 0;
+    for (uint32_t n = 0; n < argument_scopes.size(); n++) {
+        size_t i = argument_scopes[n].hash & (size - 1);
+        while (argument_scope_slots[i])
+            i = (i + 1) & (size - 1);
+        argument_scope_slots[i] = n + 1;
+    }
+}
+
 entity_index semantic_analysis::argument_scope(
     uint32_t first, uint32_t count, const template_argument *arguments,
     entity_index outer, const entity_index *forwarded)
@@ -218,38 +252,26 @@ entity_index semantic_analysis::argument_scope(
         if (a.kind == template_argument::kind_t::template_name)
             shared = false;
         argument_scope_keys.append(static_cast<uint64_t>(a.kind) |
-                                   static_cast<uint64_t>(a.count) << 8 |
-                                   instead << 40);
+                                   static_cast<uint64_t>(a.count) << 8);
         argument_scope_keys.append(static_cast<uint64_t>(a.type.cv()) << 32 |
                                    a.type.unqualified().index());
         argument_scope_keys.append(a.value);
-        argument_scope_keys.append(a.template_entity.index());
+        argument_scope_keys.append(a.template_entity.index() | instead << 32);
     }
     uint32_t words =
         static_cast<uint32_t>(argument_scope_keys.size()) - first_word;
-    auto bucket = [&](uint32_t from, uint32_t n) {
-        return vhash_bytes(reinterpret_cast<const char *>(
-                               argument_scope_keys.data() + from),
-                           n * sizeof(uint64_t)) &
-               0xffff;
-    };
-    argument_scopes_by_key.update(argument_scopes,
-                                  [&](const argument_scope_record &r) {
-                                      return bucket(r.first_word, r.words);
-                                  });
-    uint32_t key = bucket(first_word, words);
-    if (shared)
-        for (uint32_t k = argument_scopes_by_key.first(key); k;
-             k = argument_scopes_by_key.after(k)) {
-            const argument_scope_record &r = argument_scopes[k - 1];
-            if (r.words != words ||
-                memcmp(argument_scope_keys.data() + r.first_word,
-                       argument_scope_keys.data() + first_word,
-                       words * sizeof(uint64_t)) != 0)
-                continue;
+    uint32_t hash = vhash_bytes(
+        reinterpret_cast<const char *>(argument_scope_keys.data() + first_word),
+        words * sizeof(uint64_t));
+    if (shared) {
+        if (argument_scopes.size() * 2 >= argument_scope_slots.size())
+            grow_argument_scopes();
+        if (uint32_t found = argument_scope_slots[argument_scope_slot(
+                hash, first_word, words)]) {
             argument_scope_keys.resize(first_word);
-            return r.scope;
+            return argument_scopes[found - 1].scope;
         }
+    }
     entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
     for (uint32_t i = 0; i < count; i++) {
         entity_index parameter = template_parameter_entities[first + i];
@@ -260,10 +282,15 @@ entity_index semantic_analysis::argument_scope(
         }
         bind_template_argument(scope, parameter, arguments[i]);
     }
-    if (shared)
-        argument_scopes.append({first_word, words, scope});
-    else
+    if (shared) {
+        /* (found again: binding the arguments may have grown the table) */
+        size_t slot = argument_scope_slot(hash, first_word, words);
+        argument_scopes.append({first_word, words, hash, scope});
+        argument_scope_slots[slot] =
+            static_cast<uint32_t>(argument_scopes.size());
+    } else {
         argument_scope_keys.resize(first_word);
+    }
     return scope;
 }
 

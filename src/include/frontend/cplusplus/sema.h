@@ -6539,12 +6539,19 @@ class semantic_analysis
                                 const entity_index *forwarded = nullptr);
     struct argument_scope_record {
         /* its key: argument_scope_keys[first_word .. first_word + words) */
-        uint32_t first_word, words;
+        uint32_t first_word, words, hash;
         entity_index scope;
     };
     owned_array<argument_scope_record> argument_scopes;
     owned_array<uint64_t> argument_scope_keys;
-    record_chains argument_scopes_by_key;
+    /* open addressing, at most half full: a record's index plus one, 0 an
+       empty slot.  It grows with the records, so that a small translation
+       unit does not set up a large table */
+    owned_array<uint32_t> argument_scope_slots;
+    /* the slot of the key, or the empty one it goes to */
+    size_t argument_scope_slot(uint32_t hash, uint32_t first_word,
+                               uint32_t words) const;
+    void grow_argument_scopes();
     bool explicitly_specialized_class(entity_index c) const;
     /* [temp.expl.spec]/17: a member class of a specialization */
     bool member_class_specialization(SyntaxRef n, SyntaxRef specifier,
