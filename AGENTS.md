@@ -375,6 +375,7 @@ bench/cxx-run.py -j 6 [-O 0123] [PAT]  # src/test/cxx/run: vpp -c (the driver: f
 bench/cxx-depfile.py                # C++ -MD/-MMD/-MP depfiles byte for byte vs clang++, also run from another directory as vccd does (<2 s)
 bench/cxx-include-guard.py [-v]      # the C++ preprocessor's multiple-include guard skip: src/test/cxx/include-guard, text and diagnostics vs clang -E -P (<1 s)
 bench/debug-info.py                 # -g's function signatures and C types (src/test/debug-info) against clang's, x86-64 and arm64 (<2 s)
+bench/debug-values.py               # the values gdb/lldb prints from -g -O0 programs (src/test/debug-info "PRINT") = clang's; skipped without a debugger (<5 s)
 bench/cxx-debug-lines.py            # C++ -g line tables: the marked lines of src/test/cxx/debug-lines have rows, as clang++ -g's (<2 s)
 bench/cxx-thread.py [-v] [PAT]     # src/test/cxx/thread: C++ programs that need threads, built by vpp, linked by clang++ -pthread, self-checking (a variable that should be thread-local or a local emitted as a shared static; <5 s)
 bench/cxx-mangle-unit.py [--clang] [-v] [PAT]   # the mangler's unit tests (src/test/cxx/mangle, a file per ABI section): every `// MANGLE: SYMBOL` in vpp -c's object; --clang: and in clang++'s, so the expectations are clang's (<2 s)

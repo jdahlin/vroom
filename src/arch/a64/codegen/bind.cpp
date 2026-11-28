@@ -39,6 +39,7 @@ VPRIV int64_t bind_slot(codegen_context *e, uint32_t s)
     }
     b->slot = a64_frame_slot_allocate(
         e, codegen_type_size(c, t) ? codegen_type_size(c, t) : 1, al);
+    codegen_debug_local_add(e, s, b->slot, true);
     return b->slot;
 }
 
