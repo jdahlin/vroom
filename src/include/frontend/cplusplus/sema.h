@@ -7356,6 +7356,38 @@ class semantic_analysis
     {
         return specialization_template_argument(e, i, element).type;
     }
+    /* what argument i (or element of its pack) is: a type, a value or
+       neither; and a value */
+    bool specialization_argument_is_type(entity_index e, uint32_t i,
+                                         uint32_t element = 0) const
+    {
+        return specialization_template_argument(e, i, element).kind ==
+               template_argument::kind_t::type;
+    }
+    bool specialization_argument_is_value(entity_index e, uint32_t i,
+                                          uint32_t element = 0) const
+    {
+        return specialization_template_argument(e, i, element).kind ==
+               template_argument::kind_t::value;
+    }
+    uint64_t specialization_argument_value(entity_index e, uint32_t i,
+                                           uint32_t element = 0) const
+    {
+        return specialization_template_argument(e, i, element).value;
+    }
+    /* the elements of argument i's pack; 1 and element 0 for another */
+    uint32_t specialization_argument_elements(entity_index e, uint32_t i) const
+    {
+        const template_argument &a = specialization_template_argument(e, i);
+        if (a.kind != template_argument::kind_t::pack)
+            return 1;
+        return a.count;
+    }
+    bool specialization_argument_is_pack(entity_index e, uint32_t i) const
+    {
+        return specialization_template_argument(e, i).kind ==
+               template_argument::kind_t::pack;
+    }
     /* whether argument i is a pack's ([temp.variadic]/1): its number of
        elements plus one, 0 if not; element k + 1 of the functions here
        is its k-th */

@@ -192,6 +192,9 @@ typedef struct tag {
     uint32_t typedef_name; /* for anonymous records: first typedef naming it */
     uint32_t enums, nenum; /* enum: its enumerator syms (list) */
     uint32_t depr;         /* deprecated: attrs record index, 0: none */
+    /* -g, C++: string indices of the name with its template arguments, and of
+       the namespaces around it (ast_builder_symbol_debug_scope); 0: none */
+    uint32_t debug_name, debug_scope;
 } tag;
 
 /* ---------------- symbols ---------------- */

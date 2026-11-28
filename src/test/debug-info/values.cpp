@@ -19,15 +19,31 @@ template <class T> struct Box {
     T item;
 };
 
+namespace outer
+{
+namespace
+{
+int anonymous = 8;
+}
+template <class T, int N> struct Many {
+    T item[N];
+};
+} // namespace outer
+
 int total = 5;
 
 __attribute__((noinline)) static int use(const S &s, Box<long> box, S *p,
                                          int &&moved)
 {
+    outer::Many<Box<long>, 2> many{{{1}, {2}}};
+
     int x = s.m + (int)box.item;
     const int &alias = x;
 
-    return x + total + ns::hidden + p->b + moved + alias; /* STOP */
+    int sum = x + total + ns::hidden + p->b + moved + alias;
+
+    sum += outer::anonymous + (int)many.item[1].item;
+    return sum; /* STOP */
 }
 
 int main()
@@ -38,4 +54,5 @@ int main()
 
     return use(s, box, &s, 4) == 0;
 }
-/* PRINT s.m s.b s.r box.item p->m p->b moved x alias total */
+/* PRINT s.m s.b s.r box.item p->m p->b moved x alias total ns::hidden outer::anonymous */
+/* WHATIS box many s p */
