@@ -88,6 +88,8 @@ relative to it); `TODO.md` stays at the top.
   heap calls per token against clang and vcc's C front end, where they go
   (a profile, three findings), how the fastest compilers write their source,
   15 rules for fast code with what can check each, decisions needed.
+- `RESEARCH-cxx-memory.md`: the C++ front end's peak memory on OpenTTD
+  against clang, where it goes and what is left (splitting `entity`).
 - `PLAN-cxx.md`: the first C++ plan (steps X0-X7): a minimal front end to
   test the instantiation cache and per-symbol codegen on libc++'s tests and
   nlohmann/json.  Update a step's status there.  `bench/cxx-profile.py
