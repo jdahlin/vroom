@@ -682,7 +682,8 @@ template_ref semantic_analysis::function_template_of(entity_index held,
         return 0;
     const record_chains &chains = held_templates();
     for (uint32_t i = chains.first(held); i; i = chains.after(i)) {
-        const function_template &f = function_templates[i - 1];
+        const function_template &f =
+            function_templates[template_ref::from_number(i)];
         if (!f.unusable && !f.is_class && !f.is_alias && !f.is_variable &&
             is_namespace(entity_table[f.entity].enclosing) != member)
             return template_ref::from_number(i);
@@ -703,7 +704,7 @@ entity_index semantic_analysis::member_templates_of(entity_index e) const
 }
 
 void semantic_analysis::function_template_overloads(
-    entity_index held, owned_array<uint32_t> &out) const
+    entity_index held, owned_array<template_ref> &out) const
 {
     out.clear();
     if (!held)
@@ -722,7 +723,8 @@ void semantic_analysis::function_template_overloads(
     if (in_ns)
         base_ns = non_inline_ns(entity_table[held].enclosing);
     auto usable = [&](uint32_t i) {
-        const function_template &f = function_templates[i - 1];
+        const function_template &f =
+            function_templates[template_ref::from_number(i)];
         return !f.unusable && !f.is_class && !f.is_alias && !f.is_variable;
     };
     /* the templates the held entity, or one it shadows, holds */
@@ -730,7 +732,7 @@ void semantic_analysis::function_template_overloads(
     for (entity_index h = held; h; h = entity_table[h].using_shadow_of)
         for (uint32_t i = chains.first(h); i; i = chains.after(i))
             if (usable(i))
-                out.append(i);
+                out.append(template_ref::from_number(i));
     /* and the namespace's of that name, over its inline namespaces */
     if (in_ns) {
         templates_by_identifier.update(function_templates,
@@ -739,10 +741,11 @@ void semantic_analysis::function_template_overloads(
                                        });
         for (uint32_t i = templates_by_identifier.first(held_id); i;
              i = templates_by_identifier.after(i)) {
-            entity_index fn = function_templates[i - 1].name;
+            entity_index fn =
+                function_templates[template_ref::from_number(i)].name;
             if (usable(i) && fn && is_namespace(entity_table[fn].enclosing) &&
                 non_inline_ns(entity_table[fn].enclosing) == base_ns)
-                out.append(i);
+                out.append(template_ref::from_number(i));
         }
     }
     /* in declaration order, each once */
@@ -851,8 +854,8 @@ semantic_analysis::template_of_form(entity_index e,
         return 0;
     const record_chains &chains = held_templates();
     for (uint32_t i = chains.first(e); i; i = chains.after(i))
-        if (function_templates[i - 1].*form &&
-            !function_templates[i - 1].unusable)
+        if (function_templates[template_ref::from_number(i)].*form &&
+            !function_templates[template_ref::from_number(i)].unusable)
             return template_ref::from_number(i);
     return 0;
 }
@@ -888,7 +891,8 @@ type_index semantic_analysis::dependent_specialization(
 {
     if (uint32_t k = find_instantiation(
             t, arguments.data(), static_cast<uint32_t>(arguments.size())))
-        return entity_table[instantiations[k - 1].specialization]
+        return entity_table[instantiations[instantiation_ref::from_number(k)]
+                                .specialization]
             .type.unqualified();
     instantiation_record record;
     record.template_entity = t;
@@ -1278,7 +1282,8 @@ template_ref semantic_analysis::bound_template_template_of(SyntaxRef id) const
         uint32_t record = entity_table[b.parameter].template_record.number();
         if (!record)
             continue;
-        const function_template &formal = function_templates[record - 1];
+        const function_template &formal =
+            function_templates[template_ref::from_number(record)];
         if (id.first_token() < formal.declaration.first_token() ||
             id.first_token() >= formal.declaration.end_token())
             continue;

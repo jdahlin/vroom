@@ -430,13 +430,13 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
         object.node =
             expression_node(semantic_kind::entity, object, at, e.index());
     }
-    owned_array<uint32_t> group;
+    owned_array<template_ref> group;
     for (entity_index h : held) {
-        owned_array<uint32_t> one;
+        owned_array<template_ref> one;
         function_template_overloads(h, one);
-        for (uint32_t g : one) {
+        for (template_ref g : one) {
             bool listed = false;
-            for (uint32_t other : group)
+            for (template_ref other : group)
                 if (other == g)
                     listed = true;
             if (!listed)
@@ -446,14 +446,14 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
     owned_array<overload_candidate> candidates;
     owned_array<uint32_t> first_arguments;
     owned_array<template_argument> all;
-    for (uint32_t g : group) {
+    for (template_ref g : group) {
         owned_array<template_argument> given;
         template_argument index;
         /* [temp.arg]: a template whose first parameter is a type's or a
            template's takes no value argument and is no candidate (std::get
            by type, get<T>(pair)); another that is no integral one is not
            analysed */
-        const function_template f = function_templates[g - 1];
+        const function_template f = function_templates[g];
         if (f.parameter_count) {
             entity_kind first =
                 entity_table[template_parameter_entities[f.first_parameter]]
@@ -462,9 +462,9 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
                 first == entity_kind::template_entity)
                 continue;
         }
-        VTRY_SET(r, index_argument(n, template_ref::from_number(g), i, index));
+        VTRY_SET(r, index_argument(n, g, i, index));
         given.append(index);
-        owned_array<uint32_t> one;
+        owned_array<template_ref> one;
         one.append(g);
         VTRY_SET(r, template_candidates(n, one, &object, 1, candidates,
                                         &first_arguments, &all, nullptr,

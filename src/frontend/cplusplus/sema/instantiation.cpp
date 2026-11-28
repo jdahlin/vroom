@@ -80,7 +80,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             static_cast<owned_array<parameter_meaning> &&>(function_parameters);
         size_t expressions_before = expressions.size();
         size_t uses_before = name_uses.size();
-        current_scope = instantiations[index].scope;
+        current_scope = instantiations.at_index(index).scope;
         /* [temp.res]/10: the declaration's names that do not depend on a
            parameter are those in scope at the template's declaration, not
            at the call (or the constraint) that asks for the
@@ -196,7 +196,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             deleted_body(ft.definition.back())) {
             entity_table[e].deleted = true;
             entity_table[e].inline_ = true;
-            instantiations[index].defined = true;
+            instantiations.at_index(index).defined = true;
         }
         /* [temp.inst]/12: "If a function template f is called in a way
            that requires a default argument to be used, the dependent names
@@ -263,7 +263,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             /* [temp.deduct]/8: "If a substitution results in an invalid
                type or expression, type deduction fails." (the caller
                takes the diagnostics back) */
-            instantiations[index].substitution_failed = true;
+            instantiations.at_index(index).substitution_failed = true;
             return r;
         }
         if (r != analysis_result::well_formed)
@@ -281,18 +281,18 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             return not_supported_because(at, "temp.deduct", details[stage]);
         }
     }
-    if (instantiations[index].substitution_failed) {
+    if (instantiations.at_index(index).substitution_failed) {
         if (substituting)
             return analysis_result::ill_formed;
         return not_supported_because(
             at, "temp.deduct",
             "a use of a specialization whose substitution failed before");
     }
-    specialization = instantiations[index].specialization;
+    specialization = instantiations.at_index(index).specialization;
     if (!specialization)
         return not_supported_because(
             at, "temp.inst", "an instantiation that left no specialization");
-    instantiation_record &x = instantiations[index];
+    instantiation_record &x = instantiations.at_index(index);
     /* [ext.clang] a call of a C++ library builtin is the builtin's: its
        definition is not instantiated */
     if (needed && resolving_calls && cxx_library_builtin(specialization))
@@ -335,7 +335,7 @@ semantic_analysis::need_specialization_definition(SyntaxRef at, entity_index f)
     if (!entity_table[f].instantiation || unevaluated)
         return analysis_result::well_formed;
     uint32_t idx = entity_table[f].instantiation.index();
-    instantiation_record &rec = instantiations[idx];
+    instantiation_record &rec = instantiations.at_index(idx);
     const entity tmpl = entity_table[rec.template_entity];
     const function_template ft = function_templates[tmpl.template_record];
     if (rec.pending && !quiet_member_bodies)
@@ -389,7 +389,7 @@ semantic_analysis::quiet_definition_failed(SyntaxRef at, uint32_t index,
                                            analysis_result r,
                                            const unsupported_construct *cause)
 {
-    instantiation_record &x = instantiations[index];
+    instantiation_record &x = instantiations.at_index(index);
     x.defined = false;
     x.quiet = false;
     entity_table[x.specialization].defined = false;
@@ -431,8 +431,8 @@ semantic_analysis::quiet_definition_failed(SyntaxRef at, uint32_t index,
 analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
                                                           uint32_t index)
 {
-    if (!instantiations[index].requested_by && analysing)
-        instantiations[index].requested_by = analysing->node;
+    if (!instantiations.at_index(index).requested_by && analysing)
+        instantiations.at_index(index).requested_by = analysing->node;
     /* [temp.inst]/17: "There is an implementation-defined quantity that
        specifies the limit on the total depth of recursive
        instantiations"; [implimits]/2 suggests 1024, this one is lower
@@ -441,17 +441,18 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         return not_supported_because(
             at, "temp.inst",
             "function or variable instantiations nested 64 deep or more");
-    entity_index template_entity = instantiations[index].template_entity;
+    entity_index template_entity =
+        instantiations.at_index(index).template_entity;
     const function_template ft =
         function_templates[entity_table[template_entity].template_record];
     size_t unsupported_before = unsupported.size();
     uint32_t hidden_before = horizon_hidden;
-    bool quiet = instantiations[index].quiet;
+    bool quiet = instantiations.at_index(index).quiet;
     /* [impl.clang] one that only bodies nobody uses ask for (a member template called
        by an unused constructor, deque's __append) is as quiet, and its
        needs wait as theirs do (not an implicit member's, whose errors
        clang reports) */
-    entity_index spec = instantiations[index].specialization;
+    entity_index spec = instantiations.at_index(index).specialization;
     if (!entity_table[spec].member_definition_needed)
         for (const deferred_need &d : deferred_needs)
             if (d.needed == spec && !entity_table[d.by].implicit)
@@ -473,11 +474,12 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     uint32_t dependent_before = dependent_errors;
     uint32_t independent_before = independent_errors;
     uint32_t deleted_before = deleted_references;
-    enter_instantiation(context, instantiations[index].scope, ft.declaration);
+    enter_instantiation(context, instantiations.at_index(index).scope,
+                        ft.declaration);
     expanding = false;
     instantiating = index + 1;
-    instantiations[index].defining = true;
-    instantiations[index].pending = false;
+    instantiations.at_index(index).defining = true;
+    instantiations.at_index(index).pending = false;
     /* a member function template's definition, in its class
        ([temp.mem]): its declarator's cv-qualifier-seq the member's */
     member_template_declarator(
@@ -485,7 +487,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     /* (defined outside its class, [temp.mem]/1: its qualified declarator-id
        is at the scope of the template-parameters' names) */
     if (ft.definition != ft.declarator)
-        template_member_scope = instantiations[index].scope;
+        template_member_scope = instantiations.at_index(index).scope;
     analysis_result r = analysis_result::well_formed;
     if (entity_table[template_entity].special == special_member::constructor) {
         /* a constructor template's ([temp.mem]/1): its declarator again
@@ -499,20 +501,20 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         function_parameters.clear();
         r = constructor_template_declarator(
             ft.definition, d_syntax[d_skip + specifiers], type, m);
-        last_declared = instantiations[index].specialization;
+        last_declared = instantiations.at_index(index).specialization;
         if (r == analysis_result::well_formed)
             r = special_member_body(
                 d_syntax, d_syntax[d_skip + specifiers + 1 +
                                    (static_cast<bool>(
                                        trailing_constraint(ft.declaration)))]
                               .function_body());
-    } else if (entity_table[instantiations[index].specialization]
+    } else if (entity_table[instantiations.at_index(index).specialization]
                    .conversion_function) {
         auto d_syntax = ft.definition;
         uint32_t d_skip = leading_gnu_attributes(ft.definition);
         bool specifiers = d_syntax[d_skip].is(syntax_kind::decl_specifier_seq);
         function_parameters.clear();
-        last_declared = instantiations[index].specialization;
+        last_declared = instantiations.at_index(index).specialization;
         auto body =
             d_syntax[d_skip + specifiers + 1 +
                      (static_cast<bool>(trailing_constraint(ft.declaration)))]
@@ -521,8 +523,9 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     } else if (ft.definition.is(syntax_kind::lambda_expression)) {
         /* a generic lambda's ([expr.prim.lambda.closure]/3) */
         qualified_type type;
-        r = lambda_specialization(ft.definition, true, type,
-                                  instantiations[index].specialization);
+        r = lambda_specialization(
+            ft.definition, true, type,
+            instantiations.at_index(index).specialization);
     } else {
         bool saved_friend = friend_allowed;
         friend_allowed = ft.friend_class != 0;
@@ -533,7 +536,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         friend_allowed = saved_friend;
     }
     member_template_declarator(0);
-    instantiations[index].defining = false;
+    instantiations.at_index(index).defining = false;
     /* [temp.res]/6, /8: an error of a construct naming no template
        argument is the template's ([impl.clang] clang reports it at the definition);
        one naming an argument is the specialization's, its use's, unless
@@ -542,8 +545,8 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     bool dependent = dependent_errors > dependent_before &&
                      independent_errors == independent_before;
     leave_instantiation(context);
-    instantiations[index].defined = true;
-    entity_table[instantiations[index].specialization].defined = true;
+    instantiations.at_index(index).defined = true;
+    entity_table[instantiations.at_index(index).specialization].defined = true;
     quiet_member_bodies -= quiet;
     defer_next_body_needs = false;
     if (r == analysis_result::well_formed)
@@ -561,7 +564,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         return quiet_definition_failed(at, index, r, why);
     }
     /* (one analysed where a substitution is tried is not diagnosed here) */
-    instantiations[index].body_ill_formed =
+    instantiations.at_index(index).body_ill_formed =
         r == analysis_result::ill_formed && !diagnostics.suppressed;
     if (r == analysis_result::unsupported &&
         unsupported.size() > unsupported_before) {
@@ -571,14 +574,15 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
            declaration below is not the translation unit's when it is a
            member of a class.  (It stays defined for the analysis: a use
            in an unevaluated operand is as well-formed as before.) */
-        entity_index f = instantiations[index].specialization;
+        entity_index f = instantiations.at_index(index).specialization;
         body_failures.append(unsupported[unsupported_before]);
         entity_table[f].unsupported_body =
             static_cast<uint32_t>(body_failures.size());
     }
     explicit_instantiation_verdict(
-        instantiations[index].specialization, r,
-        entity_table[instantiations[index].specialization].unsupported_body,
+        instantiations.at_index(index).specialization, r,
+        entity_table[instantiations.at_index(index).specialization]
+            .unsupported_body,
         dependent);
     /* a generic lambda's specialization is no declaration of its own: an
        ill-formed body is the enclosing declaration's error (its use there
@@ -587,8 +591,8 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         ft.definition.is(syntax_kind::lambda_expression))
         lambda_error_in_enclosing(ft.definition);
     if (r == analysis_result::ill_formed && dependent &&
-        instantiations[index].wanted_by)
-        use_ill_formed(instantiations[index].wanted_by);
+        instantiations.at_index(index).wanted_by)
+        use_ill_formed(instantiations.at_index(index).wanted_by);
     /* [impl.clang] a deleted function referred to by another template's
        declaration (a non-type parameter's type, substituted here) is
        reported there: not this pattern's error */
@@ -622,7 +626,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         !strcmp(unsupported[unsupported_before].detail, "if consteval");
     /* ... an explicit instantiation's too, whose errors are its own: one
        that fails is not known to be well-formed */
-    SyntaxRef requester = instantiations[index].requested_by;
+    SyntaxRef requester = instantiations.at_index(index).requested_by;
     if (r != analysis_result::well_formed &&
         unsupported.size() > unsupported_before && requester &&
         requester != ft.declaration &&
@@ -631,8 +635,8 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     if (r == analysis_result::unsupported &&
         unsupported.size() > unsupported_before &&
         (horizon_hidden != hidden_before || undecided_body) &&
-        instantiations[index].requested_by != ft.declaration)
-        charge_requester(instantiations[index].requested_by,
+        instantiations.at_index(index).requested_by != ft.declaration)
+        charge_requester(instantiations.at_index(index).requested_by,
                          unsupported_before);
     /* the use names a function all the same */
     return analysis_result::well_formed;
@@ -769,7 +773,7 @@ semantic_analysis::instantiate_class(SyntaxRef at, template_ref class_template,
         incomplete_argument = true;
     if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
         uint32_t k = prior - 1;
-        const instantiation_record x = instantiations[k];
+        const instantiation_record x = instantiations.at_index(k);
         c = x.specialization;
         if (!c || entity_table[c].kind != entity_kind::class_type) {
             /* the definition failed earlier, perhaps where the failure was
@@ -799,9 +803,9 @@ semantic_analysis::instantiate_class(SyntaxRef at, template_ref class_template,
                                             arguments, count);
         VTRY(matched, matching_specialization(at, class_template, arguments,
                                               count, pattern, deduced));
-        instantiations[k].unmatched = false;
+        instantiations.at_index(k).unmatched = false;
         if (pattern != x.pattern) {
-            instantiation_record &y = instantiations[k];
+            instantiation_record &y = instantiations.at_index(k);
             y.pattern = pattern;
             y.first_deduced = static_cast<uint32_t>(template_arguments.size());
             for (const template_argument &a : deduced)
@@ -809,7 +813,8 @@ semantic_analysis::instantiate_class(SyntaxRef at, template_ref class_template,
         }
         SyntaxRef defined_by = ft.definition;
         if (pattern)
-            defined_by = function_templates[pattern - 1].definition;
+            defined_by = function_templates[template_ref::from_number(pattern)]
+                             .definition;
         if (defined_by && !declaring_specializations && !incomplete_argument)
             return define_class_outside(at, k, c);
         /* declared before (a friend of the class being defined, whose
@@ -828,9 +833,9 @@ semantic_analysis::instantiate_class(SyntaxRef at, template_ref class_template,
         /* named again where no complete type is needed: the use that needs
            it defines it (complete_instantiation) */
         if (defined_by && lazy_return) {
-            instantiations[k].lazy = true;
-            if (!instantiations[k].lazy_at)
-                instantiations[k].lazy_at = at;
+            instantiations.at_index(k).lazy = true;
+            if (!instantiations.at_index(k).lazy_at)
+                instantiations.at_index(k).lazy_at = at;
         }
         return analysis_result::well_formed;
     }
@@ -875,7 +880,8 @@ semantic_analysis::instantiate_class(SyntaxRef at, template_ref class_template,
     instantiations.append(record);
     SyntaxRef defined_by = ft.definition;
     if (pattern)
-        defined_by = function_templates[pattern - 1].definition;
+        defined_by =
+            function_templates[template_ref::from_number(pattern)].definition;
     if (!defined_by || declaring_specializations || incomplete_argument) {
         /* [temp.class]/1's template, or [temp.expl.spec]/1's explicit
            specialization, declared, not yet defined: the specialization
@@ -893,13 +899,13 @@ semantic_analysis::instantiate_class(SyntaxRef at, template_ref class_template,
         entity_table[c].type = qualified_type::make(
             type_table.of_entity(type_kind::class_type, c), cv_none);
         entity_table[c].instantiation = instantiation_ref::at(index);
-        instantiations[index].specialization = c;
-        instantiations[index].named_before_definition = !defined_by;
+        instantiations.at_index(index).specialization = c;
+        instantiations.at_index(index).named_before_definition = !defined_by;
         /* (declared while the specializations of a class are declared:
            the use that needs it complete defines it) */
         if ((lazy_return || declaring_specializations) && defined_by) {
-            instantiations[index].lazy = true;
-            instantiations[index].lazy_at = at;
+            instantiations.at_index(index).lazy = true;
+            instantiations.at_index(index).lazy_at = at;
         }
         if (defining_argument && defined_by && !declaring_specializations)
             deferred_class_instantiations.append(
@@ -917,14 +923,14 @@ void semantic_analysis::complete_instantiation(entity_index c)
     if (!x.instantiation || x.defined || x.size)
         return;
     uint32_t index = x.instantiation.index();
-    if (instantiations[index].defining)
+    if (instantiations.at_index(index).defining)
         return;
-    if (!instantiations[index].lazy) {
+    if (!instantiations.at_index(index).lazy) {
         /* [temp.inst]/2: named before its template was defined (libc++'s
            streampos, in iosfwd, before <__ios/fpos.h> defines fpos), it
            was made an incomplete class: the use that needs it complete
            names it again, where the template defines it now */
-        const instantiation_record record = instantiations[index];
+        const instantiation_record record = instantiations.at_index(index);
         /* (a friend's, with no pattern chosen: a partial specialization
            may define it) */
         if (record.has_failure || !record.specialization ||
@@ -956,9 +962,9 @@ void semantic_analysis::complete_instantiation(entity_index c)
                           again.data(), record.argument_count, done);
         return;
     }
-    instantiations[index].lazy = false;
+    instantiations.at_index(index).lazy = false;
     entity_index done = 0;
-    define_class_outside(instantiations[index].lazy_at, index, done);
+    define_class_outside(instantiations.at_index(index).lazy_at, index, done);
 }
 
 bool semantic_analysis::require_complete(entity_index c) const
@@ -1001,7 +1007,7 @@ analysis_result semantic_analysis::define_class_outside(SyntaxRef at,
    friend declaration only named, chosen when it is defined */
 analysis_result semantic_analysis::choose_pattern(SyntaxRef at, uint32_t index)
 {
-    const instantiation_record x = instantiations[index];
+    const instantiation_record x = instantiations.at_index(index);
     template_ref class_template = class_template_of(x.template_entity);
     owned_array<template_argument> arguments;
     for (uint32_t i = 0; i < x.argument_count; i++)
@@ -1010,7 +1016,7 @@ analysis_result semantic_analysis::choose_pattern(SyntaxRef at, uint32_t index)
     owned_array<template_argument> deduced;
     VTRY(matched, matching_specialization(at, class_template, arguments.data(),
                                           x.argument_count, pattern, deduced));
-    instantiation_record &y = instantiations[index];
+    instantiation_record &y = instantiations.at_index(index);
     y.unmatched = false;
     y.pattern = pattern;
     y.first_deduced = static_cast<uint32_t>(template_arguments.size());
@@ -1044,17 +1050,18 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
         return not_supported_because(at, "temp.inst",
                                      "class instantiations nested 64 deep or "
                                      "more (defining a specialization)");
-    if (instantiations[index].unmatched) {
+    if (instantiations.at_index(index).unmatched) {
         VTRY(chosen, choose_pattern(at, index));
     }
-    const instantiation_record record = instantiations[index];
+    const instantiation_record record = instantiations.at_index(index);
     const function_template ft =
         function_templates[entity_table[record.template_entity]
                                .template_record];
     function_template definition = ft;
     if (record.pattern)
-        definition = function_templates[record.pattern - 1];
-    instantiations[index].defining = true;
+        definition =
+            function_templates[template_ref::from_number(record.pattern)];
+    instantiations.at_index(index).defining = true;
     size_t unsupported_before = unsupported.size();
     instantiation_context context;
     enter_instantiation(context, entity_table[ft.entity].enclosing,
@@ -1067,8 +1074,8 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
     analysis_result r = class_specifier(definition.definition, type);
     postpone_member_bodies = false;
     leave_instantiation(context);
-    instantiations[index].defining = false;
-    c = instantiations[index].specialization;
+    instantiations.at_index(index).defining = false;
+    c = instantiations.at_index(index).specialization;
     if (r == analysis_result::well_formed && c &&
         entity_table[c].kind == entity_kind::class_type)
         for (uint32_t m = 0; m < template_member_definitions.size(); m++)
@@ -1088,13 +1095,14 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
        it at the use, "in instantiation of"); the use cannot go on without the
        class and is not judged */
     if (unsupported.size() > unsupported_before) {
-        instantiations[index].failure = unsupported[unsupported_before];
-        instantiations[index].has_failure = true;
+        instantiations.at_index(index).failure =
+            unsupported[unsupported_before];
+        instantiations.at_index(index).has_failure = true;
     }
     c = 0;
     analysis_result refused = not_supported(at, "temp.inst");
-    if (instantiations[index].has_failure)
-        instantiation_detail(instantiations[index].failure);
+    if (instantiations.at_index(index).has_failure)
+        instantiation_detail(instantiations.at_index(index).failure);
     else if (r == analysis_result::ill_formed) {
         const char *why = "the specialization is ill-formed";
         last_unsupported_detail(why, strlen(why));
@@ -1114,7 +1122,7 @@ analysis_result semantic_analysis::defer_or_define_member(uint32_t m,
                                                           bool recorded)
 {
     const template_member_definition o = template_member_definitions[m];
-    bool now = o.inner || !instantiations[index].specialization;
+    bool now = o.inner || !instantiations.at_index(index).specialization;
     if (!now && o.definition.is(syntax_kind::simple_declaration) &&
         out_of_class_class_member(sole_decl_specifier(o.definition), nullptr))
         now = true;
@@ -1124,7 +1132,7 @@ analysis_result semantic_analysis::defer_or_define_member(uint32_t m,
         token_index name = member_definition_name(o);
         entity_index v = 0;
         if (name)
-            v = entity_table.find(instantiations[index].specialization,
+            v = entity_table.find(instantiations.at_index(index).specialization,
                                   tokens.identifier(name));
         if (v && entity_table[v].kind == entity_kind::variable &&
             (entity_table[v].constexpr_ ||
@@ -1135,7 +1143,7 @@ analysis_result semantic_analysis::defer_or_define_member(uint32_t m,
         return define_template_member(m, index, recorded);
     }
     postponed_body b = {};
-    b.c = instantiations[index].specialization;
+    b.c = instantiations.at_index(index).specialization;
     b.member_definition = m + 1;
     b.instantiation = index;
     postponed_bodies.append(b);
@@ -1163,7 +1171,7 @@ void semantic_analysis::define_waiting_members(entity_index scope,
     for (size_t i = 0; i < count; i++) {
         const postponed_body b = postponed_bodies[i];
         if (!b.c || !b.member_definition ||
-            instantiations[b.instantiation].specialization != scope)
+            instantiations.at_index(b.instantiation).specialization != scope)
             continue;
         token_index n = member_definition_name(
             template_member_definitions[b.member_definition - 1]);
@@ -1285,7 +1293,8 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     uint32_t lookup_id = member_definition_lookup_id(o, name);
     if (!lookup_id)
         return true;
-    entity_index scope = instantiations[b.instantiation].specialization;
+    entity_index scope =
+        instantiations.at_index(b.instantiation).specialization;
     /* (a virtual function is needed by the vtable, [temp.inst]/11; an
        explicit instantiation of the class defines its members, /10) */
     if (entity_table[scope].explicitly_instantiated ==
@@ -1547,15 +1556,15 @@ void semantic_analysis::instantiate_pending(bool at_end)
         for (; next_definition < pending_definitions.size();
              next_definition++) {
             uint32_t index = pending_definitions[next_definition];
-            if (!instantiations[index].pending)
+            if (!instantiations.at_index(index).pending)
                 continue;
-            entity_index t = instantiations[index].template_entity;
+            entity_index t = instantiations.at_index(index).template_entity;
             const function_template ft =
                 function_templates[entity_table[t].template_record];
             if (!at_end && !instantiable_early(ft.declaration))
                 continue;
             if (!ft.definition) {
-                instantiations[index].pending = false;
+                instantiations.at_index(index).pending = false;
                 continue;
             }
             instantiate_definition(ft.declaration, index);
@@ -1595,8 +1604,9 @@ void semantic_analysis::bind_specialization_parameters(entity_index e,
                                                        uint32_t record,
                                                        uint32_t index)
 {
-    const function_template ft = function_templates[record - 1];
-    const instantiation_record x = instantiations[index];
+    const function_template ft =
+        function_templates[template_ref::from_number(record)];
+    const instantiation_record x = instantiations.at_index(index);
     for (uint32_t i = 0; i < ft.parameter_count && i < x.argument_count; i++)
         bind_template_argument(
             e, template_parameter_entities[ft.first_parameter + i],
@@ -1619,7 +1629,7 @@ analysis_result semantic_analysis::declare_specialization(
 {
     uint32_t index = instantiating - 1;
     instantiating = 0;
-    instantiation_record &record = instantiations[index];
+    instantiation_record &record = instantiations.at_index(index);
     if (record.specialization) {
         /* the definition of a specialization whose declaration was
            instantiated before */
@@ -1709,8 +1719,9 @@ analysis_result semantic_analysis::declare_variable_specialization(
     uint32_t index = variable_instantiating - 1;
     variable_instantiating = 0;
     /* (a copy: making the entity can move the table) */
-    const entity t = entity_table[instantiations[index].template_entity];
-    bool explicit_ = instantiations[index].explicit_specialization;
+    const entity t =
+        entity_table[instantiations.at_index(index).template_entity];
+    bool explicit_ = instantiations.at_index(index).explicit_specialization;
     if ((s.constexpr_ != t.constexpr_ && !explicit_) || s.extern_ || s.typedef_)
         return not_supported_because(
             declaration, "temp.inst",
@@ -1734,7 +1745,7 @@ analysis_result semantic_analysis::declare_variable_specialization(
         entity_table[e].inline_ = false;
     entity_table[e].instantiation = instantiation_ref::at(index);
     entity_table.add_declaration(e, declaration);
-    instantiations[index].specialization = e;
+    instantiations.at_index(index).specialization = e;
     declared_name d;
     d.declaration = declaration;
     d.outermost = current_declaration;
@@ -1809,7 +1820,8 @@ bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
 {
     for (uint32_t k = template_record(t).number(); k;
          k = templates_by_entity.after(k)) {
-        const function_template &ft = function_templates[k - 1];
+        const function_template &ft =
+            function_templates[template_ref::from_number(k)];
         if (i >= ft.parameter_count)
             continue;
         const entity &p =
@@ -1833,7 +1845,8 @@ SyntaxRef semantic_analysis::parameter_type_constraint(entity_index t,
 {
     for (uint32_t k = template_record(t).number(); k;
          k = templates_by_entity.after(k)) {
-        const function_template &ft = function_templates[k - 1];
+        const function_template &ft =
+            function_templates[template_ref::from_number(k)];
         if (i >= ft.parameter_count)
             continue;
         template_parameter_parts x;

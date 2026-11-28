@@ -1149,21 +1149,21 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
     } else if (x.entity && !x.ambiguous &&
                entity_table[x.entity].member_templates)
         held = member_templates_of(x.entity);
-    owned_array<uint32_t> group;
+    owned_array<template_ref> group;
     if (held)
         function_template_overloads(held, group);
     /* ([namespace.memdef]/3: a friend declaration is not found by an
        unqualified lookup) */
-    owned_array<uint32_t> found_templates;
-    for (uint32_t t2 : group)
-        if (!function_templates[t2 - 1].friend_declaration)
+    owned_array<template_ref> found_templates;
+    for (template_ref t2 : group)
+        if (!function_templates[t2].friend_declaration)
             found_templates.append(t2);
-    group = static_cast<owned_array<uint32_t> &&>(found_templates);
+    group = static_cast<owned_array<template_ref> &&>(found_templates);
     if (group.size() != 1)
         return not_supported_because(
             n, "over.over",
             "a member template-id naming no template or several");
-    template_ref ft = template_ref::from_number(group[0]);
+    template_ref ft = group[0];
     owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     VTRY_SET(r, written_arguments_of(id, written, expansion));

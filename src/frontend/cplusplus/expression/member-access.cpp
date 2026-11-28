@@ -608,11 +608,13 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     uint32_t made_by = entity_table[c].instantiation.number();
     if (entity_table[c].kind != entity_kind::class_type) {
         /* a class whose definition was not analysed */
-        if (made_by && instantiations[made_by - 1].has_failure)
+        if (made_by &&
+            instantiations[instantiation_ref::from_number(made_by)].has_failure)
             return not_supported_caused_by(
                 n, "class.pre",
                 "member access on a class whose instantiation failed",
-                instantiations[made_by - 1].failure);
+                instantiations[instantiation_ref::from_number(made_by)]
+                    .failure);
         return not_supported_because(
             n, "class.pre",
             "member access on a class type whose entity is not a class");

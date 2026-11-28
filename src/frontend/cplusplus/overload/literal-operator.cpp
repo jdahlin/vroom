@@ -297,14 +297,14 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
         } else if (held_templates) {
             /* [lex.ext]/3: a numeric literal operator template:
                operator "" X<'c1', 'c2', ...>() */
-            owned_array<uint32_t> group;
+            owned_array<template_ref> group;
             function_template_overloads(held_templates, group);
             if (group.size() != 1)
                 return not_supported_because(
                     current_declaration, "lex.ext",
                     "a numeric literal operator template with more than one "
                     "overload");
-            uint32_t ft = group[0];
+            template_ref ft = group[0];
             owned_array<template_argument> chars;
             qualified_type char_type = qualified_type::make(
                 type_table.fundamental(fundamental_type::char_), cv_none);
@@ -320,9 +320,9 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
             }
             template_argument pack =
                 make_pack(chars.data(), static_cast<uint32_t>(chars.size()));
-            VTRY(ir, instantiate(current_declaration,
-                                 function_templates[ft - 1].entity, &pack, 1,
-                                 chosen));
+            VTRY(ir,
+                 instantiate(current_declaration, function_templates[ft].entity,
+                             &pack, 1, chosen));
         } else {
             return not_supported_because(
                 current_declaration, "lex.ext",

@@ -432,8 +432,9 @@ analysis_result semantic_analysis::constructible_types(
            element) */
         uint32_t record = entity_table[c].instantiation.number();
         if (record && !entity_table[c].defined && !entity_table[c].size &&
-            !instantiations[record - 1].defining &&
-            instantiations[record - 1].specialization == c) {
+            !instantiations[instantiation_ref::from_number(record)].defining &&
+            instantiations[instantiation_ref::from_number(record)]
+                    .specialization == c) {
             entity_index done = c;
             VTRY(defined, define_class_outside(n, record - 1, done));
         }

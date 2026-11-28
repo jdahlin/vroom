@@ -796,7 +796,8 @@ entity_index semantic_analysis::dependent_variable_specialization(
     entity_index s = 0;
     const record_chains &chains = instantiations_of_templates();
     for (uint32_t n = chains.first(v); n; n = chains.after(n)) {
-        const instantiation_record &i = instantiations[n - 1];
+        const instantiation_record &i =
+            instantiations[instantiation_ref::from_number(n)];
         if (i.argument_count != arguments.size() || !i.specialization ||
             entity_table[i.specialization].kind !=
                 entity_kind::template_specialization)

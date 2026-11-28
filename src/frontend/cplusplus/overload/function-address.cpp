@@ -86,11 +86,11 @@ bool semantic_analysis::function_set_at(token_index at, function_set &out) const
         /* [namespace.memdef]/3: a friend template declared in a class is
            not found by an unqualified lookup (no argument-dependent lookup
            in an address) */
-        owned_array<uint32_t> visible;
-        for (uint32_t t : out.templates)
-            if (!function_templates[t - 1].friend_declaration)
+        owned_array<template_ref> visible;
+        for (template_ref t : out.templates)
+            if (!function_templates[t].friend_declaration)
                 visible.append(t);
-        out.templates = static_cast<owned_array<uint32_t> &&>(visible);
+        out.templates = static_cast<owned_array<template_ref> &&>(visible);
         inline_set_functions(found.unknown_entity, out.functions);
         if (found.entity)
             overload_set(found.entity, out.functions);
@@ -209,13 +209,13 @@ bool semantic_analysis::function_target(qualified_type target,
  */
 analysis_result semantic_analysis::select_for_target(
     SyntaxRef at, const function_set &set, qualified_type ft,
-    set_selection &how, entity_index &function, uint32_t &template_index,
+    set_selection &how, entity_index &function, template_ref &template_index,
     owned_array<template_argument> &deduced, const char *&why,
     entity_index member_class)
 {
     how = set_selection::none;
     function = 0;
-    template_index = 0;
+    template_index = nullptr;
     why = "over.over";
     if (depends_on_template_parameter(ft)) {
         how = set_selection::unknown;
@@ -257,8 +257,8 @@ analysis_result semantic_analysis::select_for_target(
         how = set_selection::unknown;
         return analysis_result::well_formed;
     }
-    for (uint32_t t : set.templates) {
-        const entity &te = entity_table[function_templates[t - 1].entity];
+    for (template_ref t : set.templates) {
+        const entity &te = entity_table[function_templates[t].entity];
         if (member_class) {
             if (!te.nonstatic_member)
                 continue;
@@ -296,8 +296,7 @@ analysis_result semantic_analysis::select_for_target(
                                     wanted.function_cv, wanted.function_ref),
                 target.cv());
         }
-        VTRY(r, deduce_from_function_type(at, template_ref::from_number(t),
-                                          target, arguments, failed));
+        VTRY(r, deduce_from_function_type(at, t, target, arguments, failed));
         if (failed)
             continue;
         if (template_index) {
@@ -374,13 +373,13 @@ analysis_result semantic_analysis::template_id_for_target(SyntaxElement e,
                                      "the address of a friend function "
                                      "template by unqualified template-id");
     handled = true;
-    owned_array<uint32_t> group;
+    owned_array<template_ref> group;
     if (written_at)
         function_template_overloads(function_templates[found].name, group);
     else
-        group.append(found.number());
-    for (uint32_t g : group)
-        if (entity_table[function_templates[g - 1].entity].nonstatic_member)
+        group.append(found);
+    for (template_ref g : group)
+        if (entity_table[function_templates[g].entity].nonstatic_member)
             return not_supported_because(
                 id.index(), "over.over",
                 "the address of a template-id whose overloads include a "
@@ -472,7 +471,7 @@ semantic_analysis::overload_set_sequence(const expression_meaning &a,
     }
     set_selection how = set_selection::none;
     entity_index function = 0;
-    uint32_t template_index = 0;
+    template_ref template_index;
     owned_array<template_argument> deduced;
     const char *why = nullptr;
     analysis_result r = select_for_target(0, set, ft, how, function,
@@ -530,7 +529,7 @@ analysis_result semantic_analysis::target_expression(SyntaxElement e,
         at = without_parentheses(e).index();
     set_selection how = set_selection::none;
     entity_index chosen = 0;
-    uint32_t template_index = 0;
+    template_ref template_index;
     owned_array<template_argument> deduced;
     const char *why = nullptr;
     VTRY(r, select_for_target(at, set, ft, how, chosen, template_index, deduced,
@@ -545,10 +544,9 @@ analysis_result semantic_analysis::target_expression(SyntaxElement e,
                                    "type of the target",
                                    "over.over");
     if (template_index) {
-        VTRY_SET(r,
-                 instantiate(at, function_templates[template_index - 1].entity,
-                             deduced.data(),
-                             static_cast<uint32_t>(deduced.size()), chosen));
+        VTRY_SET(r, instantiate(at, function_templates[template_index].entity,
+                                deduced.data(),
+                                static_cast<uint32_t>(deduced.size()), chosen));
     }
     /* the name is analysed as the function chosen (id_expression) */
     overload_target_token = set.at;

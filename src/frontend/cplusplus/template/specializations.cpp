@@ -390,7 +390,8 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             if (v)
                 record = entity_table[ns.entity].instantiation.number();
             if (record &&
-                instantiations[record - 1].specialization == ns.entity &&
+                instantiations[instantiation_ref::from_number(record)]
+                        .specialization == ns.entity &&
                 entity_table[v].kind == entity_kind::variable && !lead &&
                 /* [dcl.init.general]: a const or constexpr member may
                    have its initializer in the class ([class.static.data]
@@ -420,7 +421,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     VTRY(r, named_specialization(n, inner, lead, true, false, s, index));
     /* [temp.expl.spec]/14 (Note): the template's exception specification
        is instantiated for the comparison: not here */
-    entity_index e = instantiations[index].specialization;
+    entity_index e = instantiations.at_index(index).specialization;
     if (!defines)
         return analysis_result::well_formed;
     if (entity_table[e].defined)
@@ -442,7 +443,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     function_cv = saved_cv;
     current_scope = saved_scope;
     if (r == analysis_result::well_formed &&
-        last_declared != instantiations[index].specialization)
+        last_declared != instantiations.at_index(index).specialization)
         return not_supported_because(
             n, "temp.expl.spec",
             "a specialization definition that declares a different entity");
@@ -604,7 +605,7 @@ semantic_analysis::function_explicit_instantiation(SyntaxRef n, SyntaxRef d,
     specified s;
     uint32_t index = 0;
     VTRY(r, named_specialization(n, d, lead, false, extern_, s, index));
-    entity_index e = instantiations[index].specialization;
+    entity_index e = instantiations.at_index(index).specialization;
     mark_explicit_instantiation(e, extern_);
     return analysis_result::well_formed;
 }
@@ -641,7 +642,8 @@ uint32_t semantic_analysis::find_instantiation(entity_index t,
     for (uint32_t k =
              instantiations_by_key.first(instantiation_bucket(t, a, count));
          k; k = instantiations_by_key.after(k)) {
-        const instantiation_record &x = instantiations[k - 1];
+        const instantiation_record &x =
+            instantiations[instantiation_ref::from_number(k)];
         if (x.template_entity != t || x.argument_count != count)
             continue;
         bool same = true;
@@ -684,13 +686,14 @@ semantic_analysis::record_instantiation(const function_template &ft,
     }
     if (ft.outer_instantiation) {
         const instantiation_record &ox =
-            instantiations[ft.outer_instantiation - 1];
+            instantiations[instantiation_ref::from_number(
+                ft.outer_instantiation)];
         function_template oof =
             function_templates[entity_table[ox.template_entity]
                                    .template_record];
         uint32_t first = ox.first_argument;
         if (ox.pattern) {
-            oof = function_templates[ox.pattern - 1];
+            oof = function_templates[template_ref::from_number(ox.pattern)];
             first = ox.first_deduced;
         }
         for (uint32_t i = 0; i < oof.parameter_count; i++)
@@ -825,7 +828,7 @@ semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
                                      "a variable specialization already used "
                                      "or with a wrong argument count");
     uint32_t index = record_instantiation(ft, arguments.data(), count);
-    instantiations[index].explicit_specialization = true;
+    instantiations.at_index(index).explicit_specialization = true;
     variable_instantiating = index + 1;
     declarator_template_id = true;
     r = simple_declaration(inner);
@@ -833,11 +836,11 @@ semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
     variable_instantiating = 0;
     if (r != analysis_result::well_formed)
         return r;
-    if (!instantiations[index].specialization)
+    if (!instantiations.at_index(index).specialization)
         return not_supported_because(
             n, "temp.expl.spec",
             "a variable specialization that declared no variable");
-    instantiations[index].defined = true;
+    instantiations.at_index(index).defined = true;
     return analysis_result::well_formed;
 }
 
@@ -1143,22 +1146,22 @@ analysis_result semantic_analysis::named_specialization(
     {
         /* [temp.func.order]/1.4: which of the name's templates the
            declaration refers to is partial ordering's: not analysed */
-        owned_array<uint32_t> group;
+        owned_array<template_ref> group;
         function_template_overloads(function_templates[ft].name, group);
         if (group.size() > 1) {
             /* [temp.deduct.decl]/1: without template arguments given, the
                templates whose deduction from the declared type succeeds;
                exactly one of them is the one named (more than one is
                partial ordering's) */
-            uint32_t chosen = 0;
+            template_ref chosen;
             /* [temp.explicit]/3, [temp.deduct.decl]/1: with template
                arguments written, each template takes them first and then
                deduces the rest from the declared type */
             bool unique = true;
-            for (uint32_t g : group) {
+            for (template_ref g : group) {
                 if (!unique)
                     break;
-                const function_template &c = function_templates[g - 1];
+                const function_template &c = function_templates[g];
                 /* ([namespace.def]/5: a member of an inline namespace of
                    the owner is a member of the owner too: libc++'s std::swap
                    is std::__1::swap) */
@@ -1198,8 +1201,8 @@ analysis_result semantic_analysis::named_specialization(
                     if (!completable)
                         continue;
                     size_t uses = name_uses.size();
-                    analysis_result w = template_id_arguments(
-                        m.template_id, template_ref::from_number(g), trial);
+                    analysis_result w =
+                        template_id_arguments(m.template_id, g, trial);
                     name_uses.resize(uses);
                     if (w != analysis_result::well_formed ||
                         trial.size() > c.parameter_count)
@@ -1225,7 +1228,7 @@ analysis_result semantic_analysis::named_specialization(
                 return not_supported_because(
                     n, rule,
                     "overloaded function templates (partial ordering)");
-            ft = template_ref::from_number(chosen);
+            ft = chosen;
             if (m.template_id && m.template_id.size() > 3) {
                 values.clear();
                 VTRY(ar, template_id_arguments(m.template_id, ft, values));
@@ -1289,7 +1292,8 @@ analysis_result semantic_analysis::named_specialization(
     uint32_t prior = find_instantiation(f.entity, values.data(),
                                         static_cast<uint32_t>(values.size()));
     if (prior) {
-        const instantiation_record &x = instantiations[prior - 1];
+        const instantiation_record &x =
+            instantiations[instantiation_ref::from_number(prior)];
         entity_index e = x.specialization;
         if (!e)
             return not_supported_because(
@@ -1320,7 +1324,8 @@ analysis_result semantic_analysis::named_specialization(
                 "an explicit instantiation after a specialization, "
                 "definition or use");
         if (extern_) {
-            instantiations[prior - 1].pending = false;
+            instantiations[instantiation_ref::from_number(prior)].pending =
+                false;
             entity_table[e].explicitly_instantiated =
                 instantiation_kind::declaration;
             entity_table.add_declaration(e, declaration);
@@ -1355,9 +1360,10 @@ analysis_result semantic_analysis::named_specialization(
     if (!specialization && !extern_) {
         explicit_instantiation_record(e, n);
         uint32_t at = entity_table[e].instantiation.index();
-        if (!instantiations[at].defined && !instantiations[at].pending &&
-            !instantiations[at].defining)
-            want_definition(instantiations[at], at);
+        if (!instantiations.at_index(at).defined &&
+            !instantiations.at_index(at).pending &&
+            !instantiations.at_index(at).defining)
+            want_definition(instantiations.at_index(at), at);
     }
     index = entity_table[e].instantiation.index();
     if (specialization) {
@@ -1365,8 +1371,8 @@ analysis_result semantic_analysis::named_specialization(
            or variable template is inline only if it is declared with the
            inline specifier or defined as deleted, and independently of
            whether its function or variable template is inline" */
-        instantiations[index].explicit_specialization = true;
-        instantiations[index].defined = true;
+        instantiations.at_index(index).explicit_specialization = true;
+        instantiations.at_index(index).defined = true;
         /* ([dcl.constexpr]/1: "A function ... declared with a constexpr
            ... specifier is implicitly an inline function") */
         entity_table[e].inline_ = s.inline_ || s.constexpr_;
@@ -1453,7 +1459,7 @@ analysis_result semantic_analysis::class_explicit_instantiation(
        explicitly specialized, declared only or defined, has no effect
        (clang warns, -Winstantiation-after-specialization) */
     for (size_t k = 0; k < function_templates.size(); k++) {
-        const function_template &o = function_templates[k];
+        const function_template &o = function_templates.at_index(k);
         if (o.primary != ct || o.parameter_count ||
             o.pattern_count != arguments.size())
             continue;
@@ -1557,7 +1563,8 @@ analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
         /* [temp.expl.spec]: an explicit specialization's class is no
            instantiation */
         if (record.pattern &&
-            !function_templates[record.pattern - 1].parameter_count)
+            !function_templates[template_ref::from_number(record.pattern)]
+                 .parameter_count)
             return not_supported_because(
                 n, "temp.explicit",
                 "an explicit instantiation of an explicitly specialized class");
@@ -1706,7 +1713,8 @@ analysis_result semantic_analysis::member_explicit_instantiation(
             "namespace");
     const instantiation_record record = instantiations[c.instantiation];
     if (record.pattern &&
-        !function_templates[record.pattern - 1].parameter_count)
+        !function_templates[template_ref::from_number(record.pattern)]
+             .parameter_count)
         return not_supported_because(
             n, "temp.explicit",
             "a member instantiation of an explicitly specialized class");

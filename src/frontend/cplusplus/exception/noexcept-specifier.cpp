@@ -644,7 +644,8 @@ bool semantic_analysis::dependent_exception_specification(entity_index t) const
 {
     for (uint32_t k = template_record(t).number(); k;
          k = templates_by_entity.after(k)) {
-        const function_template &f = function_templates[k - 1];
+        const function_template &f =
+            function_templates[template_ref::from_number(k)];
         if (!f.declaration)
             continue;
         auto d = f.declaration;
