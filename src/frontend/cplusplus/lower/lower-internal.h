@@ -515,6 +515,8 @@ class c_lowering
     bool is_reference(qualified_type t) const;
     /* -g (debug-names.cpp) */
     void debug_scope(entity_index e, vbuffer *out) const;
+    void debug_virtual_bases(entity_index e, ast_qualified_type made,
+                             token_index at);
     ast_qualified_type debug_enum_type(entity_index e, token_index at);
     ast_qualified_type debug_type(qualified_type t, token_index at);
     void debug_class_name(entity_index e, vbuffer *out);

@@ -53,7 +53,10 @@ registers; D3 changes that and measures run time and compile time.
   defined in the unit are declared in their class (object parameter
   artificial), their definitions refer to the declaration.  Members only
   declared or never used here are not listed.
-- **D4e**: virtual bases (`DW_AT_data_member_location` through the vtable).
+- **D4e, virtual bases** (done): each direct virtual base is a
+  `DW_TAG_inheritance` located through the virtual table.  Constructors and
+  destructors are no longer listed in their class (their variants made wrong
+  declarations); the virtual table pointer is not marked artificial.
 - **D5, optimized code**: location lists at `-O1` and up; until then a
   variable there is optimized out.
 

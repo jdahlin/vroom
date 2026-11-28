@@ -515,6 +515,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
             ast_builder_type_record_debug_type(
                 c, made, c_fields[member_order[i]], debug_type(m.type, at));
     }
+    debug_virtual_bases(e, made, at);
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
         const entity &m = analysis.entity_table[member];

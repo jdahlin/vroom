@@ -202,4 +202,35 @@ ast_qualified_type c_lowering::debug_type(qualified_type t, token_index at)
     return made;
 }
 
+/* -g: where the direct virtual bases of the class e are: through its
+   virtual table ([abi:vtable-components]: the offset of the i-th virtual
+   base is 3 + i entries below the address point, virtual_base_address) */
+void c_lowering::debug_virtual_bases(entity_index e, ast_qualified_type made,
+                                     token_index at)
+{
+    if (!ast_builder_debugging(c))
+        return;
+    const entity x = analysis.entity_table[e];
+    owned_array<uint32_t> pairs;
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity b =
+            analysis.entity_table[analysis.class_bases[x.first_base + i]];
+        if (!b.virtual_base)
+            continue;
+        const dynamic_class *d = analysis.dynamic_of(e);
+        entity_index base = record(b.type).entity;
+        uint32_t index = 0;
+        while (d && index < d->vbase_entry_count &&
+               analysis.vbase_entries[d->first_vbase_entry + index] != base)
+            index++;
+        if (!d || index == d->vbase_entry_count)
+            continue;
+        pairs.append(type(b.type, at));
+        pairs.append((3 + index) * 8);
+    }
+    if (pairs.size())
+        ast_builder_type_record_debug_virtual_bases(
+            c, made, pairs.data(), static_cast<uint32_t>(pairs.size() / 2));
+}
+
 } // namespace cplusplus::lowering

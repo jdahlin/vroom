@@ -54,6 +54,7 @@ enum {
     DEBUG_AT_DATA_BIT_OFFSET = 0x6b,
     DEBUG_AT_ARTIFICIAL = 0x34,
     DEBUG_AT_SPECIFICATION = 0x47,
+    DEBUG_AT_VIRTUALITY = 0x4c,
     DEBUG_AT_ENUM_CLASS = 0x6d,
     DEBUG_AT_LINKAGE_NAME = 0x6e,
 };
@@ -74,6 +75,8 @@ enum {
     DEBUG_FORM_FRAME_OFFSET = 0xf3,
     DEBUG_FORM_SYMBOL = 0xf4,
     DEBUG_FORM_MEMBER = 0xf5, /* ref4: a member's declaration in its class */
+    /* an expression: from an object's address, that of its virtual base */
+    DEBUG_FORM_VIRTUAL_BASE = 0xf6,
 };
 enum { DEBUG_ATTRIBUTES = 8, DEBUG_SHAPES = 96 };
 
@@ -264,6 +267,19 @@ static void debug_die_write(debug_writer *w, const debug_die *d)
             vtext_format_append(b, "\t.%s\t.Ldbg_m%llu-.Ldbg_cu\n", w->word,
                                 (unsigned long long)a->number);
             break;
+        case DEBUG_FORM_VIRTUAL_BASE: {
+            /* DW_OP_dup, deref (the virtual table), constu N, minus, deref
+               (the base's offset), plus */
+            unsigned bytes = 1;
+
+            for (uint64_t v = a->number; v > 127; v >>= 7)
+                bytes++;
+            vtext_format_append(b,
+                                "\t.byte\t%u, 18, 6, 16\n\t.uleb128\t%llu\n"
+                                "\t.byte\t28, 6, 34\n",
+                                bytes + 6, (unsigned long long)a->number);
+            break;
+        }
         case DEBUG_FORM_SYMBOL: /* DW_OP_addr */
             vtext_format_append(b, "\t.byte\t9, 3\n\t.%s\t", w->quad);
             codegen_symbol_name_append(w->c, b, (uint32_t)a->number);
@@ -596,6 +612,16 @@ static void debug_record_write(debug_writer *w, ast_qualified_type t)
         }
         debug_die_write(w, &m);
     }
+    for (uint32_t i = 0; i < r->debug_virtual_base_count; i++) {
+        const uint32_t *pair = &c->lists[r->debug_virtual_bases + 2 * i];
+        debug_die v = debug_die_new(DEBUG_TAG_INHERITANCE, false);
+
+        debug_die_type(w, &v, pair[0], 0);
+        debug_die_number(&v, DEBUG_AT_DATA_MEMBER_LOCATION,
+                         DEBUG_FORM_VIRTUAL_BASE, pair[1]);
+        debug_die_number(&v, DEBUG_AT_VIRTUALITY, DEBUG_FORM_UDATA, 1);
+        debug_die_write(w, &v);
+    }
     for (uint32_t i = 0; i < w->member_count; i++)
         if (AST_QUALIFIED_TYPE_INDEX(
                 codegen_symbol_attributes(c, w->members[i])->debug_class) ==
@@ -872,6 +898,22 @@ static bool debug_is_parameter(const cc *c, uint32_t function, uint32_t s)
     return false;
 }
 
+/* a constructor or destructor: its variants are several functions of one declaration, which
+   classes do not list yet */
+static bool debug_is_structor(cc *c, uint32_t s)
+{
+    const attrs *a = codegen_symbol_attributes(c, s);
+    const tag *r = &c->tags[T(c, a->debug_class)->aux];
+    const char *name;
+
+    if (!a->debug_name)
+        return true;
+    name = c->strs[a->debug_name - 1].s;
+    return name[0] == '~' ||
+           (strlen(name) == vintern_ents[r->name].len &&
+            !memcmp(name, vintern_ents[r->name].s, vintern_ents[r->name].len));
+}
+
 static void debug_function_append(debug_writer *w, uint32_t function,
                                   int version, const codegen_debug_frame *frame)
 {
@@ -889,8 +931,10 @@ static void debug_function_append(debug_writer *w, uint32_t function,
                       parameters || variadic || (frame && frame->count));
 
     /* (a class's member: declared in it, which this definition completes) */
-    bool member = a->debug_class && (c->tags[T(c, a->debug_class)->aux].flags &
-                                     AST_RECORD_FLAG_COMPLETE);
+    bool member =
+        a->debug_class &&
+        (c->tags[T(c, a->debug_class)->aux].flags & AST_RECORD_FLAG_COMPLETE) &&
+        !debug_is_structor(c, function);
 
     if (member) {
         debug_member_note(w, function, a->debug_class);
