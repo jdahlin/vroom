@@ -21,6 +21,7 @@
 #include "frontend/cplusplus/syntax.h"
 #include "frontend/cplusplus/builtin-registry.h"
 #include "frontend/cplusplus/stable-array.h"
+#include "common/fail.h"
 
 namespace cplusplus
 {
@@ -1600,7 +1601,7 @@ enum class semantic_kind : uint8_t {
     /* value- or zero-initialization: a scalar's 0, an array's all zero */
     zero,
     /* an array's elements, each initialized, in list[first .. first +
-       count); the rest zero */
+       count); the rest zero.  A union's: a: the member initialized */
     initializer_list,
     /* [dcl.init.aggr]/5.1: an element initialized from its default member
        initializer that names members: a: the initializer, b: the `this` it
@@ -1873,6 +1874,61 @@ struct semantic_node {
     /* a list's first index and its count */
     uint32_t first = 0, count = 0;
     uint64_t value = 0;
+
+    /* a and b hold a node, an entity or neither, by kind: an entity is
+       read and written only through these, which the ASan build checks
+       against the kind */
+    entity_index entity_a() const
+    {
+        check_payload(holds_entity_a());
+        return entity_index_in(a);
+    }
+    entity_index entity_b() const
+    {
+        check_payload(holds_entity_b());
+        return entity_index_in(b);
+    }
+    void set_entity_a(entity_index e)
+    {
+        check_payload(kind == semantic_kind::none || holds_entity_a());
+        a = e.index();
+    }
+    void set_entity_b(entity_index e)
+    {
+        check_payload(kind == semantic_kind::none || holds_entity_b());
+        b = e.index();
+    }
+
+  private:
+    bool holds_entity_a() const
+    {
+        return kind == semantic_kind::entity ||
+               kind == semantic_kind::declaration_statement ||
+               kind == semantic_kind::member_pointer ||
+               kind == semantic_kind::initializer_list;
+    }
+    bool holds_entity_b() const
+    {
+        return kind == semantic_kind::member ||
+               kind == semantic_kind::bound_member_function ||
+               kind == semantic_kind::construct ||
+               kind == semantic_kind::destroy ||
+               kind == semantic_kind::vtable_pointer_store ||
+               kind == semantic_kind::source_location ||
+               kind == semantic_kind::predefined_name ||
+               kind == semantic_kind::default_argument ||
+               kind == semantic_kind::default_member_initializer ||
+               kind == semantic_kind::conversion;
+    }
+    static void check_payload(bool holds)
+    {
+#if VCC_ASAN
+        if (!holds)
+            VBUG("semantic_node: no entity in this payload of this kind");
+#else
+        (void)holds;
+#endif
+    }
 };
 
 class semantic_tree

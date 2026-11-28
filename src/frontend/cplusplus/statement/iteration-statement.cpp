@@ -300,7 +300,7 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
                 n, "stmt.ranged",
                 "a begin or end member that gives no bound call");
         object = semantics[f.node].a;
-        chosen = entity_index_in(semantics[f.node].b);
+        chosen = semantics[f.node].entity_b();
         overload_set(chosen, set);
     } else {
         /* "where begin and end are looked up in the associated namespaces
@@ -333,7 +333,7 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
     if (set.size() > 1) {
         VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
         if (member)
-            chosen = entity_index_in(semantics[f.node].b);
+            chosen = semantics[f.node].entity_b();
     }
     return call_with(n, f, f.type, object, chosen, arguments, early, m);
 }

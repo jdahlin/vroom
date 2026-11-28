@@ -539,8 +539,8 @@ analysis_result semantic_analysis::best_viable_function(
                                     list_initializer_list(list_target);
                                 if (semantics[value.node].kind ==
                                     semantic_kind::construct)
-                                    a.function = entity_index_in(
-                                        semantics[value.node].b);
+                                    a.function =
+                                        semantics[value.node].entity_b();
                             }
                             if (tr.kind == type_kind::lvalue_reference ||
                                 tr.kind == type_kind::rvalue_reference) {

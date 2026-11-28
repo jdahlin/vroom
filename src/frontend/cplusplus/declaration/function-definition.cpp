@@ -668,7 +668,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
         }
         if (!b.has(language_feature::non_literal_constexpr_variables))
             for (uint32_t v : found.variables) {
-                const entity &e = entity_table[entity_index_in(semantics[v].a)];
+                const entity &e = entity_table[semantics[v].entity_a()];
                 if (e.automatic &&
                     literal_type(e.type) == constness::not_constant)
                     result = worse(

@@ -49,7 +49,7 @@ bool c_lowering::at_this(uint32_t n) const
     for (;;) {
         const semantic_node &x = node(n);
         if (x.kind == semantic_kind::entity)
-            return structor_this && entity_index_in(x.a) == structor_this;
+            return structor_this && x.entity_a() == structor_this;
         if (x.kind == semantic_kind::address ||
             x.kind == semantic_kind::indirection ||
             (x.kind == semantic_kind::conversion &&
@@ -64,16 +64,15 @@ entity_index c_lowering::base_subobject_of(uint32_t n) const
 {
     const semantic_node &x = node(n);
     if (x.kind == semantic_kind::member &&
-        analysis.entity_table[entity_index_in(x.b)].base_subobject &&
-        at_this(x.a))
-        return entity_index_in(x.b);
+        analysis.entity_table[x.entity_b()].base_subobject && at_this(x.a))
+        return x.entity_b();
     if (x.kind != semantic_kind::indirection)
         return 0;
     const semantic_node &p = node(x.a);
     if (p.kind == semantic_kind::conversion &&
         p.op == static_cast<uint8_t>(conversion_kind::derived_to_base) &&
         at_this(p.a))
-        return entity_index_in(p.b);
+        return p.entity_b();
     return 0;
 }
 
@@ -145,7 +144,7 @@ ast_qualified_type c_lowering::structor_type(entity_index e, token_index at)
  */
 uint32_t c_lowering::vtable_pointer_stores(const semantic_node &n)
 {
-    entity_index k = entity_index_in(n.b);
+    entity_index k = n.entity_b();
     const dynamic_class *d = analysis.dynamic_of(k);
     ast_qualified_type vp = pointer_to(void_type);
     ast_qualified_type vpp = pointer_to(vp);
@@ -215,12 +214,12 @@ uint32_t c_lowering::null_checked_offset(const semantic_node &n, int64_t offset,
         if (x.kind != semantic_kind::conversion)
             break;
         conversion_kind k = static_cast<conversion_kind>(x.op);
-        int64_t by = static_cast<int64_t>(
-            analysis.entity_table[entity_index_in(x.b)].offset);
+        int64_t by =
+            static_cast<int64_t>(analysis.entity_table[x.entity_b()].offset);
         if (k == conversion_kind::base_to_derived)
             by = -by;
         else if (k != conversion_kind::derived_to_base ||
-                 analysis.entity_table[entity_index_in(x.b)].virtual_base)
+                 analysis.entity_table[x.entity_b()].virtual_base)
             break;
         offset += by;
         operand = x.a;

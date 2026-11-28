@@ -878,7 +878,7 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
             address.type = qualified_type::make(
                 type_table.pointer_to(result.type), cv_none);
             converted(address, conversion_kind::derived_to_base);
-            semantics[address.node].b = step.index();
+            semantics[address.node].set_entity_b(step);
             result.node = expression_node(semantic_kind::indirection, result,
                                           at, address.node);
         }
@@ -936,7 +936,7 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
             m.type = type;
             converted(m, conversion_kind::derived_to_base);
             if (m.node)
-                semantics[m.node].b = virtual_base_of(from, v).index();
+                semantics[m.node].set_entity_b(virtual_base_of(from, v));
             return analysis_result::well_formed;
         }
         /* a base inside the virtual base: to the virtual base first, then
@@ -948,7 +948,7 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
             cv_none);
         converted(m, conversion_kind::derived_to_base);
         if (m.node)
-            semantics[m.node].b = virtual_base_of(from, v).index();
+            semantics[m.node].set_entity_b(virtual_base_of(from, v));
         return pointer_to_base(at, v, to, type, m);
     }
     /* [conv.ptr]/3: "The result of the conversion is a pointer to the base
@@ -1052,7 +1052,7 @@ analysis_result semantic_analysis::pointer_along_path(
             m.evaluation = constness::unknown;
         converted(m, kind);
         if (m.node)
-            semantics[m.node].b = steps[0].index();
+            semantics[m.node].set_entity_b(steps[0]);
         return analysis_result::well_formed;
     }
     for (size_t k = 0; k < shifts.size(); k++) {
@@ -1074,7 +1074,7 @@ analysis_result semantic_analysis::pointer_along_path(
             m.evaluation = constness::unknown;
         converted(m, kind);
         if (m.node)
-            semantics[m.node].b = steps[shifts[k]].index();
+            semantics[m.node].set_entity_b(steps[shifts[k]]);
     }
     return analysis_result::well_formed;
 }
@@ -1235,7 +1235,7 @@ analysis_result semantic_analysis::to_virtual_base(token_index at,
     address.type =
         qualified_type::make(type_table.pointer_to(result.type), cv_none);
     converted(address, conversion_kind::derived_to_base);
-    semantics[address.node].b = virtual_base_of(c, v).index();
+    semantics[address.node].set_entity_b(virtual_base_of(c, v));
     result.node =
         expression_node(semantic_kind::indirection, result, at, address.node);
     m = result;

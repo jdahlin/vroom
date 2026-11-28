@@ -51,11 +51,11 @@ bool semantic_analysis::decltype_of(const expression_meaning &m, bool named,
         }
         const semantic_node &n = semantics[m.node];
         if (n.kind == semantic_kind::entity && n.a) {
-            type = entity_table[entity_index_in(n.a)].type;
+            type = entity_table[n.entity_a()].type;
             return true;
         }
         if (n.kind == semantic_kind::member && n.b) {
-            type = entity_table[entity_index_in(n.b)].type;
+            type = entity_table[n.entity_b()].type;
             return true;
         }
         /* an enumerator: a prvalue of its enumeration's type */
@@ -381,7 +381,7 @@ void semantic_analysis::collect_written_casts(
                 written_binding b;
                 SyntaxRef named = x[0];
                 b.cast = named.index().index();
-                b.specialization = entity_index_in(semantics[callee].a);
+                b.specialization = semantics[callee].entity_a();
                 b.type = m.type;
                 found.append(b);
             }

@@ -59,10 +59,10 @@ void c_lowering::block_items(uint32_t first, uint32_t count,
    initialization ([impl.clang] as clang's -O0) */
 bool c_lowering::unreached_static(const semantic_node &n)
 {
-    const entity &x = analysis.entity_table[entity_index_in(n.a)];
+    const entity &x = analysis.entity_table[n.entity_a()];
     if (x.automatic || !n.b || constant_initializer(n.b))
         return false;
-    uint32_t s = symbol(entity_index_in(n.a), n.at);
+    uint32_t s = symbol(n.entity_a(), n.at);
     if (s) {
         ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
         ast_builder_symbol_keep(c, s);
@@ -92,7 +92,7 @@ void c_lowering::initialized_declaration(const semantic_node &n,
                                          owned_array<uint32_t> &out)
 {
     entity_index outer_declaring = declaring;
-    declaring = entity_index_in(n.a);
+    declaring = n.entity_a();
     initialized_variable(n, out);
     declaring = outer_declaring;
 }
@@ -100,7 +100,7 @@ void c_lowering::initialized_declaration(const semantic_node &n,
 void c_lowering::initialized_variable(const semantic_node &n,
                                       owned_array<uint32_t> &out)
 {
-    entity_index e = entity_index_in(n.a);
+    entity_index e = n.entity_a();
     const entity &x = analysis.entity_table[e];
     qualified_type object;
     entity_index destructor = element_destructor(x.type, object);
@@ -275,7 +275,7 @@ bool c_lowering::static_lvalue(uint32_t n) const
     case semantic_kind::string_literal:
         return true;
     case semantic_kind::entity: {
-        const entity &e = analysis.entity_table[entity_index_in(x.a)];
+        const entity &e = analysis.entity_table[x.entity_a()];
         if (is_reference(e.type))
             return false;
         return e.kind == entity_kind::function ||
@@ -318,7 +318,7 @@ bool c_lowering::address_constant(uint32_t n) const
             return address_constant(x.a);
         case conversion_kind::derived_to_base:
             /* a virtual base's offset is read from the virtual table */
-            return !analysis.entity_table[entity_index_in(x.b)].virtual_base &&
+            return !analysis.entity_table[x.entity_b()].virtual_base &&
                    address_constant(x.a);
         default:
             return false;
@@ -366,7 +366,7 @@ bool c_lowering::nonnull_address(uint32_t n) const
     const semantic_node &o = node(object);
     if (o.kind != semantic_kind::entity)
         return false;
-    const entity &e = analysis.entity_table[entity_index_in(o.a)];
+    const entity &e = analysis.entity_table[o.entity_a()];
     if (is_reference(e.type) || (e.gnu_flags & gnu_weak))
         return false;
     return e.kind == entity_kind::function ||
@@ -497,7 +497,7 @@ bool c_lowering::constant_initializer(uint32_t n) const
    static one's symbol holds its initializer */
 uint32_t c_lowering::declaration(const semantic_node &n)
 {
-    entity_index e = entity_index_in(n.a);
+    entity_index e = n.entity_a();
     const entity &x = analysis.entity_table[e];
     uint32_t s = symbol(e, n.at);
     if (!s)
