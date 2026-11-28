@@ -78,6 +78,7 @@ void c_lowering::declaration_items(const semantic_node &n,
     /* the initializer is a full-expression ([intro.execution]/5.3): the
        temporaries of its arguments before the declaration, destroyed
        after it */
+    located here(c, tokens.location(n.at));
     collection k = collect();
     owned_array<uint32_t> items, after;
     initialized_declaration(n, items);
@@ -746,6 +747,7 @@ uint32_t c_lowering::statement(uint32_t index)
     if (failure.what || !index)
         return 0;
     const semantic_node &n = node(index);
+    located here(c, tokens.location(n.at));
     switch (n.kind) {
     case semantic_kind::block:
     case semantic_kind::declarations:

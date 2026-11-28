@@ -194,6 +194,21 @@ static bool report_psabi(void *context, uint32_t location, const char *text)
     return m.severity == diagnostic_severity::error;
 }
 
+/* -g: a location of the lowered AST (0: none, a node the lowering made up) */
+static bool describe_location(void *context, uint32_t location,
+                              const char **name, uint32_t *line,
+                              uint32_t *column)
+{
+    if (!location)
+        return false;
+    source_position p =
+        static_cast<token_stream *>(context)->files.position(location);
+    *name = p.file_name;
+    *line = p.line;
+    *column = p.column;
+    return true;
+}
+
 /* the driver's C preprocessor p keeps the list -MD writes */
 static void compile_dependency(void *context, const char *path, bool system)
 {
@@ -287,6 +302,8 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
     if (!diagnostics.error_count && co->emit) {
         cc *c = ast_builder_open(p, co);
         ast_builder_psabi_reporter(c, report_psabi, &diagnostics);
+        if (co->debug)
+            ast_builder_location_describer(c, describe_location, &tokens);
         lowering_failure why;
         if (!lower_translation_unit(analysis, tokens, c, co->target, why, path,
                                     co->rtti != 0)) {

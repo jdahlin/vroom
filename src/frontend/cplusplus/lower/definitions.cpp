@@ -98,6 +98,8 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     vtt_parameter = 0;
     if (failure.what)
         return false;
+    /* -g: the function's own line is its body's '{' */
+    ast_builder_node_location(c, block_node, tokens.location(node(body.a).at));
     struct node &b = ast_builder_ast(c)->nodes[block_node];
     uint32_t count = static_cast<uint32_t>(parameters.size());
     b.a = ast_builder_list(c, parameters.data(), count);
