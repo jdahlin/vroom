@@ -274,8 +274,10 @@ bool character_type(fundamental_type t)
 /* a string-literal, not in parentheses */
 bool is_unparenthesized_string_literal(token_stream &tokens, syntax_child c)
 {
-    return c.is_token() && tokens[c.index()].kind == token_kind::literal &&
-           tokens[c.index()].literal == literal_kind::string_literal;
+    return c.is_token() &&
+           tokens[token_index{c.index()}].kind == token_kind::literal &&
+           tokens[token_index{c.index()}].literal ==
+               literal_kind::string_literal;
 }
 
 } // namespace

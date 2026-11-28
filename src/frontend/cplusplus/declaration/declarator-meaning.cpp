@@ -442,7 +442,7 @@ uint32_t semantic_analysis::expression_structure(SyntaxElement e)
                 static_cast<uint32_t>(v.floating_bits_high >> 32));
         else if (k.literal == literal_kind::string_literal ||
                  k.literal == literal_kind::user_defined_literal)
-            floating = expression_node_make(tag_token, t, 0, 0);
+            floating = expression_node_make(tag_token, t.index(), 0, 0);
         return expression_node_make(tag_literal + (uint32_t)k.literal, v.value,
                                     (uint32_t)k.type, floating);
     }

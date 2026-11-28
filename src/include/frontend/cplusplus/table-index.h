@@ -62,6 +62,35 @@ template <typename Tag> class table_index
         value++;
         return old;
     }
+    friend constexpr table_index operator-(table_index i, uint32_t offset)
+    {
+        return table_index(i.value - offset);
+    }
+    friend constexpr uint32_t operator-(table_index a, table_index b)
+    {
+        return a.value - b.value;
+    }
+    constexpr table_index &operator--()
+    {
+        value--;
+        return *this;
+    }
+    constexpr table_index operator--(int)
+    {
+        table_index old = *this;
+        value--;
+        return old;
+    }
+    constexpr table_index &operator-=(uint32_t offset)
+    {
+        value -= offset;
+        return *this;
+    }
+    constexpr table_index &operator+=(uint32_t offset)
+    {
+        value += offset;
+        return *this;
+    }
     friend constexpr table_index operator+(table_index i, uint32_t offset)
     {
         return table_index(i.value + offset);

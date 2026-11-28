@@ -678,7 +678,7 @@ uint32_t c_lowering::asm_statement(const semantic_node &n)
             return fail("an asm operand that is not of a scalar type", o.at);
     }
     for (uint32_t i = 0; i < n.c; i++)
-        written(clobbers[i], true);
+        written(token_index{clobbers[i]}, true);
     auto text = [&](size_t index) {
         ast_builder_asm_text t;
         t.text = pool.data() + ends[index];

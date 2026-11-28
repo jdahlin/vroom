@@ -784,7 +784,7 @@ void semantic_analysis::collect_written_bindings(
         entity_index pack = find_pack(id);
         /* (sizeof...(P) is mangled by P's position whatever P is) */
         bool measured =
-            t >= 2 &&
+            t.index() >= 2 &&
             tokens[t - 2].kind == token_kind::operator_or_punctuator &&
             is_operator(tokens[t - 2], preprocessing_op_or_punc::ELLIPSIS);
         if (!pack || (!pack_depends(pack) && !measured))
@@ -852,8 +852,7 @@ type_index semantic_analysis::dependent_written_type(
             SyntaxRef(node_index(static_cast<uint32_t>(entity_table[e].value)));
         bool same =
             y.end_token() - y.first_token() == n.end_token() - n.first_token();
-        for (token_index i = 0; same && i < n.end_token() - n.first_token();
-             i++)
+        for (uint32_t i = 0; same && i < n.end_token() - n.first_token(); i++)
             same =
                 same_token_spelling(n.first_token() + i, y.first_token() + i);
         same = same && entity_table[e].member_count == bindings.size();

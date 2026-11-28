@@ -25,7 +25,7 @@ namespace cplusplus
 /* ---- the tokens of phase 7 --------------------------------------------- */
 
 /* a token of the translation unit: its place in the token_stream */
-using token_index = uint32_t;
+using token_index = table_index<struct token_tag>;
 
 /*
  * [lex.phases]/1.5-1.7 over the preprocessor: escape sequences converted,
@@ -82,7 +82,7 @@ class token_stream
     owned_array<bool> revertible_keywords;
 
   private:
-    owned_array<token> tokens;
+    owned_array<token, token_index> tokens;
     /* the tokens at which source_files::layout_pragma changed, and what it
        changed to */
     owned_array<token_index> layout_change_at;
@@ -92,9 +92,9 @@ class token_stream
     owned_array<uint32_t> target_change_to;
     uint32_t target_pragma_before = 0;
     /* token i is preprocessing_tokens[first_piece[i] .. first_piece[i+1]) */
-    owned_array<uint32_t> first_piece;
+    owned_array<uint32_t, token_index> first_piece;
     owned_array<preprocessing_token> preprocessing_tokens;
-    owned_array<uint32_t> identifiers;
+    owned_array<uint32_t, token_index> identifiers;
     /* the preprocessing token read ahead to see whether a string literal is
        followed by another */
     preprocessing_token lookahead;
@@ -104,7 +104,7 @@ class token_stream
     /* the tokens up to i exist: almost always, so tested here */
     void make_through(token_index i)
     {
-        if (!complete && tokens.size() <= i)
+        if (!complete && tokens.size() <= i.index())
             make_more(i);
     }
     void make_more(token_index i);
@@ -190,7 +190,7 @@ struct syntax_child {
     }
     static syntax_child token(token_index t)
     {
-        return {t << 1 | 1};
+        return {t.index() << 1 | 1};
     }
     bool is_token() const
     {
@@ -1456,7 +1456,7 @@ class parser
         token_index end;
     };
     owned_array<specialization_region> specialization_regions;
-    bool same_template_id(token_index a, token_index b, token_index length);
+    bool same_template_id(token_index a, token_index b, uint32_t length);
     bool abstract_pack_follows();
     /* the token ends a template-argument-list: '>', or '>>', '>=', '>>='
        of which the first '>' does ([temp.names]/3) */

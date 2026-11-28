@@ -2174,7 +2174,8 @@ class semantic_analysis
     {
         if (!tree[n].child_count || !tree.children(n)[0].is_token())
             return standard_keyword::none;
-        return syntax_parser.keyword_of(tokens[tree.children(n)[0].index()]);
+        return syntax_parser.keyword_of(
+            tokens[token_index{tree.children(n)[0].index()}]);
     }
     /* whether x is the keyword k */
     bool is_keyword(SyntaxElement x, standard_keyword k) const

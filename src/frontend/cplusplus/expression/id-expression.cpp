@@ -97,11 +97,11 @@ static unsigned nested_component_length(parser &p, bool qualified, bool known,
     return end;
 }
 
-bool parser::same_template_id(token_index a, token_index b, token_index length)
+bool parser::same_template_id(token_index a, token_index b, uint32_t length)
 {
     if (b + length > position)
         return false;
-    for (token_index i = 0; i < length; i++) {
+    for (uint32_t i = 0; i < length; i++) {
         owned_buffer x, y;
         tokens.spelling(a + i, x.get());
         tokens.spelling(b + i, y.get());

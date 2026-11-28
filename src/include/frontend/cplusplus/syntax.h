@@ -217,14 +217,15 @@ class SyntaxRef
     /* whether child c is the keyword k */
     bool is_keyword(syntax_child c, standard_keyword k) const
     {
-        return c.is_token() && syntax_ambient->p.keyword_of(
-                                   syntax_ambient->tokens[c.index()]) == k;
+        return c.is_token() &&
+               syntax_ambient->p.keyword_of(
+                   syntax_ambient->tokens[token_index{c.index()}]) == k;
     }
     bool is_punctuator(syntax_child c, preprocessing_op_or_punc op) const
     {
         if (!c.is_token())
             return false;
-        const token &t = syntax_ambient->tokens[c.index()];
+        const token &t = syntax_ambient->tokens[token_index{c.index()}];
         return t.kind == token_kind::operator_or_punctuator &&
                preprocessing_op_or_punc_primary(t.op_or_punc) == op;
     }
@@ -331,7 +332,7 @@ class SyntaxElement : public SyntaxRef
     {
         if (!c.is_token())
             return 0;
-        return c.index();
+        return token_index{c.index()};
     }
     using SyntaxRef::is;
     /* the items of a list: the children of this node if it is of kind
@@ -343,12 +344,14 @@ class SyntaxElement : public SyntaxRef
     {
         if (!c.is_token())
             return standard_keyword::none;
-        return syntax_ambient->p.keyword_of(syntax_ambient->tokens[c.index()]);
+        return syntax_ambient->p.keyword_of(
+            syntax_ambient->tokens[token_index{c.index()}]);
     }
     bool is_identifier() const
     {
         return c.is_token() &&
-               syntax_ambient->tokens[c.index()].kind == token_kind::identifier;
+               syntax_ambient->tokens[token_index{c.index()}].kind ==
+                   token_kind::identifier;
     }
     bool is(preprocessing_op_or_punc op) const
     {
@@ -553,7 +556,8 @@ inline SyntaxElement SyntaxRef::token_of_kind(token_kind k) const
 {
     for (uint32_t i = 0; i < size(); i++) {
         syntax_child c = children()[i];
-        if (c.is_token() && syntax_ambient->tokens[c.index()].kind == k)
+        if (c.is_token() &&
+            syntax_ambient->tokens[token_index{c.index()}].kind == k)
             return SyntaxElement(c);
     }
     return {};

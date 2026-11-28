@@ -463,7 +463,7 @@ static void child_tokens(const syntax_tree &tree, syntax_child c,
                          token_index &first, token_index &end)
 {
     if (c.is_token()) {
-        first = c.index();
+        first = token_index{c.index()};
         end = first + 1;
         return;
     }
