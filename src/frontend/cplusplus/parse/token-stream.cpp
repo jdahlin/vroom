@@ -62,7 +62,7 @@ void token_stream::resume()
         first_piece[token_index{static_cast<uint32_t>(tokens.size() - 1)}]);
     first_piece.resize(tokens.size() - 1);
     identifiers.resize(tokens.size() - 1);
-    tokens.resize(tokens.size() - 1);
+    tokens.truncate(tokens.size() - 1);
     complete = false;
 }
 

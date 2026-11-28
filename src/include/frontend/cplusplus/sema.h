@@ -1968,7 +1968,7 @@ class semantic_tree
 
   private:
     owned_array<semantic_node> nodes;
-    owned_array<uint32_t> lists;
+    stable_array<uint32_t> lists;
 };
 
 /* one expression analysis gave a type: what -fcxx-dump=type-claims has clang
