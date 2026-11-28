@@ -731,6 +731,48 @@ static SyntaxRef alias_declaration_of(SyntaxRef d)
 }
 
 /*
+ * [expr.prim.id.qual]: whether the identifier at t, between first and end,
+ * is part of a qualified name: after :: or ::~, or before :: (after its
+ * template-argument-list, if any).  Such a name is looked up, in the
+ * current scope or in the qualifier's; no declaration here declares it.
+ */
+bool semantic_analysis::qualified_or_qualifier(token_index t, token_index first,
+                                               token_index end) const
+{
+    auto punctuator = [&](token_index at, preprocessing_op_or_punc op) {
+        const token &x = tokens[at];
+        return x.kind == token_kind::operator_or_punctuator &&
+               preprocessing_op_or_punc_primary(x.op_or_punc) == op;
+    };
+    if (t > first) {
+        token_index before{t.index() - 1};
+        if (punctuator(before, preprocessing_op_or_punc::COLON_COLON) ||
+            punctuator(before, preprocessing_op_or_punc::TILDE))
+            return true;
+    }
+    token_index next = t;
+    next++;
+    if (next < end && punctuator(next, preprocessing_op_or_punc::LESS)) {
+        int angles = 0;
+        for (; next < end; next++) {
+            if (punctuator(next, preprocessing_op_or_punc::LESS))
+                angles++;
+            else if (punctuator(next, preprocessing_op_or_punc::GREATER))
+                angles--;
+            else if (punctuator(next,
+                                preprocessing_op_or_punc::GREATER_GREATER))
+                angles -= 2;
+            if (angles <= 0)
+                break;
+        }
+        if (next < end)
+            next++;
+    }
+    return next < end &&
+           punctuator(next, preprocessing_op_or_punc::COLON_COLON);
+}
+
+/*
  * A declaration not analysed (unsupported or not parsed) still declares
  * its names, and a later declaration of one of them is a redeclaration whose
  * meaning depends on this one ([basic.link]/11, [dcl.stc]/6 ...): the names
@@ -932,11 +974,28 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
            parentheses, brackets, braces and template-argument-lists (the
            template's, the member's); the classes its template-arguments
            name are used, and holding them would leave them, and the
-           symbols of their members, unknown */
+           symbols of their members, unknown.  So are the types of a
+           function's or variable's decl-specifier-seq, and a name before
+           :: ([expr.prim.id.qual]) is looked up, not declared: holding
+           the std of template std::string f<int>(int); would hide the
+           namespace from every later lookup */
+        token_index start = declaration.first_token();
+        SyntaxElement instantiated = declaration[declaration.size() - 1];
+        if (instantiated.is(syntax_kind::simple_declaration)) {
+            token_index specifiers_end = 0;
+            bool declarators = false;
+            for (auto c : instantiated.elements()) {
+                if (c.is(syntax_kind::decl_specifier_seq))
+                    specifiers_end = c.end_token();
+                else if (c.is_node() && c.init_declarators())
+                    declarators = true;
+            }
+            if (declarators && specifiers_end)
+                start = specifiers_end;
+        }
         int depth = 0;
         int angles = 0;
-        for (token_index t = declaration.first_token();
-             t < declaration.end_token(); t++) {
+        for (token_index t = start; t < declaration.end_token(); t++) {
             const token &tok = tokens[t];
             if (tok.kind == token_kind::operator_or_punctuator) {
                 switch (preprocessing_op_or_punc_primary(tok.op_or_punc)) {
@@ -969,8 +1028,11 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                 }
                 continue;
             }
-            if (tok.kind == token_kind::identifier && !depth && !angles)
-                ids.append(t);
+            if (tok.kind != token_kind::identifier || depth || angles)
+                continue;
+            if (qualified_or_qualifier(t, start, declaration.end_token()))
+                continue;
+            ids.append(t);
         }
     } else if (!by_declarator && !class_template) {
         /* the declarators are not known (a declaration not parsed, or of

@@ -861,18 +861,35 @@ bool semantic_analysis::gnu_attributes_without_effect(SyntaxElement n) const
     return any;
 }
 
-/* whether an attribute in the attribute-specifier(-seq) at c has an
-   attribute-argument-clause ([dcl.attr.grammar]/1) */
-bool semantic_analysis::attribute_argument_present(SyntaxElement c) const
+/* whether every token of every attribute-argument-clause at c is a string
+   literal, a parenthesis or a comma: a message ([dcl.attr.deprecated]/1,
+   [dcl.attr.nodiscard]/1, [ext:gnu_attributes] no_specializations), which
+   names nothing analysis would have to check */
+bool semantic_analysis::attribute_arguments_are_messages(SyntaxElement c) const
 {
     if (c.is_token())
-        return false;
-    if (c.is(syntax_kind::attribute_argument_clause))
         return true;
-    for (auto child : c.elements())
-        if (attribute_argument_present(child))
-            return true;
-    return false;
+    if (!c.is(syntax_kind::attribute_argument_clause)) {
+        for (auto child : c.elements())
+            if (!attribute_arguments_are_messages(child))
+                return false;
+        return true;
+    }
+    for (token_index t = c.first_token(); t < c.end_token(); t++) {
+        const token &x = tokens[t];
+        if (x.kind == token_kind::literal &&
+            x.literal == literal_kind::string_literal)
+            continue;
+        if (x.kind != token_kind::operator_or_punctuator)
+            return false;
+        preprocessing_op_or_punc op =
+            preprocessing_op_or_punc_primary(x.op_or_punc);
+        if (op != preprocessing_op_or_punc::LEFT_PARENTHESIS &&
+            op != preprocessing_op_or_punc::RIGHT_PARENTHESIS &&
+            op != preprocessing_op_or_punc::COMMA)
+            return false;
+    }
+    return true;
 }
 
 /* a class-head's attribute-specifier-seq, attribute-specifier or
