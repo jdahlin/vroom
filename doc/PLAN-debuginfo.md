@@ -60,6 +60,30 @@ registers; D3 changes that and measures run time and compile time.
 - **D5, optimized code**: location lists at `-O1` and up; until then a
   variable there is optimized out.
 
+## Cost of `-g` (x86-64, `-O0`, compiler instructions)
+
+| input | without | with `-g` | object |
+|---|---|---|---|
+| SQLite amalgamation | 2.97 G | 3.36 G (+13 %) | 1.58 -> 2.18 MB |
+| 3000 C++ classes and enums | 1.76 G | 2.53 G (+44 %; 4.48 G before the lookups were indexed) | 1.60 -> 3.1 MB |
+
+## What is left, in order
+
+1. Function-local static and thread-local variables (no entry).
+2. Lexical blocks: locals are the function's, so shadowed names are
+   ambiguous.  Needs a range per scope that survives VIR's block order.
+3. No location: VLAs, arm64 locals aligned over 16, parameters passed by
+   reference or left in the caller's frame, x86-64 frames without a frame
+   pointer.
+4. `DW_AT_decl_file`/`decl_line` (the `.file` table is written before the
+   unit's entries are known).
+5. C++: constructors and destructors in their class, the artificial vtable
+   pointer, template arguments of functions, other template arguments (`?`).
+6. C: typedef names under a pointer or on a result; vectors, `_BitInt`,
+   scalable types.
+7. Check on Windows (winedbg), C++ on arm64, and COFF weak functions.
+8. D5: optimized code (location lists).
+
 ## Validation
 
 `llvm-dwarfdump --verify` (`bench/vcc-dwarf.py`), the entries compared with

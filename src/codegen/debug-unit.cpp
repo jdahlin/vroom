@@ -100,6 +100,11 @@ typedef struct debug_type {
     uint8_t reference; /* AST_DEBUG_*REFERENCE: the pointer type is one */
 } debug_type;
 
+typedef struct debug_member {
+    uint32_t type; /* its class's type index */
+    uint32_t symbol;
+} debug_member;
+
 typedef struct debug_writer {
     cc *c;
     tbuf *b;
@@ -113,7 +118,8 @@ typedef struct debug_writer {
     uint32_t *type_labels,
         *typedef_labels;        /* by qualified type, by sym; 0: none yet */
     uint32_t *reference_labels; /* by qualified type, two per: & and && */
-    uint32_t *members; /* the member functions and static members defined
+    struct debug_member
+        *members; /* the member functions and static members defined
                           here, declared in their classes */
     uint32_t member_count, member_capacity;
 } debug_writer;
@@ -550,12 +556,13 @@ static void debug_member_note(debug_writer *w, uint32_t s,
 {
     if (w->member_count == w->member_capacity) {
         w->member_capacity = 2 * w->member_capacity + 32;
-        w->members = (uint32_t *)realloc(w->members, w->member_capacity *
-                                                         sizeof *w->members);
+        w->members = (debug_member *)realloc(
+            w->members, w->member_capacity * sizeof *w->members);
         if (!w->members)
             vout_of_memory();
     }
-    w->members[w->member_count++] = s;
+    w->members[w->member_count++] =
+        VCC_LITERAL(debug_member, AST_QUALIFIED_TYPE_INDEX(debug_class), s);
     debug_type_label(w, debug_class, 0);
 }
 
@@ -622,11 +629,20 @@ static void debug_record_write(debug_writer *w, ast_qualified_type t)
         debug_die_number(&v, DEBUG_AT_VIRTUALITY, DEBUG_FORM_UDATA, 1);
         debug_die_write(w, &v);
     }
-    for (uint32_t i = 0; i < w->member_count; i++)
-        if (AST_QUALIFIED_TYPE_INDEX(
-                codegen_symbol_attributes(c, w->members[i])->debug_class) ==
-            AST_QUALIFIED_TYPE_INDEX(t))
-            debug_member_write(w, w->members[i]);
+    /* (members are sorted by class: this one's start where the search
+       says) */
+    uint32_t of = AST_QUALIFIED_TYPE_INDEX(t), low = 0, high = w->member_count;
+
+    while (low < high) {
+        uint32_t middle = low + (high - low) / 2;
+
+        if (w->members[middle].type < of)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    while (low < w->member_count && w->members[low].type == of)
+        debug_member_write(w, w->members[low++].symbol);
     debug_children_end(w);
 }
 
@@ -809,6 +825,17 @@ static void debug_global_write(debug_writer *w, uint32_t s, bool coff)
     debug_die_number(&d, DEBUG_AT_LOCATION, DEBUG_FORM_SYMBOL, s);
     debug_die_write(w, &d);
     debug_scope_close(w, depth);
+}
+
+/* by class, then by symbol: the order does not depend on the sort */
+static int debug_member_compare(const void *a, const void *b)
+{
+    const debug_member *x = (const debug_member *)a;
+    const debug_member *y = (const debug_member *)b;
+
+    if (x->type != y->type)
+        return x->type < y->type ? -1 : 1;
+    return x->symbol < y->symbol ? -1 : x->symbol > y->symbol;
 }
 
 /* the entries of every type referred to, those they refer to too */
@@ -1112,6 +1139,9 @@ VPRIV void codegen_debug_unit_append(cc *c, tbuf *tail,
             debug_function_append(&writer, function, v, frame);
         }
     }
+    if (writer.member_count)
+        qsort(writer.members, writer.member_count, sizeof *writer.members,
+              debug_member_compare);
     debug_types_write(&writer);
     free(writer.types);
     free(writer.type_labels);

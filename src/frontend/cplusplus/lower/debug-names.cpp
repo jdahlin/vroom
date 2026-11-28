@@ -135,21 +135,37 @@ void c_lowering::debug_type_name(qualified_type t, vbuffer *out)
     }
 }
 
+/* -g: every enumeration's enumerators, chained in declaration order, found
+   in one pass over the entities when the first is asked for */
+void c_lowering::gather_enumerators()
+{
+    if (enumerators_gathered)
+        return;
+    enumerators_gathered = true;
+    /* (backwards, so that each chain is in order) */
+    for (uint32_t i = static_cast<uint32_t>(analysis.entity_table.size());
+         i-- > 1;) {
+        const entity &y = analysis.entity_table[entity_index(i)];
+        if (y.kind != entity_kind::enumerator ||
+            record(y.type).kind != type_kind::enumeration)
+            continue;
+        entity_index of = record(y.type).entity;
+        next_enumerator[entity_index(i)] = first_enumerator[of];
+        first_enumerator[of] = entity_index(i);
+    }
+}
+
 /* the enumeration e as -g describes it (made once) */
 ast_qualified_type c_lowering::debug_enum_type(entity_index e, token_index at)
 {
-    for (size_t i = 0; i < debug_enums.size(); i++)
-        if (debug_enums[i] == e)
-            return debug_enum_types[i];
+    if (debug_enums[e])
+        return debug_enums[e];
     const entity x = analysis.entity_table[e];
     ast_qualified_type underlying = fundamental(x.underlying, at);
+    gather_enumerators();
     owned_array<uint32_t> enumerators;
-    for (uint32_t i = 1; i < analysis.entity_table.size(); i++) {
-        const entity &y = analysis.entity_table[entity_index(i)];
-        if (y.kind != entity_kind::enumerator ||
-            record(y.type).kind != type_kind::enumeration ||
-            record(y.type).entity != e)
-            continue;
+    for (entity_index i = first_enumerator[e]; i; i = next_enumerator[i]) {
+        const entity &y = analysis.entity_table[i];
         size_t length = 0;
         const char *text = analysis.identifier_text(y.name, &length);
         enumerators.append(ast_builder_debug_enumerator(
@@ -162,8 +178,7 @@ ast_qualified_type c_lowering::debug_enum_type(entity_index e, token_index at)
         c, name.data(), name.size(), scope.data(), scope.size(), underlying,
         enumerators.data(), static_cast<uint32_t>(enumerators.size()),
         x.scoped);
-    debug_enums.append(e);
-    debug_enum_types.append(made);
+    debug_enums[e] = made;
     return made;
 }
 
