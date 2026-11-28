@@ -306,9 +306,9 @@ analysis_result semantic_analysis::generic_closure_conversion(
         return not_supported_because(at, "expr.prim.lambda.closure",
                                      "a generic lambda's call operator not "
                                      "matching the pointer's parameters");
-    const qualified_type *pat_params =
+    checked_span<const qualified_type> pat_params =
         type_table.parameters(entity_table[f.entity].type.unqualified());
-    const qualified_type *to_params =
+    checked_span<const qualified_type> to_params =
         type_table.parameters(to_ptr.operand.unqualified());
     owned_array<template_argument> values;
     owned_array<bool> set;
@@ -337,7 +337,7 @@ analysis_result semantic_analysis::generic_closure_conversion(
         return not_supported_because(at, "expr.prim.lambda.closure",
                                      "an instantiated lambda call operator "
                                      "with another type than the target");
-    const qualified_type *inst_params =
+    checked_span<const qualified_type> inst_params =
         type_table.parameters(entity_table[call].type.unqualified());
     for (uint32_t i = 0; i < inst_fn.parameter_count; i++)
         if (!(inst_params[i] == to_params[i]))

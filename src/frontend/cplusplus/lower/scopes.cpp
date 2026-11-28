@@ -77,7 +77,8 @@ uint32_t c_lowering::each_element(uint32_t s, ast_qualified_type array,
     owned_array<uint32_t> arguments;
     uint32_t argument_count = 0;
     if (construct) {
-        const uint32_t *given = analysis.semantics.items(construct->first);
+        checked_span<const uint32_t> given =
+            analysis.semantics.items(construct->first);
         argument_count = construct->count;
         for (uint32_t k = 0; k < argument_count; k++) {
             uint32_t a = expression(given[k]);

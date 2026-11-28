@@ -125,7 +125,7 @@ ast_qualified_type c_lowering::structor_type(entity_index e, token_index at)
     parameters.append(
         pointer_to(type(analysis.entity_table[x.enclosing].type, at)));
     parameters.append(pointer_to(ast_builder_type_pointer(c, void_type)));
-    const qualified_type *p =
+    checked_span<const qualified_type> p =
         analysis.type_table.parameters(x.type.unqualified());
     for (uint32_t i = 0; i < f.parameter_count; i++)
         parameters.append(parameter_type(p[i], at));
@@ -356,7 +356,7 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
     if (ft.variadic)
         return fail("a thunk of a variadic function", at);
     ast_qualified_type function = entity_type(f, at);
-    const qualified_type *types =
+    checked_span<const qualified_type> types =
         analysis.type_table.parameters(x.type.unqualified());
     owned_array<ast_qualified_type> parameter_types;
     parameter_types.append(pointer_to(
@@ -470,7 +470,7 @@ bool c_lowering::deleting_destructor(entity_index e, token_index at,
         return false;
     ast_builder_symbol_flags_add(c, target, AST_SYMBOL_FLAG_USED);
     ast_qualified_type function = entity_type(f, at);
-    const qualified_type *types = analysis.type_table.parameters(
+    checked_span<const qualified_type> types = analysis.type_table.parameters(
         analysis.entity_table[f].type.unqualified());
     uint32_t arguments[2];
     uint32_t count = 1;
@@ -554,7 +554,7 @@ bool c_lowering::complete_variant(entity_index e)
         return false;
     if (x.special != special_member::destructor)
         return definition_body(e, complete, 1);
-    const uint32_t *items = analysis.semantics.items(body.first);
+    checked_span<const uint32_t> items = analysis.semantics.items(body.first);
     uint32_t self = symbol(entity_index_in(items[0]), body.at);
     if (!self)
         return false;

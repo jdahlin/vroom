@@ -132,7 +132,8 @@ analysis_result semantic_analysis::member_function_template(
         bool allocation = m.allocation == allocation_function::new_ ||
                           m.allocation == allocation_function::new_array;
         const struct type &fn = type_table[type.unqualified()];
-        const qualified_type *ps = type_table.parameters(type.unqualified());
+        checked_span<const qualified_type> ps =
+            type_table.parameters(type.unqualified());
         if (fn.parameter_count < 2 || fn.variadic)
             return not_supported_because(n, "temp.mem",
                                          "an allocation or deallocation "

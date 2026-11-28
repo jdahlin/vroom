@@ -2315,7 +2315,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
             "In copy-list-initialization, if an explicit constructor is "
             "chosen, the initialization is ill-formed",
             "over.match.list");
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         type_table.parameters(entity_table[chosen].type.unqualified());
     uint32_t count =
         type_table[entity_table[chosen].type.unqualified()].parameter_count;

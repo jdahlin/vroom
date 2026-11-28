@@ -355,7 +355,7 @@ bool semantic_analysis::aggregate_built_in_place(uint32_t value) const
     } else if (t.kind != type_kind::array || n.count != t.bound) {
         return false;
     }
-    const uint32_t *items = semantics.items(n.first);
+    checked_span<const uint32_t> items = semantics.items(n.first);
     for (uint32_t i = 0; i < n.count; i++) {
         const semantic_node &item = semantics[items[i]];
         if (item.kind == semantic_kind::construct && !item.a)
@@ -840,7 +840,7 @@ analysis_result semantic_analysis::special_member_declarator(
     if (f.variadic)
         return not_supported_because(declaration, "dcl.fct",
                                      "a variadic constructor or destructor");
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         type_table.parameters(type.unqualified());
     special_member kind = special_member::constructor;
     if (m.destructor && constexpr_specified &&
@@ -1079,7 +1079,7 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         }
         return analysis_result::well_formed;
     }
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         type_table.parameters(type.unqualified());
     const struct type &first = type_table[parameters[0].unqualified()];
     /* explicit on a defaulted copy or move constructor takes it out of
@@ -1602,7 +1602,7 @@ analysis_result semantic_analysis::construct(
     /* [dcl.fct.def.delete]/2 */
     VTRY(deleted, deleted_use(at.first_token(), chosen));
     size_t n = arguments.size();
-    const qualified_type *p =
+    checked_span<const qualified_type> p =
         type_table.parameters(entity_table[chosen].type.unqualified());
     owned_array<uint32_t> nodes;
     for (size_t i = 0; i < n; i++) {

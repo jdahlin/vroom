@@ -230,7 +230,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 packs++;
             }
         const struct type ft = type_table[type.unqualified()];
-        const qualified_type *list = type_table.parameters(type.unqualified());
+        checked_span<const qualified_type> list =
+            type_table.parameters(type.unqualified());
         /* [temp.param]/14: "A template parameter pack of a function
            template shall not be followed by another template parameter
            unless that template parameter can be deduced from the

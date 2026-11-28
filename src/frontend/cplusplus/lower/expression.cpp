@@ -246,7 +246,8 @@ uint32_t c_lowering::expression(uint32_t index)
     }
     case semantic_kind::vector_shuffle: {
         if (n.op >= 15) {
-            const uint32_t *operands = analysis.semantics.items(n.first);
+            checked_span<const uint32_t> operands =
+                analysis.semantics.items(n.first);
             uint32_t values[3] = {0, 0, 0};
             for (uint32_t i = 0; i < n.count && i < 3; i++) {
                 values[i] = expression(operands[i]);
@@ -271,7 +272,7 @@ uint32_t c_lowering::expression(uint32_t index)
             return ast_builder_vector_saturate(c, n.op == 5, a, b);
         if (n.op)
             return ast_builder_vector_minmax(c, n.op == 3, a, b);
-        const uint32_t *items = analysis.semantics.items(n.first);
+        checked_span<const uint32_t> items = analysis.semantics.items(n.first);
         int32_t indices[64];
         for (uint32_t i = 0; i < n.count && i < 64; i++)
             indices[i] = static_cast<int32_t>(node(items[i]).value);

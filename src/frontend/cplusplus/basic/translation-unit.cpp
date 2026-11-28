@@ -268,7 +268,7 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
         return type_without_external_linkage(record.operand, visible,
                                              arguments);
     case type_kind::function: {
-        const qualified_type *parameters =
+        checked_span<const qualified_type> parameters =
             type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < record.parameter_count; i++)
             if (type_without_external_linkage(parameters[i], visible,

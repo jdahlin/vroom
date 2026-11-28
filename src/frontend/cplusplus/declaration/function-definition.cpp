@@ -228,7 +228,7 @@ void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
     switch (x.kind) {
     case semantic_kind::block:
     case semantic_kind::declarations: {
-        const uint32_t *items = tree.items(x.first);
+        checked_span<const uint32_t> items = tree.items(x.first);
         for (uint32_t i = 0; i < x.count; i++)
             walk_constexpr_body(tree, items[i], found);
         return;
@@ -604,7 +604,8 @@ analysis_result semantic_analysis::analyse_function_body_of(
             if (literal_type(returns) == constness::not_constant)
                 literal = false;
             type_index ft = entity_table[f].type.unqualified();
-            const qualified_type *parameters3 = type_table.parameters(ft);
+            checked_span<const qualified_type> parameters3 =
+                type_table.parameters(ft);
             for (uint32_t i = 0; i < type_table[ft].parameter_count; i++)
                 if (literal_type(parameters3[i]) == constness::not_constant)
                     literal = false;
@@ -665,7 +666,8 @@ analysis_result semantic_analysis::analyse_function_body_of(
                                            "literal type",
                                            "dcl.constexpr"));
             type_index ft = entity_table[f].type.unqualified();
-            const qualified_type *parameters2 = type_table.parameters(ft);
+            checked_span<const qualified_type> parameters2 =
+                type_table.parameters(ft);
             for (uint32_t i = 0; i < type_table[ft].parameter_count; i++)
                 if (literal_type(parameters2[i]) == constness::not_constant)
                     result = worse(

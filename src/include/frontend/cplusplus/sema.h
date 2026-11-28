@@ -245,9 +245,10 @@ class types
     {
         return records[t];
     }
-    const qualified_type *parameters(type_index t) const
+    checked_span<const qualified_type> parameters(type_index t) const
     {
-        return parameter_lists.data() + records[t].first_parameter;
+        const type &r = records[t];
+        return {parameter_lists.data() + r.first_parameter, r.parameter_count};
     }
     /* the number of types, the unused type 0 included */
     size_t size() const
@@ -2063,9 +2064,10 @@ class semantic_tree
     {
         return nodes[n];
     }
-    const uint32_t *items(uint32_t first) const
+    /* the list that starts at first, or the rest of it from there */
+    checked_span<const uint32_t> items(uint32_t first) const
     {
-        return lists.data() + first;
+        return {lists.data() + first, list_rest[first]};
     }
     size_t size() const
     {
@@ -2075,6 +2077,8 @@ class semantic_tree
   private:
     owned_array<semantic_node> nodes;
     stable_array<uint32_t> lists;
+    /* per element of lists: the elements from it to its list's end */
+    owned_array<uint32_t> list_rest;
 };
 
 /* one expression analysis gave a type: what -fcxx-dump=type-claims has clang

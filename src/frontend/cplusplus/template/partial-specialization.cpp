@@ -709,7 +709,8 @@ bool semantic_analysis::pack_expansion_not_last(qualified_type t,
         return false;
     const struct type &r = type_table[t.unqualified()];
     if (r.kind == type_kind::function) {
-        const qualified_type *list = type_table.parameters(t.unqualified());
+        checked_span<const qualified_type> list =
+            type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < r.parameter_count; i++) {
             if (type_table[list[i].unqualified()].kind ==
                     type_kind::pack_expansion &&

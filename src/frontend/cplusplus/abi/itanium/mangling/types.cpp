@@ -232,7 +232,7 @@ bool itanium_mangler::bare_function_type(qualified_type t)
     const struct type &f = record(t);
     if (f.kind != type_kind::function)
         return false;
-    const qualified_type *parameters =
+    checked_span<const qualified_type> parameters =
         analysis.type_table.parameters(t.unqualified());
     for (uint32_t i = 0; i < f.parameter_count; i++)
         if (!type(parameters[i]))

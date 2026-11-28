@@ -350,7 +350,8 @@ static void spell_type(semantic_analysis &a, qualified_type t,
     case type_kind::function: {
         vbuffer_append(next.get(), decl.data(), decl.size());
         append(next, "(");
-        const qualified_type *p = a.type_table.parameters(t.unqualified());
+        checked_span<const qualified_type> p =
+            a.type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < r.parameter_count; i++) {
             owned_buffer none;
             if (i)
