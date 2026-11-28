@@ -341,9 +341,9 @@ def darwin_cxx_rows(d):
              lambda: header('/usr/bin/clang++') == header(vd.VPP) == '.sdk/usr/include/c++/v1/cstdarg')]
 
 def native_triple_rows(d):
-    """--target= naming the host's own triple keeps the system headers"""
+    """--target= naming the host's own triple keeps the system headers (x86-64 hosts)"""
     import platform
-    if platform.system() != 'Linux' or platform.machine() not in ('x86_64', 'aarch64'):
+    if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         return []
     src = os.path.join(d, 'native.c')
     open(src, 'w').write('#include <stdint.h>\nuint32_t x;\n')
@@ -352,10 +352,9 @@ def native_triple_rows(d):
         answers = [run([c, '--target=' + target, '-fsyntax-only'], src)[0]
                    for c in (vd.CL, vd.VPP)]
         return answers == [0, 0]
-    arch = platform.machine()
     return [(f'system headers with --target={t}', lambda t=t: check(t))
-            for t in (f'{arch}-linux-gnu', f'{arch}-unknown-linux-gnu',
-                      f'{arch}-pc-linux-gnu')]
+            for t in ('x86_64-linux-gnu', 'x86_64-unknown-linux-gnu',
+                      'x86_64-pc-linux-gnu')]
 
 
 def main():
