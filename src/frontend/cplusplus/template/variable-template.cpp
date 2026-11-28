@@ -12,7 +12,7 @@
 namespace cplusplus
 {
 
-uint32_t semantic_analysis::variable_template_of(entity_index e) const
+template_ref semantic_analysis::variable_template_of(entity_index e) const
 {
     return template_of_form(e, &function_template::is_variable);
 }
@@ -110,16 +110,16 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
                                          "a qualified variable template other "
                                          "than a static member definition");
         entity_index prior = entity_table.find(m.qualifier, name);
-        uint32_t vt = variable_template_of(prior);
-        if (!vt || function_templates[vt - 1].definition ||
-            function_templates[vt - 1].parameter_count != parameters.size() ||
-            !same_template_parameters(
-                first, function_templates[vt - 1].first_parameter,
-                function_templates[vt - 1].parameter_count))
+        template_ref vt = variable_template_of(prior);
+        if (!vt || function_templates[vt].definition ||
+            function_templates[vt].parameter_count != parameters.size() ||
+            !same_template_parameters(first,
+                                      function_templates[vt].first_parameter,
+                                      function_templates[vt].parameter_count))
             return not_supported_because(n, "temp.pre",
                                          "a static member template definition "
                                          "that matches no declaration");
-        function_template &record = function_templates[vt - 1];
+        function_template &record = function_templates[vt];
         VTRY(merged, merge_template_defaults(n, record.first_parameter, first,
                                              record.parameter_count, false));
         record.declaration = n;
@@ -173,20 +173,20 @@ analysis_result semantic_analysis::variable_template_id(SyntaxRef n,
         return not_supported_because(
             n, "temp.names",
             "a variable template-id whose template name is not resolved");
-    if (uint32_t ct = concept_of(named))
+    if (template_ref ct = concept_of(named))
         if (!x.ambiguous)
             return concept_id(n, ct, m);
-    uint32_t vt = variable_template_of(named);
+    template_ref vt = variable_template_of(named);
     if (!vt && !x.ambiguous) {
-        uint32_t ft = function_template_of(x.unknown_entity);
+        template_ref ft = function_template_of(x.unknown_entity);
         /* a static member template of the enclosing class named without
            its class (Highway's &CallClosure<Closure>) */
         entity_index of = 0;
         if (!ft && x.unknown_entity)
             of = entity_table[x.unknown_entity].enclosing;
         if (of && entity_table[of].kind == entity_kind::class_type) {
-            uint32_t found = function_template_of(x.unknown_entity, true);
-            if (found && !entity_table[function_templates[found - 1].entity]
+            template_ref found = function_template_of(x.unknown_entity, true);
+            if (found && !entity_table[function_templates[found].entity]
                               .nonstatic_member)
                 ft = found;
         }
@@ -201,7 +201,7 @@ analysis_result semantic_analysis::variable_template_id(SyntaxRef n,
 }
 
 analysis_result
-semantic_analysis::variable_template_id_of(SyntaxRef n, uint32_t vt,
+semantic_analysis::variable_template_id_of(SyntaxRef n, template_ref vt,
                                            expression_meaning &m)
 {
     owned_array<template_argument> arguments;
@@ -221,12 +221,12 @@ semantic_analysis::variable_template_id_of(SyntaxRef n, uint32_t vt,
 }
 
 analysis_result
-semantic_analysis::instantiate_variable(SyntaxRef at, uint32_t vt,
+semantic_analysis::instantiate_variable(SyntaxRef at, template_ref vt,
                                         const template_argument *arguments,
                                         uint32_t count, entity_index &e)
 {
     e = 0;
-    const function_template ft = function_templates[vt - 1];
+    const function_template ft = function_templates[vt];
     if (count != ft.parameter_count)
         return not_supported_because(
             at, "temp.inst",

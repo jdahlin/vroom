@@ -116,8 +116,9 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
            written as a typename-specifier names a member by a
            qualified-id, a non-deduced context
            ([temp.deduct.type]/5.1) */
-        if (uint32_t alias = template_record(specialized_template(pr.entity))) {
-            const function_template &f = function_templates[alias - 1];
+        if (template_ref alias =
+                template_record(specialized_template(pr.entity))) {
+            const function_template &f = function_templates[alias];
             if (f.is_alias && f.definition) {
                 for (token_index t = f.definition.first_token();
                      t < f.definition.end_token(); t++)
@@ -148,9 +149,9 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                deduced as A's template when their parameters match
                ([temp.arg.template]/3) */
             const function_template x =
-                function_templates[entity_table[pt].template_record - 1];
+                function_templates[entity_table[pt].template_record];
             const function_template y =
-                function_templates[entity_table[at].template_record - 1];
+                function_templates[entity_table[at].template_record];
             uint64_t k = entity_table[pt].value;
             bool x_has_pack = x.parameter_count > 0 &&
                               template_parameter_is_pack(x.first_parameter +
@@ -811,12 +812,13 @@ bool semantic_analysis::class_parameter_of_guide(qualified_type t) const
     if (r.kind != type_kind::template_parameter)
         return false;
     const entity &e = entity_table[r.entity];
-    if (!e.template_record || e.template_record > function_templates.size())
+    if (!e.template_record ||
+        e.template_record.number() > function_templates.size())
         return false;
-    const function_template &guide = function_templates[e.template_record - 1];
+    const function_template &guide = function_templates[e.template_record];
     if (!guide.implicit_guide)
         return false;
-    return e.value < function_templates[guide.guide_of - 1].parameter_count;
+    return e.value < function_templates[guide.guide_of].parameter_count;
 }
 
 /* [temp.deduct.call]/2-3: the P and A deduce_type compares, for a
@@ -969,14 +971,13 @@ int semantic_analysis::deduce_from_braced_list(
 }
 
 analysis_result semantic_analysis::deduce_from_call(
-    SyntaxRef at, uint32_t function_template,
+    SyntaxRef at, template_ref function_template,
     const expression_meaning *arguments, uint32_t count,
     owned_array<template_argument> &deduced, bool *failed)
 {
     if (failed)
         *failed = false;
-    const struct function_template &ft =
-        function_templates[function_template - 1];
+    const struct function_template &ft = function_templates[function_template];
     qualified_type type = entity_table[ft.entity].type;
     const struct type f = type_table[type.unqualified()];
     const qualified_type *parameters =
@@ -1289,13 +1290,12 @@ analysis_result semantic_analysis::deduce_from_call(
  * failed (when given) is set when deduction fails, as for a call's.
  */
 analysis_result semantic_analysis::deduce_from_function_type(
-    SyntaxRef at, uint32_t function_template, qualified_type target,
+    SyntaxRef at, template_ref function_template, qualified_type target,
     owned_array<template_argument> &deduced, bool &failed,
     const owned_array<template_argument> *explicit_arguments)
 {
     failed = false;
-    const struct function_template &ft =
-        function_templates[function_template - 1];
+    const struct function_template &ft = function_templates[function_template];
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
@@ -1365,11 +1365,10 @@ analysis_result semantic_analysis::deduce_from_function_type(
  * from, so one without either, or a pack written, is not analysed.
  */
 analysis_result semantic_analysis::arguments_without_deduction(
-    SyntaxRef at, uint32_t function_template,
+    SyntaxRef at, template_ref function_template,
     owned_array<template_argument> &arguments, bool &failed)
 {
-    const struct function_template ft =
-        function_templates[function_template - 1];
+    const struct function_template ft = function_templates[function_template];
     uint32_t written = static_cast<uint32_t>(arguments.size());
     owned_array<template_argument> values;
     owned_array<bool> set;

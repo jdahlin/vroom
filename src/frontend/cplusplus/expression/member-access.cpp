@@ -605,7 +605,7 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     /* [temp.inst]/2: a specialization named only is defined here; one
        that cannot be is no class */
     require_complete(c);
-    uint32_t made_by = entity_table[c].instantiation;
+    uint32_t made_by = entity_table[c].instantiation.number();
     if (entity_table[c].kind != entity_kind::class_type) {
         /* a class whose definition was not analysed */
         if (made_by && instantiations[made_by - 1].has_failure)
@@ -620,11 +620,11 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     /* a specialization whose definition could not be analysed is no
        incomplete class */
     if (!entity_table[c].size && entity_table[c].instantiation &&
-        instantiations[entity_table[c].instantiation - 1].has_failure)
+        instantiations[entity_table[c].instantiation].has_failure)
         return not_supported_caused_by(
             n, "temp.inst",
             "member access on a class whose instantiation failed",
-            instantiations[entity_table[c].instantiation - 1].failure);
+            instantiations[entity_table[c].instantiation].failure);
     if (!entity_table[c].size && entity_table[c].defined)
         /* [expr.ref]/4: in the definition of the class, a complete-class
            context ([class.mem]/6) whose layout is not known yet */
@@ -665,7 +665,7 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
                                      "an ambiguous member name");
     if (e && (entity_table[e].kind == entity_kind::none ||
               entity_table[e].member_templates)) {
-        if (uint32_t vt = variable_template_of(e)) {
+        if (template_ref vt = variable_template_of(e)) {
             SyntaxElement id = member_template_id(n);
             if (id.is(syntax_kind::simple_template_id,
                       syntax_kind::template_id))

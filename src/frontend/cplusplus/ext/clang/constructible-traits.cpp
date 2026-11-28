@@ -430,7 +430,7 @@ analysis_result semantic_analysis::constructible_types(
         /* [temp.inst]/2: one that waits for the class being defined is
            required complete here (libc++'s allocator of a container's
            element) */
-        uint32_t record = entity_table[c].instantiation;
+        uint32_t record = entity_table[c].instantiation.number();
         if (record && !entity_table[c].defined && !entity_table[c].size &&
             !instantiations[record - 1].defining &&
             instantiations[record - 1].specialization == c) {

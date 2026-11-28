@@ -571,11 +571,11 @@ semantic_analysis::function_template_definition(SyntaxRef n,
  * are [over.over]'s.
  */
 analysis_result
-semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
+semantic_analysis::function_template_id_value(SyntaxRef n, template_ref ft,
                                               expression_meaning &m)
 {
     token_index name = 0;
-    uint32_t found = 0;
+    template_ref found = 0;
     bool qualified = false;
     owned_array<template_argument> specified;
     VTRY(parts, template_callee_parts(n, name, found, specified, qualified));
@@ -596,7 +596,7 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
                 n, "temp.dep",
                 "a function template-id with dependent or pack arguments");
     if (found != ft || overloaded_written_at ||
-        specified.size() != function_templates[ft - 1].parameter_count) {
+        specified.size() != function_templates[ft].parameter_count) {
         /* [over.over]: the templates of the name whose arguments are all
            written or defaulted, less those substitution rejects
            ([temp.deduct]/8): one specialization left is the one named */
@@ -617,7 +617,7 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
         if (!found)
             return not_supported_because(n, "over.over", none);
         owned_array<uint32_t> group;
-        function_template_overloads(function_templates[found - 1].name, group);
+        function_template_overloads(function_templates[found].name, group);
         for (uint32_t g : group)
             if (entity_table[function_templates[g - 1].entity].nonstatic_member)
                 return not_supported_because(n, "over.over", none);
@@ -639,7 +639,7 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
         entity_index chosen = 0;
         VTRY(made,
              instantiate(
-                 n, function_templates[candidates[0].template_index - 1].entity,
+                 n, function_templates[candidates[0].template_index].entity,
                  all.data() + first[0],
                  static_cast<uint32_t>(all.size()) - first[0], chosen));
         size_t uses_before = name_uses.size();
@@ -648,7 +648,7 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
         return named;
     }
     entity_index e = 0;
-    VTRY(r, instantiate(n, function_templates[ft - 1].entity, specified.data(),
+    VTRY(r, instantiate(n, function_templates[ft].entity, specified.data(),
                         static_cast<uint32_t>(specified.size()), e));
     size_t uses_before = name_uses.size();
     analysis_result named = named_entity(name, e, m);

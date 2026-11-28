@@ -1199,7 +1199,7 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     analysis_result r = analysis_result::well_formed;
     bool ctad_done = false;
     if (!definition && specifiers.size() == 1 && declaration.size() >= 3) {
-        uint32_t ct = 0;
+        template_ref ct = 0;
         if (specifiers[0].is_identifier()) {
             lookup_result found = lookup_unqualified(
                 tokens.identifier(specifiers[0].token()), lookup_filter::any);
@@ -1222,7 +1222,7 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
                 ct = class_template_of(held);
             }
         }
-        if (ct && !function_templates[ct - 1].is_alias) {
+        if (ct && !function_templates[ct].is_alias) {
             uint32_t spec_at = 0;
             while (spec_at < declaration.size() &&
                    !(declaration[spec_at].is(syntax_kind::decl_specifier_seq) &&
