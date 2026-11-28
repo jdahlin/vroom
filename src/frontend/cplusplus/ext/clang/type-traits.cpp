@@ -173,7 +173,7 @@ semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
                                  written.size()) +
             1;
         /* the operand: its type and cv-qualifiers */
-        uint64_t operand = (uint64_t(t.cv()) << 32) | t.unqualified();
+        uint64_t operand = (uint64_t(t.cv()) << 32) | t.unqualified().index();
         type = qualified_type::make(
             dependent_type(type_transformations,
                            entity_kind::type_transformation, name, operand),

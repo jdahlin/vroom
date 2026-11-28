@@ -27,7 +27,15 @@
 namespace cplusplus
 {
 
-template <typename T> class owned_array
+/* the position of an index in its table: a plain size_t here, and an
+   overload for each index type (table-index.h) */
+inline size_t table_slot(size_t i)
+{
+    return i;
+}
+
+/* Index: the type operator[] takes */
+template <typename T, typename Index = size_t> class owned_array
 {
     /* the elements are moved with realloc and never destroyed */
     static_assert(__is_trivially_copyable(T) && __is_trivially_destructible(T),
@@ -105,13 +113,13 @@ template <typename T> class owned_array
         count = 0;
     }
 
-    T &operator[](size_t i)
+    T &operator[](Index i)
     {
-        return elements[i];
+        return elements[table_slot(i)];
     }
-    const T &operator[](size_t i) const
+    const T &operator[](Index i) const
     {
-        return elements[i];
+        return elements[table_slot(i)];
     }
     T &back()
     {
@@ -224,7 +232,7 @@ inline void *operator new(size_t, cplusplus::owned_placement, void *p) noexcept
 namespace cplusplus
 {
 
-template <typename T> class owned_objects
+template <typename T, typename Index = size_t> class owned_objects
 {
   public:
     owned_objects() = default;
@@ -248,13 +256,13 @@ template <typename T> class owned_objects
         pointers.append(object);
         return *object;
     }
-    T &operator[](size_t i)
+    T &operator[](Index i)
     {
-        return *pointers[i];
+        return *pointers[table_slot(i)];
     }
-    const T &operator[](size_t i) const
+    const T &operator[](Index i) const
     {
-        return *pointers[i];
+        return *pointers[table_slot(i)];
     }
     size_t size() const
     {

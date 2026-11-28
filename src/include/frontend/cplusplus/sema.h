@@ -27,7 +27,7 @@ namespace cplusplus
 /* ---- types -------------------------------------------------------------- */
 
 /* a type of the translation unit's type table; 0 is no type */
-using type_index = uint32_t;
+using type_index = table_index<struct type_tag>;
 
 /* [basic.type.qualifier]/1: "a const-qualified version, a
    volatile-qualified version, and a const-volatile-qualified version";
@@ -51,6 +51,13 @@ inline uint32_t object_cv(uint32_t member_cv)
     return member_cv & (cv_const | cv_volatile);
 }
 
+/* a type_index kept in a field that holds other things too (type::bound,
+   entity::value) */
+inline type_index type_index_in(uint64_t field)
+{
+    return type_index{static_cast<uint32_t>(field)};
+}
+
 /*
  * A possibly cv-qualified type: the cv-unqualified type's index and the
  * qualifiers.  [basic.type.qualifier]/1: "The cv-qualified or
@@ -61,11 +68,11 @@ struct qualified_type {
     uint32_t bits = 0;
     static qualified_type make(type_index type, uint32_t cv)
     {
-        return {type << 3 | cv};
+        return {type.index() << 3 | cv};
     }
     type_index unqualified() const
     {
-        return bits >> 3;
+        return type_index{bits >> 3};
     }
     uint32_t cv() const
     {
@@ -244,7 +251,7 @@ class types
               type_index b) const;
     void grow();
 
-    owned_array<type> records;
+    owned_array<type, type_index> records;
     owned_array<qualified_type> parameter_lists;
     /* open addressing: a type's index, 0 for an empty slot */
     owned_array<type_index> slots;

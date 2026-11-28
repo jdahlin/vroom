@@ -930,7 +930,7 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     for (const template_argument &a : values) {
         words.append(static_cast<uint64_t>(a.kind) |
                      static_cast<uint64_t>(a.type.cv()) << 8);
-        words.append(a.type.unqualified());
+        words.append(a.type.unqualified().index());
         words.append(a.value);
         words.append(a.template_entity);
         words.append(a.count);
