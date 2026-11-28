@@ -23,6 +23,8 @@ relative to it); `TODO.md` stays at the top.
   steps WIN0-WIN10): plans
   and per-step status.  Update the
   status section of a step when it changes.
+- `PLAN-debuginfo.md` (steps D1-D5): DWARF beyond line tables.  Update a
+  step's status there.
 - `PLAN-quality.md`: the code quality work before C++ (duplication, one
   scheduler, one pass per file, names): method, stages P0-P4, baseline.
 - `PLAN-tree.md`: reorganising the source tree PostgreSQL-style (`src/`,
