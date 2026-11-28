@@ -535,7 +535,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            each its argument ([temp.arg.type]) */
         entity_table.bind(c, name, c);
         const function_template &ft = function_templates
-            [entity_table[record.template_entity].instantiation - 1];
+            [entity_table[record.template_entity].template_record - 1];
         if (record.pattern) {
             /* a partial specialization's parameters, each the argument
                matching deduced */

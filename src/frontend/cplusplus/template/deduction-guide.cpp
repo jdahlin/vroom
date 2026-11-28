@@ -117,7 +117,7 @@ semantic_analysis::deduction_guide_candidate(TemplateDeclaration t,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].instantiation = index + 1;
+                entity_table[e].template_record = index + 1;
         }
     }
     function_template record =
@@ -292,7 +292,7 @@ analysis_result semantic_analysis::implicit_guide_member(uint32_t ct,
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].instantiation = index + 1;
+                entity_table[e].template_record = index + 1;
         }
     }
     function_template record =

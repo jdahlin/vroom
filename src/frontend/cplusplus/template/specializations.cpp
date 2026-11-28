@@ -656,9 +656,8 @@ semantic_analysis::record_instantiation(const function_template &ft,
     if (ft.outer_instantiation) {
         const instantiation_record &ox =
             instantiations[ft.outer_instantiation - 1];
-        function_template oof =
-            function_templates[entity_table[ox.template_entity].instantiation -
-                               1];
+        function_template oof = function_templates
+            [entity_table[ox.template_entity].template_record - 1];
         uint32_t first = ox.first_argument;
         if (ox.pattern) {
             oof = function_templates[ox.pattern - 1];

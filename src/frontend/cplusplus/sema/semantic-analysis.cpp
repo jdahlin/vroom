@@ -86,7 +86,7 @@ void semantic_analysis::name_lookup_detail(token_index t,
         name_held_detail(t, found.unknown_by);
         last_unsupported_held_by(found.unknown_entity);
     } else if (found.unknown_entity &&
-               entity_table[found.unknown_entity].instantiation &&
+               entity_table[found.unknown_entity].template_record &&
                !entity_table[found.unknown_entity].held_by_template)
         /* [temp.dep.constexpr]/2: in a template's own declaration, only
            the parameter's bare name as an array bound is represented

@@ -4190,7 +4190,7 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
         if (x.specialization != f || x.defined || x.defining)
             continue;
         const function_template &ft =
-            function_templates[entity_table[x.template_entity].instantiation -
+            function_templates[entity_table[x.template_entity].template_record -
                                1];
         if (ft.definition)
             instantiate_definition(ft.declaration, static_cast<uint32_t>(i));

@@ -220,7 +220,7 @@ bool semantic_analysis::names_dependent_entity(token_index first,
             !depends_on_template_parameter(entity_table[e].type))
             continue;
         if ((k == entity_kind::none &&
-             (entity_table[e].instantiation ||
+             (entity_table[e].template_record ||
               (entity_table[e].argument_bound &&
                depends_on_template_parameter(entity_table[e].type)))) ||
             is_template_template_parameter(e))

@@ -96,7 +96,7 @@ analysis_result semantic_analysis::member_function_template(
         for (size_t i = 0; i < parameters.size(); i++) {
             entity_index e = template_parameter_entities[first + i];
             if (entity_table[e].kind != entity_kind::template_entity)
-                entity_table[e].instantiation = index + 1;
+                entity_table[e].template_record = index + 1;
         }
     }
     /* [temp.mem]/3: "A member function template shall not be virtual." */

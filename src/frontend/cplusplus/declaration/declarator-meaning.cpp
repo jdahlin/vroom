@@ -309,7 +309,7 @@ entity_index semantic_analysis::value_parameter_named(SyntaxElement e)
     if (!named)
         named = x.unknown_entity;
     if (named && entity_table[named].kind == entity_kind::none &&
-        entity_table[named].instantiation &&
+        entity_table[named].template_record &&
         !entity_table[named].held_by_template)
         return named;
     return 0;
@@ -428,7 +428,8 @@ uint32_t semantic_analysis::expression_structure(SyntaxElement e)
             return expression_node_make(tag_parameter,
                                         entity_table[named].value, 0, 0);
         lookup_result x = lookup_unqualified(identifier, lookup_filter::any);
-        if (x.entity && !entity_table[x.entity].instantiation)
+        if (x.entity && !entity_table[x.entity].instantiation &&
+            !entity_table[x.entity].template_record)
             return expression_node_make(tag_entity, 0, x.entity.index(), 0);
         return expression_node_make(tag_identifier, 0, identifier, 0);
     }

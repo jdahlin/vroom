@@ -46,11 +46,11 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
     scoped_value<bool> nested(collecting_candidates, false);
     specialization = 0;
     const entity t = entity_table[template_entity];
-    if (t.kind != entity_kind::template_entity || !t.instantiation)
+    if (t.kind != entity_kind::template_entity || !t.template_record)
         return not_supported_because(at, "temp.inst",
                                      "an instantiation of an entity that is no "
                                      "template with a recorded pattern");
-    const function_template ft = function_templates[t.instantiation - 1];
+    const function_template ft = function_templates[t.template_record - 1];
     if (count != ft.parameter_count)
         return not_supported_because(at, "temp.inst",
                                      "an instantiation with a different number "
@@ -309,7 +309,7 @@ semantic_analysis::need_specialization_definition(SyntaxRef at, entity_index f)
     uint32_t idx = entity_table[f].instantiation - 1;
     instantiation_record &rec = instantiations[idx];
     const entity tmpl = entity_table[rec.template_entity];
-    const function_template ft = function_templates[tmpl.instantiation - 1];
+    const function_template ft = function_templates[tmpl.template_record - 1];
     if (rec.pending && !quiet_member_bodies)
         rec.quiet = false;
     if (rec.defined || rec.defining || rec.pending)
@@ -415,7 +415,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
             "function or variable instantiations nested 64 deep or more");
     entity_index template_entity = instantiations[index].template_entity;
     const function_template ft =
-        function_templates[entity_table[template_entity].instantiation - 1];
+        function_templates[entity_table[template_entity].template_record - 1];
     size_t unsupported_before = unsupported.size();
     uint32_t hidden_before = horizon_hidden;
     bool quiet = instantiations[index].quiet;
@@ -872,7 +872,7 @@ void semantic_analysis::complete_instantiation(entity_index c)
         if (!record.named_before_definition || record.has_failure ||
             !record.specialization ||
             !function_templates
-                 [entity_table[record.template_entity].instantiation - 1]
+                 [entity_table[record.template_entity].template_record - 1]
                      .definition)
             return;
         owned_array<template_argument> again;
@@ -893,7 +893,7 @@ void semantic_analysis::complete_instantiation(entity_index c)
         }
         entity_index done = 0;
         instantiate_class(current_declaration,
-                          entity_table[record.template_entity].instantiation,
+                          entity_table[record.template_entity].template_record,
                           again.data(), record.argument_count, done);
         return;
     }
@@ -964,9 +964,8 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
                                      "class instantiations nested 64 deep or "
                                      "more (defining a specialization)");
     const instantiation_record record = instantiations[index];
-    const function_template ft =
-        function_templates[entity_table[record.template_entity].instantiation -
-                           1];
+    const function_template ft = function_templates
+        [entity_table[record.template_entity].template_record - 1];
     function_template definition = ft;
     if (record.pattern)
         definition = function_templates[record.pattern - 1];
@@ -1425,7 +1424,7 @@ void semantic_analysis::instantiate_pending(bool at_end)
                 continue;
             entity_index t = instantiations[index].template_entity;
             const function_template ft =
-                function_templates[entity_table[t].instantiation - 1];
+                function_templates[entity_table[t].template_record - 1];
             if (!at_end && !instantiable_early(ft.declaration))
                 continue;
             if (!ft.definition) {
@@ -1524,7 +1523,7 @@ analysis_result semantic_analysis::declare_specialization(
     if (t.explicit_dependent)
         entity_table[e].explicit_ = s.explicit_;
     entity_table.add_declaration(e, declaration);
-    const function_template ft = function_templates[t.instantiation - 1];
+    const function_template ft = function_templates[t.template_record - 1];
     entity_table[e].gnu_flags = ft.gnu_flags;
     entity_table[e].abi_tag = ft.abi_tag;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {

@@ -172,7 +172,7 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
             if (entity_table[template_parameter_entities[first + i]].kind !=
                 entity_kind::template_entity)
                 entity_table[template_parameter_entities[first + i]]
-                    .instantiation = declared;
+                    .template_record = declared;
         function_template &record = function_templates[declared - 1];
         record.declaration = n;
         record.definition = specifier;

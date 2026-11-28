@@ -981,7 +981,7 @@ analysis_result semantic_analysis::template_argument_for(
                 if (!named)
                     named = x.unknown_entity;
                 if (named && entity_table[named].kind == entity_kind::none &&
-                    entity_table[named].instantiation &&
+                    entity_table[named].template_record &&
                     !entity_table[named].held_by_template &&
                     entity_table[named].type == to) {
                     out.kind = template_argument::kind_t::value;
@@ -1018,7 +1018,7 @@ analysis_result semantic_analysis::template_argument_for(
         if (!named)
             named = x.unknown_entity;
         if (named && entity_table[named].kind == entity_kind::none &&
-            entity_table[named].instantiation &&
+            entity_table[named].template_record &&
             !entity_table[named].held_by_template) {
             if (placeholder_to)
                 to = qualified_type::make(
@@ -1059,7 +1059,9 @@ analysis_result semantic_analysis::template_argument_for(
         /* in an instantiation, a pointer, reference or std::nullptr_t
            parameter's name (bind_template_argument): its argument */
         if (named && entity_table[named].kind == entity_kind::none &&
-            !entity_table[named].instantiation && entity_table[named].defined &&
+            !entity_table[named].instantiation &&
+            !entity_table[named].template_record &&
+            entity_table[named].defined &&
             (placeholder_to || entity_table[named].type == to)) {
             if (placeholder_to)
                 to = qualified_type::make(
@@ -1122,7 +1124,7 @@ analysis_result semantic_analysis::template_argument_for(
         /* (or an alias template's parameter bound to such an argument) */
         bool template_template = is_template_template_parameter(e);
         bool parameter = (named.kind == entity_kind::none &&
-                          named.instantiation && !named.held_by_template) ||
+                          named.template_record && !named.held_by_template) ||
                          template_template ||
                          named.kind == entity_kind::dependent_value ||
                          bound_pack_is_dependent(e);
@@ -1449,8 +1451,10 @@ bool semantic_analysis::template_parameters_match(
         if (x.kind == entity_kind::none)
             return x.type == y.type;
         if (x.kind == entity_kind::template_entity) {
-            const function_template p = function_templates[x.instantiation - 1];
-            const function_template q = function_templates[y.instantiation - 1];
+            const function_template p =
+                function_templates[x.template_record - 1];
+            const function_template q =
+                function_templates[y.template_record - 1];
             return p.parameter_count == q.parameter_count &&
                    same_template_parameters(
                        p.first_parameter, q.first_parameter, p.parameter_count);
@@ -1568,7 +1572,7 @@ analysis_result semantic_analysis::template_template_argument(
             "a template argument naming no primary class or alias template");
     const function_template given = function_templates[a - 1];
     const function_template wanted =
-        function_templates[entity_table[parameter].instantiation - 1];
+        function_templates[entity_table[parameter].template_record - 1];
     if (!template_parameters_match(wanted, given))
         return not_supported_because(
             at, "temp.arg.template",
