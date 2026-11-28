@@ -604,8 +604,6 @@ struct exception_specification {
 struct entity {
     entity_kind kind = entity_kind::none;
     linkage linkage_of_name = linkage::none;
-    /* [basic.def]/2: a declaration of it was a definition */
-    bool defined = false;
     /* an instantiated member function whose body analysis does not support:
        left undefined, and a use of it is refused (body_failures' index
        plus one) */
@@ -617,8 +615,6 @@ struct entity {
     /* [except.spec]/1: the function's exception specification, compared
        by redeclarations ([except.spec]/4) */
     exception_specification exceptions;
-    /* [temp.inst]/4: a definition deferred until the function is used. */
-    bool member_definition_needed = false, member_body_deferred = false;
     /* the declaration of the translation unit whose use first needed the
        definition ([temp.inst]/4), 0 if none: an argument-dependent error
        of the instantiated body makes it ill-formed (clang: "in
@@ -649,41 +645,6 @@ struct entity {
        (semantic_analysis::expression_structure, hash-consed: one entity
        per structure), 0 for another */
     uint32_t expression = 0;
-    /* [dcl.constexpr]/1 */
-    bool constexpr_ = false;
-    /* [dcl.constexpr]/2: "A function or function template declared with
-       the consteval specifier is called an immediate function" (also
-       constexpr_ and inline_) */
-    bool immediate = false;
-    /* a class: [class.pre]/1 marked final (cannot be a direct base class) */
-    bool final_ = false;
-    /* [dcl.inline]: an inline function or variable; [namespace.def]/7: an
-       inline namespace */
-    bool inline_ = false;
-    /* A constructor with an unsatisfied associated constraint. */
-    bool constraint_unsatisfied = false;
-    /* [over.load]/2: a member function declared with a trailing
-       requires-clause (it overloads one that differs in it) */
-    bool trailing_requires = false;
-    /* a scope: a declaration analysis did not follow may have brought
-       names into it that are not held one by one (a using-directive whose
-       namespace is not known, a using-enum-declaration): a name not found
-       in it is not known to be undeclared */
-    bool unknown_names = false;
-    /* a name hold_names kept with no entity (kind none) because a
-       template-declaration or explicit-specialization declared it: what
-       it denotes needs [temp]'s rules */
-    bool held_by_template = false;
-    /* [expr.const]/4: a variable usable in constant expressions whose
-       128-bit integer value `value` cannot hold: usable stays unknown for
-       every reader of value, and the evaluator reads the value from
-       semantic_analysis::wide_variables */
-    bool wide_value = false;
-    /* [temp.dep]: in an instantiation, a name whose meaning came from the
-       template arguments: a template-parameter's name bound to its
-       argument, a local variable, parameter or this declared with one; a
-       construct that uses it is argument-dependent (argument_named) */
-    bool argument_bound = false;
     /* the subclause whose missing rules made the declaration that
        hold_names held this name not analysed (declaration() sets it from
        that declaration's first refusal): a use of the name is refused for
@@ -701,10 +662,6 @@ struct entity {
        analysed (declaration() sets it), else the using-directive's */
     const char *unknown_because = nullptr;
     held_cause unknown_by = held_cause::refused;
-    /* a scope (a namespace, 0 the global one, or a block): a
-       using-directive appears in it ([namespace.udir]; an unnamed or
-       inline namespace's implied one in its enclosing namespace) */
-    bool has_using_directive = false;
     /* [basic.scope.hiding]/2: "If a class name or enumeration name and a
        variable, data member, function, or enumerator are declared in the same
        declarative region (in any order) with the same name ..., the class or
@@ -712,49 +669,24 @@ struct entity {
        or enumerator name is visible.": the class or enumeration this entity's
        name hides in its scope, 0 if none */
     entity_index hidden_type = 0;
-    /* a variable: [basic.stc.auto]/1, a local variable not declared static
-       (or a parameter) */
-    bool automatic = false;
-    /* a variable: [ext:clang_c11_thread_local] declared _Thread_local, of
-       thread storage duration ([basic.stc.thread]) with C11's rules */
-    bool c11_thread_local = false;
-    /* a variable: [dcl.constinit]/1 declared constinit (by any of its
-       declarations) */
-    bool constinit_ = false;
-    /* a constexpr variable whose initializer is not a constant expression
-       ([dcl.constexpr]/10): not usable in constant expressions, a read of
-       it is not constant ([expr.const]/5.8) */
-    bool unusable_initializer = false;
     /* a block_scope: the scope whose names it shall not redeclare (the
        function parameter scope for the outermost block of a function
        definition, the scope of a statement's condition for its
        substatements' outermost blocks), and whether that is the parameter
        scope */
     entity_index conflicts = 0;
-    bool parameter_scope = false;
-    bool template_scope = false;
     /* [basic.link]: its declarations, in order, are a chain through
        `declarations`: the first and the last */
     uint32_t first_declaration = 0, last_declaration = 0;
     /* the semantic tree of its definition: a function's
        semantic_kind::function_body, a variable's initializer (0: none) */
     uint32_t definition = 0;
-    /* an array of unknown bound whose initializer would give the bound
-       ([dcl.array]/7) and was not analysed: its type is not known */
-    bool bound_unknown = false;
-    /* a member of a class (enclosing is the class): [class.mem]/3 a
-       non-static data member or a non-static member function, which has
-       a `this` ([class.this]) */
-    bool nonstatic_member = false;
     /* [class.access]: a member's access (0 public, 1 protected, 2
        private) */
     uint8_t access = 0;
     /* a non-static member function: [class.mfct.non-static]/5 the
        cv-qualifier-seq of its declarator, which qualifies `this` */
     uint32_t member_cv = 0;
-    /* a non-static data member declared mutable ([dcl.stc]/8): the type of
-       an access to it takes no const from the object ([expr.ref]/6.2) */
-    bool mutable_member = false;
     /* a non-static data member: its number among the class's and, once
        the class is complete, its offset in bytes ([class.mem]/19,
        [abi:class-types]) */
@@ -767,45 +699,14 @@ struct entity {
        ([class.mem]/10: a brace-or-equal-initializer or braced-init-list
        node), 0 if none */
     SyntaxRef default_initializer = 0;
-    /* a member: its default member initializer holds a source location
-       builtin, folded for a defaulted constructor defined where it is used
-       and not where it is declared: the value is not clang's */
-    bool initializer_located = false;
-    /* the default member initializer is being analysed ([class.mem]/6) */
-    bool initializer_active = false;
-    /* ... and whether it can throw ([except.spec]/7), once a constructor
+    /* whether the default member initializer can throw
+       ([except.spec]/7), once a constructor
        using it is defined (semantic_analysis::default_member_initializer) */
     initializer_exception initializer_throws = initializer_exception::unknown;
-    /* a class: its default constructor is declared = default
-       ([dcl.fct.def.default]), declared as the implicit one is */
-    bool defaulted_default_constructor = false;
-    /* a class: its implicit copy constructor is deleted, a subobject's
-       being deleted or not accessible ([class.copy.ctor]/10.1) */
-    bool implicit_copy_deleted = false;
-    /* ... and explicit: explicit X() = default ([class.conv.ctor]/2: a
-       copy-initialization does not consider it) */
-    bool explicit_default_constructor = false;
-    /* X& operator=(const X&) = default (defaulted_copy_assignment) */
-    bool defaulted_copy_assignment = false;
-    /* ... and the access of one declared protected or private, which the
+    /* the access of a defaulted copy or move assignment declared protected
+       or private (defaulted_copy_assignment), which the
        entity declared at the class's end takes */
     uint8_t defaulted_copy_access = 0, defaulted_move_access = 0;
-    /* X(X&&) = default and X& operator=(X&&) = default, trivial
-       ([class.copy.ctor]/11, [class.copy.assign]/9): no entity; the move
-       constructor copies the bytes (construct) */
-    bool defaulted_move_constructor = false;
-    /* X(const X&) = default: no entity when trivial */
-    bool defaulted_copy_constructor = false;
-    bool defaulted_move_assignment = false;
-    /* [class.default.ctor]/2: the implicit default constructor is deleted
-       (a subobject without a usable default constructor) */
-    bool implicit_default_deleted = false;
-    /* [expr.prim.lambda.closure]/13: a closure type's copy assignment
-       operator is deleted (a lambda-capture) */
-    bool closure_assignment_deleted = false;
-    /* a function (the first of its overloads) a using-declaration names
-       ([namespace.udecl]/11) */
-    bool named_by_using = false;
     uint64_t offset = 0;
     /* a class: its non-static data members, in declaration order, are
        semantic_analysis::class_members[first_member .. first_member +
@@ -822,24 +723,6 @@ struct entity {
        base_count) */
     uint64_t data_size = 0;
     uint32_t first_base = 0, base_count = 0;
-    /* a base class subobject ([intro.object]/2): an unnamed non-static
-       member of the derived class (enclosing) whose type is the base
-       class, with its offset and access ([class.access.base]/1); one that
-       is not empty is also among the class's non-static data members
-       (field) */
-    bool base_subobject = false;
-    /* a base subobject of a class template's specialization whose
-       base-specifier depends on a template-parameter: [temp.dep]/3, its
-       class's members are not found by unqualified lookup */
-    bool dependent_base = false;
-    /* a class (a class template's pattern or specialization) with a
-       template friend class that is a member of a dependent type
-       ([temp.friend]/4): clang does not check access to its members
-       (-Wunsupported-friend, "turning off access control") */
-    bool access_unchecked = false;
-    /* a class: the implicit assignment being defined assigns a subobject
-       of it, its operator= accessible as subobject_assignment decided */
-    bool assigned_by_implicit = false;
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
@@ -849,9 +732,6 @@ struct entity {
     /* [ext.clang] #pragma pack's value where the class was defined: no
        member's alignment exceeds it (0: none) */
     uint8_t max_field_alignment = 0;
-    /* a non-static data member with the packed attribute: aligned to 1
-       before its aligned attribute ([ext:gnu_attributes]) */
-    bool packed = false;
     /* an unnamed class: [dcl.typedef]/9 "the first typedef-name declared
        by the declaration to be that class type ... is used to denote the
        class type ... for linkage purposes only" */
@@ -879,36 +759,17 @@ struct entity {
        name in the class, which [temp.mem]/2 overloads with the chain; 0
        if none */
     entity_index member_templates = 0;
-    /* a function: [dcl.fct.def.delete]/1 a deleted function */
-    bool deleted = false;
     /* a function: [dcl.fct.default]/1 the number of its last parameters
        that have a default argument (default_argument) */
     uint32_t default_arguments = 0;
-    /* ... and where its parameters' are in
+    /* ... and where the default arguments of a function's parameters are in
        semantic_analysis::default_argument_nodes (0: none has one) */
     uint32_t first_default = 0;
-    /* ... not known: a declaration's default arguments were not analysed,
-       or it is in another scope than the first ([dcl.fct.default]/4: "For
-       non-template functions, default arguments can be added in later
-       declarations of a function that appear within the same scope.
-       Declarations that appear in different scopes have completely distinct
-       sets of default arguments.") */
-    bool unknown_defaults = false;
-    /* a function: [over.oper]/1 an operator function, and the operator
-       it implements (its name is operator_name's) */
-    bool operator_function = false;
+    /* an operator function (operator_function): the operator */
     preprocessing_op_or_punc implemented = {};
     /* ... or one of the allocation and deallocation functions
        ([basic.stc.dynamic]/1) */
     allocation_function allocation = allocation_function::none;
-    /* ... or a conversion function ([class.conv.fct]): its name is
-       conversion_function_name's, shared by all; explicit_ when declared
-       explicit ([class.conv.fct]/2) */
-    bool conversion_function = false, explicit_ = false;
-    /* [dcl.fct.spec]/2: a constructor template's explicit(condition) whose
-       condition is value-dependent: decided per specialization, so unknown
-       on the template itself */
-    bool explicit_dependent = false;
     /* a class: the copy assignment operators it declares
        ([class.copy.assign]/1) not deleted on their first declaration */
     uint32_t user_copy_assignments = 0;
@@ -925,20 +786,8 @@ struct entity {
        it hold as function_templates (member_function_template), 0 if
        none */
     entity_index constructor_templates = 0;
-    /* a non-static data member that is a bit-field ([class.bit]): its
-       width and the offset of its first bit in the class (offset is the
-       byte that bit is in); an unnamed one (name 0) is in the layout but
-       not a member ([class.bit]/2) */
-    bool bit_field = false;
-    /* a non-static data member declared [[no_unique_address]]
-       ([dcl.attr.nouniqueaddr]): potentially-overlapping
-       ([intro.object]/7), laid out by [abi:class-types] II as clang does */
-    bool no_unique_address = false;
     uint16_t bit_width = 0;
     uint64_t bit_offset = 0;
-    /* a class: a union ([class.union]/1: "A union is a class defined
-       with the class-key union") */
-    bool union_ = false;
     /* a class that is defined: the class-key of its class-specifier */
     token_index class_key = 0;
     /* a function or variable: [ext:gnu_attributes] the GNU attributes
@@ -964,34 +813,14 @@ struct entity {
        by typeid_object, a variable named _ZTI <type> by the ABI), 0 for
        any other entity */
     type_index typeinfo_of = 0;
-    /* [dcl.link]/1: a function or variable with C language linkage,
-       whose name is its symbol */
-    bool c_language_linkage = false;
-    /* a variable or function internal only because its type is or is
-       made of a class or enumeration without external linkage (an unnamed
-       class, [basic.link]/4.3; one of an unnamed namespace): [impl.clang]
-       its symbol is local, and mangled as an external name's is, without
-       L */
-    bool unnamed_type_linkage = false;
-    /* a special member function declared implicitly ([class.default.ctor]/1,
-       [class.copy.ctor]/6, [class.dtor]/4) */
-    bool implicit = false;
-    /* a defaulted comparison operator function without a noexcept-specifier
-       that compares scalars only: it is not potentially-throwing */
-    bool compares_scalars = false;
     /* a constructor of a class that a using-declarator names a base
        class's constructors for ([namespace.udecl]/3): the base's
        constructor it forwards to ([class.inhctor.init]/1); implicit too */
     entity_index inherited_constructor = 0;
-    /* a class: a using-declarator names the constructors of one of its
-       bases ([namespace.udecl]/3), whose constructors it inherits at its
-       closing }; no aggregate ([dcl.init.aggr]/1.1) */
-    bool inherits_constructors = false;
     /* an enumeration ([dcl.enum]): its underlying type once it is
        complete (none before), whether it is scoped ([dcl.enum]/2) and
        whether its underlying type is fixed ([dcl.enum]/5) */
     fundamental_type underlying = fundamental_type::none;
-    bool scoped = false, fixed_underlying = false;
     /* ... and, its underlying type not fixed, the bits of its values'
        range ([dcl.enum]/8): of the largest enumerator value and of the
        most negative one (0: none negative) */
@@ -1011,23 +840,12 @@ struct entity {
        explicit instantiation ([temp.explicit]/2) declaration (extern) or
        definition */
     instantiation_kind explicitly_instantiated = instantiation_kind::none;
-    /* a non-static member function: [class.virtual]/2 a virtual function
-       (declared virtual, or overriding one), pure ([class.abstract]/2),
-       and its slot in the virtual table of its class (the index of its
-       function pointer after the offset to top and the RTTI pointer,
-       [abi:vtable-components]) */
-    bool virtual_ = false, pure = false, final_function = false;
+    /* a virtual function (virtual_): its slot */
     uint32_t vtable_slot = 0;
     /* a class: [class.virtual]/1 a polymorphic (dynamic, [abi:definitions])
        class: its record in semantic_analysis::dynamic_classes plus one, 0
        if it is none */
     uint32_t dynamic = 0;
-    /* a base class subobject that is a virtual base ([class.mi]/4): a
-       direct one (its base-specifier has virtual) in class_bases, or one
-       of a class's virtual bases, direct or indirect
-       (semantic_analysis::class_virtual_bases), whose offset is its
-       offset in a complete object of the class; neither is a member */
-    bool virtual_base = false;
     /* a class: its virtual bases, direct and indirect, are
        semantic_analysis::class_virtual_bases[first_virtual_base ..
        first_virtual_base + virtual_base_count), in the order of their
@@ -1039,9 +857,6 @@ struct entity {
        without virtual bases nvsize is its data size */
     uint64_t nv_size = 0;
     uint32_t nv_alignment = 0;
-    /* a function declared with a return type that has a placeholder
-       ([dcl.spec.auto]/3), deduced or not */
-    bool placeholder_return = false;
     /* a closure type ([expr.prim.lambda.closure]/1): its lambda-expression
        (0: the class is no closure) and its function call operator */
     SyntaxRef lambda = 0;
@@ -1065,6 +880,205 @@ struct entity {
        first_binding + binding_count, which name it ([abi:mangle.name]) */
     entity_index first_binding = 0;
     uint32_t binding_count = 0;
+    /*
+     * The flags, one bit each and together: a translation unit has more than a
+     * million records, and a bool of its own among the members above cost a
+     * byte and its padding.
+     */
+    /* [basic.def]/2: a declaration of it was a definition */
+    bool defined : 1 = false;
+    /* [temp.inst]/4: a definition deferred until the function is used. */
+    bool member_definition_needed : 1 = false, member_body_deferred : 1 = false;
+    /* [dcl.constexpr]/1 */
+    bool constexpr_ : 1 = false;
+    /* [dcl.constexpr]/2: "A function or function template declared with
+       the consteval specifier is called an immediate function" (also
+       constexpr_ and inline_) */
+    bool immediate : 1 = false;
+    /* a class: [class.pre]/1 marked final (cannot be a direct base class) */
+    bool final_ : 1 = false;
+    /* [dcl.inline]: an inline function or variable; [namespace.def]/7: an
+       inline namespace */
+    bool inline_ : 1 = false;
+    /* A constructor with an unsatisfied associated constraint. */
+    bool constraint_unsatisfied : 1 = false;
+    /* [over.load]/2: a member function declared with a trailing
+       requires-clause (it overloads one that differs in it) */
+    bool trailing_requires : 1 = false;
+    /* a scope: a declaration analysis did not follow may have brought
+       names into it that are not held one by one (a using-directive whose
+       namespace is not known, a using-enum-declaration): a name not found
+       in it is not known to be undeclared */
+    bool unknown_names : 1 = false;
+    /* a name hold_names kept with no entity (kind none) because a
+       template-declaration or explicit-specialization declared it: what
+       it denotes needs [temp]'s rules */
+    bool held_by_template : 1 = false;
+    /* [expr.const]/4: a variable usable in constant expressions whose
+       128-bit integer value `value` cannot hold: usable stays unknown for
+       every reader of value, and the evaluator reads the value from
+       semantic_analysis::wide_variables */
+    bool wide_value : 1 = false;
+    /* [temp.dep]: in an instantiation, a name whose meaning came from the
+       template arguments: a template-parameter's name bound to its
+       argument, a local variable, parameter or this declared with one; a
+       construct that uses it is argument-dependent (argument_named) */
+    bool argument_bound : 1 = false;
+    /* a scope (a namespace, 0 the global one, or a block): a
+       using-directive appears in it ([namespace.udir]; an unnamed or
+       inline namespace's implied one in its enclosing namespace) */
+    bool has_using_directive : 1 = false;
+    /* a variable: [basic.stc.auto]/1, a local variable not declared static
+       (or a parameter) */
+    bool automatic : 1 = false;
+    /* a variable: [ext:clang_c11_thread_local] declared _Thread_local, of
+       thread storage duration ([basic.stc.thread]) with C11's rules */
+    bool c11_thread_local : 1 = false;
+    /* a variable: [dcl.constinit]/1 declared constinit (by any of its
+       declarations) */
+    bool constinit_ : 1 = false;
+    /* a constexpr variable whose initializer is not a constant expression
+       ([dcl.constexpr]/10): not usable in constant expressions, a read of
+       it is not constant ([expr.const]/5.8) */
+    bool unusable_initializer : 1 = false;
+    /* a block_scope: whether conflicts is the function parameter scope */
+    bool parameter_scope : 1 = false;
+    /* a block_scope: of a template's parameters */
+    bool template_scope : 1 = false;
+    /* an array of unknown bound whose initializer would give the bound
+       ([dcl.array]/7) and was not analysed: its type is not known */
+    bool bound_unknown : 1 = false;
+    /* a member of a class (enclosing is the class): [class.mem]/3 a
+       non-static data member or a non-static member function, which has
+       a `this` ([class.this]) */
+    bool nonstatic_member : 1 = false;
+    /* a non-static data member declared mutable ([dcl.stc]/8): the type of
+       an access to it takes no const from the object ([expr.ref]/6.2) */
+    bool mutable_member : 1 = false;
+    /* a member: its default member initializer holds a source location
+       builtin, folded for a defaulted constructor defined where it is used
+       and not where it is declared: the value is not clang's */
+    bool initializer_located : 1 = false;
+    /* the default member initializer is being analysed ([class.mem]/6) */
+    bool initializer_active : 1 = false;
+    /* a class: its default constructor is declared = default
+       ([dcl.fct.def.default]), declared as the implicit one is */
+    bool defaulted_default_constructor : 1 = false;
+    /* a class: its implicit copy constructor is deleted, a subobject's
+       being deleted or not accessible ([class.copy.ctor]/10.1) */
+    bool implicit_copy_deleted : 1 = false;
+    /* ... and explicit: explicit X() = default ([class.conv.ctor]/2: a
+       copy-initialization does not consider it) */
+    bool explicit_default_constructor : 1 = false;
+    /* X& operator=(const X&) = default (defaulted_copy_assignment) */
+    bool defaulted_copy_assignment : 1 = false;
+    /* X(X&&) = default and X& operator=(X&&) = default, trivial
+       ([class.copy.ctor]/11, [class.copy.assign]/9): no entity; the move
+       constructor copies the bytes (construct) */
+    bool defaulted_move_constructor : 1 = false;
+    /* X(const X&) = default: no entity when trivial */
+    bool defaulted_copy_constructor : 1 = false;
+    bool defaulted_move_assignment : 1 = false;
+    /* [class.default.ctor]/2: the implicit default constructor is deleted
+       (a subobject without a usable default constructor) */
+    bool implicit_default_deleted : 1 = false;
+    /* [expr.prim.lambda.closure]/13: a closure type's copy assignment
+       operator is deleted (a lambda-capture) */
+    bool closure_assignment_deleted : 1 = false;
+    /* a function (the first of its overloads) a using-declaration names
+       ([namespace.udecl]/11) */
+    bool named_by_using : 1 = false;
+    /* a base class subobject ([intro.object]/2): an unnamed non-static
+       member of the derived class (enclosing) whose type is the base
+       class, with its offset and access ([class.access.base]/1); one that
+       is not empty is also among the class's non-static data members
+       (field) */
+    bool base_subobject : 1 = false;
+    /* a base subobject of a class template's specialization whose
+       base-specifier depends on a template-parameter: [temp.dep]/3, its
+       class's members are not found by unqualified lookup */
+    bool dependent_base : 1 = false;
+    /* a class (a class template's pattern or specialization) with a
+       template friend class that is a member of a dependent type
+       ([temp.friend]/4): clang does not check access to its members
+       (-Wunsupported-friend, "turning off access control") */
+    bool access_unchecked : 1 = false;
+    /* a class: the implicit assignment being defined assigns a subobject
+       of it, its operator= accessible as subobject_assignment decided */
+    bool assigned_by_implicit : 1 = false;
+    /* a non-static data member with the packed attribute: aligned to 1
+       before its aligned attribute ([ext:gnu_attributes]) */
+    bool packed : 1 = false;
+    /* a function: [dcl.fct.def.delete]/1 a deleted function */
+    bool deleted : 1 = false;
+    /* a function's default arguments (default_arguments) are not known: a
+       declaration's were not analysed,
+       or it is in another scope than the first ([dcl.fct.default]/4: "For
+       non-template functions, default arguments can be added in later
+       declarations of a function that appear within the same scope.
+       Declarations that appear in different scopes have completely distinct
+       sets of default arguments.") */
+    bool unknown_defaults : 1 = false;
+    /* a function: [over.oper]/1 an operator function, and the operator
+       it implements (its name is operator_name's) */
+    bool operator_function : 1 = false;
+    /* ... or a conversion function ([class.conv.fct]): its name is
+       conversion_function_name's, shared by all; explicit_ when declared
+       explicit ([class.conv.fct]/2) */
+    bool conversion_function : 1 = false, explicit_ : 1 = false;
+    /* [dcl.fct.spec]/2: a constructor template's explicit(condition) whose
+       condition is value-dependent: decided per specialization, so unknown
+       on the template itself */
+    bool explicit_dependent : 1 = false;
+    /* a non-static data member that is a bit-field ([class.bit]): its
+       width and the offset of its first bit in the class (offset is the
+       byte that bit is in); an unnamed one (name 0) is in the layout but
+       not a member ([class.bit]/2) */
+    bool bit_field : 1 = false;
+    /* a non-static data member declared [[no_unique_address]]
+       ([dcl.attr.nouniqueaddr]): potentially-overlapping
+       ([intro.object]/7), laid out by [abi:class-types] II as clang does */
+    bool no_unique_address : 1 = false;
+    /* a class: a union ([class.union]/1: "A union is a class defined
+       with the class-key union") */
+    bool union_ : 1 = false;
+    /* [dcl.link]/1: a function or variable with C language linkage,
+       whose name is its symbol */
+    bool c_language_linkage : 1 = false;
+    /* a variable or function internal only because its type is or is
+       made of a class or enumeration without external linkage (an unnamed
+       class, [basic.link]/4.3; one of an unnamed namespace): [impl.clang]
+       its symbol is local, and mangled as an external name's is, without
+       L */
+    bool unnamed_type_linkage : 1 = false;
+    /* a special member function declared implicitly ([class.default.ctor]/1,
+       [class.copy.ctor]/6, [class.dtor]/4) */
+    bool implicit : 1 = false;
+    /* a defaulted comparison operator function without a noexcept-specifier
+       that compares scalars only: it is not potentially-throwing */
+    bool compares_scalars : 1 = false;
+    /* a class: a using-declarator names the constructors of one of its
+       bases ([namespace.udecl]/3), whose constructors it inherits at its
+       closing }; no aggregate ([dcl.init.aggr]/1.1) */
+    bool inherits_constructors : 1 = false;
+    /* an enumeration: whether it is scoped ([dcl.enum]/2) and whether its
+       underlying type is fixed ([dcl.enum]/5) */
+    bool scoped : 1 = false, fixed_underlying : 1 = false;
+    /* a non-static member function: [class.virtual]/2 a virtual function
+       (declared virtual, or overriding one), pure ([class.abstract]/2),
+       and its slot in the virtual table of its class (the index of its
+       function pointer after the offset to top and the RTTI pointer,
+       [abi:vtable-components]) */
+    bool virtual_ : 1 = false, pure : 1 = false, final_function : 1 = false;
+    /* a base class subobject that is a virtual base ([class.mi]/4): a
+       direct one (its base-specifier has virtual) in class_bases, or one
+       of a class's virtual bases, direct or indirect
+       (semantic_analysis::class_virtual_bases), whose offset is its
+       offset in a complete object of the class; neither is a member */
+    bool virtual_base : 1 = false;
+    /* a function declared with a return type that has a placeholder
+       ([dcl.spec.auto]/3), deduced or not */
+    bool placeholder_return : 1 = false;
 };
 
 /* [class.virtual], [abi:vtable-components]: what a dynamic class adds to
