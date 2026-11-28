@@ -69,7 +69,8 @@ registers; D3 changes that and measures run time and compile time.
 
 ## What is left, in order
 
-1. Function-local static and thread-local variables (no entry).
+1. Function-local statics: C done (`bench/debug-values.py`); C++ ones and
+   thread-local variables have no entry.
 2. Lexical blocks: locals are the function's, so shadowed names are
    ambiguous.  Needs a range per scope that survives VIR's block order.
 3. No location: VLAs, arm64 locals aligned over 16, parameters passed by
