@@ -40,7 +40,7 @@ void c_lowering::debug_class_name(entity_index e, vbuffer *out)
     }
     uint32_t name = x.name;
     if (!name)
-        name = x.linkage_name;
+        name = x.details().linkage_name;
     if (!name)
         return;
     size_t length = 0;
