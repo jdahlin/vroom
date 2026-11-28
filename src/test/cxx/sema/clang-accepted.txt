@@ -4005,6 +4005,7 @@ SemaTemplate/cxx1z-fold-expressions.cpp:99 -std=c++2a
 SemaTemplate/cxx1z-using-declaration.cpp:106 -std=c++1z
 SemaTemplate/cxx1z-using-declaration.cpp:151 -std=c++1z
 SemaTemplate/cxx1z-using-declaration.cpp:159 -std=c++1z
+SemaTemplate/cxx1z-using-declaration.cpp:19 -std=c++1z
 SemaTemplate/cxx1z-using-declaration.cpp:4 -std=c++1z
 SemaTemplate/cxx2a-constraint-exprs.cpp:23 -std=c++2a
 SemaTemplate/cxx2a-constraint-exprs.cpp:39 -std=c++2a

@@ -47,7 +47,8 @@ node_index parser::using_declaration()
  *         typename_opt nested-name-specifier unqualified-id
  *
  * The unqualified-ids that are operator names are operator-function.cpp's.
- * A using-declarator with typename names a type ([temp.res]/5); a name
+ * A using-declarator with typename names a type ([temp.res]/5); one that
+ * names a constructor declares no name; a name
  * the parser cannot look up (a class's member) is declared as nothing.
  */
 node_index parser::using_declarator()
@@ -62,6 +63,8 @@ node_index parser::using_declarator()
         return 0;
     if (!qualifier)
         return expected("a nested-name-specifier", "namespace.udecl");
+    /* the unqualified-id's own template-id would overwrite it */
+    uint32_t qualifier_name = last_qualifier_name;
     /* unqualified-id: no template keyword before it */
     if (at(standard_keyword::template_))
         return expected("an unqualified-id after the nested-name-specifier",
@@ -92,7 +95,15 @@ node_index parser::using_declarator()
     if (at(preprocessing_op_or_punc::LESS))
         return violates("no template-id in a using-declarator",
                         "namespace.udecl", position);
-    if (name) {
+    /* [class.qual]/2: in a member-declaration, a name that is "the same as
+       the identifier or the simple-template-id's template-name in the last
+       component of the nested-name-specifier" names the constructor, and
+       [namespace.udecl]/1: only a using-declarator that "does not name a
+       constructor" declares its unqualified-id.  A template parameter, an
+       alias or a class of that name keeps its meaning. */
+    bool constructor = name && name == qualifier_name &&
+                       names.kind_of(names.current()) == scope_kind::class_;
+    if (name && !constructor) {
         name_kind kind = name_kind::not_declared;
         scope_index owned = 0;
         bool dependent = false;
