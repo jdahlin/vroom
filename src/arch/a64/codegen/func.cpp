@@ -580,6 +580,22 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
                        e->records[kpro].condition != A64_NOP_PROLOGUE;
              kpro++)
             ;
+    /* -g: the direct emitter's parameters in slots of their own */
+    for (uint32_t i = 0; !e->vir_lowering && i < N(c->syms[s].body)->aux; i++) {
+        uint32_t p = c->lists[N(c->syms[s].body)->a + i];
+        const codegen_binding *bd = codegen_symbol_binding_get(e, p);
+
+        if (bd->kind == CODEGEN_BINDING_SLOT)
+            codegen_debug_local_add(e, p, bd->slot, true);
+    }
+    /* -g: the locals' offsets as the rewrite below makes them (DWARF registers 28, x29, sp) */
+    if (bp)
+        codegen_debug_frame_store(e, s, A64_REGISTER_FRAME_BASE,
+                                  total - 16 - csave);
+    else if (e->dynamic_frame)
+        codegen_debug_frame_store(e, s, 29, -csave);
+    else
+        codegen_debug_frame_store(e, s, 31, total - 16 - csave);
     /* rewrite frame-slot references */
     A64_RECORD_PASS_BEGIN(e);
     for (uint32_t k = 0; k < e->record_count; k++) {
@@ -896,6 +912,7 @@ static bool emit_function1(codegen_context *e, uint32_t s, int nlreg)
     codegen_function_prepass_request(e, s);
     e->record_count = 0;
     e->debug_row_count = 0;
+    e->debug_local_count = 0;
     e->raw.n = 0;
     e->label_count = 0;
     e->known_value_count = 0, e->known_values_valid = 0,

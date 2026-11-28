@@ -31,6 +31,10 @@ VIR runs the passes required to construct and lower SSA. The optional
 SSA optimization passes start at `-O2`. The walker retains its existing
 `-O0` folding and inlining rules.
 
+Every named local and parameter stays in its frame slot, as with clang: no
+promotion to SSA values, no forwarding of a stored value to a later load and
+no dead-store removal for those slots (`doc/PLAN-debuginfo.md`).
+
 ### -O1
 
 The frontend and walker also apply local optimizations when `cc_opts.opt >= 1`.

@@ -79,6 +79,7 @@ typedef struct virbuild_preir_slot {
         incoming_object; /* SysV memory parameter: address of the caller-provided argument copy */
     uint8_t
         float32_written; /* an 8-byte slot whose last float stored was an f32 (its low 4 bytes) */
+    uint8_t is_pinned; /* -O0's named local: stays in memory as written */
 } virbuild_preir_slot;
 
 #define VIRBUILD_MEMSET_LIFETIME_FLAG                                          \
