@@ -1226,10 +1226,9 @@ entity_index semantic_analysis::lexical_parent(entity_index s) const
 
 bool semantic_analysis::defined_by_friend(entity_index f) const
 {
-    friends_by_function.update(friend_definitions,
-                               [](const friend_definition &d) {
-                                   return static_cast<size_t>(d.function);
-                               });
+    friends_by_function.update(
+        friend_definitions,
+        [](const friend_definition &d) { return d.function; });
     return friends_by_function.first(f) != 0;
 }
 

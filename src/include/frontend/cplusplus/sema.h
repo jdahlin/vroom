@@ -5863,13 +5863,14 @@ class semantic_analysis
     /* the slots of template_parameter_entities that hold an entity: a chain
        from the entity (slot plus one, 0 ends it), written only by
        set_template_parameter_entity */
-    owned_array<uint32_t> parameter_slot_of_entity, parameter_slot_next;
+    owned_array<uint32_t, entity_index> parameter_slot_of_entity;
+    owned_array<uint32_t> parameter_slot_next;
     void set_template_parameter_entity(uint32_t slot, entity_index e)
     {
         if (template_parameter_entities[slot] == e)
             return;
         template_parameter_entities[slot] = e;
-        while (parameter_slot_of_entity.size() <= e)
+        while (parameter_slot_of_entity.size() <= e.index())
             parameter_slot_of_entity.append(0);
         while (parameter_slot_next.size() <= slot)
             parameter_slot_next.append(0);
@@ -5878,7 +5879,7 @@ class semantic_analysis
     }
     uint32_t first_parameter_slot(entity_index e) const
     {
-        if (e < parameter_slot_of_entity.size())
+        if (e.index() < parameter_slot_of_entity.size())
             return parameter_slot_of_entity[e];
         return 0;
     }

@@ -527,10 +527,9 @@ uint32_t semantic_analysis::template_record(entity_index t) const
 {
     if (!t)
         return 0;
-    templates_by_entity.update(function_templates,
-                               [](const function_template &f) {
-                                   return static_cast<size_t>(f.entity);
-                               });
+    templates_by_entity.update(
+        function_templates,
+        [](const function_template &f) { return f.entity; });
     return templates_by_entity.first(t);
 }
 

@@ -909,7 +909,7 @@ class c_lowering
        (lower_waiting_functions); 0 for one lowered */
     owned_array<entity_index> waiting_functions;
     /* by entity: whether it is in waiting_functions now */
-    owned_array<uint8_t> is_waiting;
+    owned_array<uint8_t, entity_index> is_waiting;
     bool lowering_waiting = false;
     bool lower_waiting_functions();
     bool variable_definition(entity_index e);
