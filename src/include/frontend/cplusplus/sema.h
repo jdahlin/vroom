@@ -5817,6 +5817,7 @@ class semantic_analysis
        instantiations by template_entity: made as they are asked for */
     mutable record_chains templates_by_held, templates_by_identifier,
         instantiations_by_template;
+    mutable record_chains templates_by_entity, friends_by_function;
     const record_chains &held_templates() const
     {
         templates_by_held.update(
@@ -5859,6 +5860,28 @@ class semantic_analysis
        its type the parameter's); and its type-parameter or
        parameter-declaration, for its default template-argument */
     owned_array<entity_index> template_parameter_entities;
+    /* the slots of template_parameter_entities that hold an entity: a chain
+       from the entity (slot plus one, 0 ends it), written only by
+       set_template_parameter_entity */
+    owned_array<uint32_t> parameter_slot_of_entity, parameter_slot_next;
+    void set_template_parameter_entity(uint32_t slot, entity_index e)
+    {
+        if (template_parameter_entities[slot] == e)
+            return;
+        template_parameter_entities[slot] = e;
+        while (parameter_slot_of_entity.size() <= e)
+            parameter_slot_of_entity.append(0);
+        while (parameter_slot_next.size() <= slot)
+            parameter_slot_next.append(0);
+        parameter_slot_next[slot] = parameter_slot_of_entity[e];
+        parameter_slot_of_entity[e] = slot + 1;
+    }
+    uint32_t first_parameter_slot(entity_index e) const
+    {
+        if (e < parameter_slot_of_entity.size())
+            return parameter_slot_of_entity[e];
+        return 0;
+    }
     owned_array<SyntaxRef> template_parameter_nodes;
     /* per template-parameter: the first_parameter of the declaration whose
        parameter names its default template-argument uses (its own

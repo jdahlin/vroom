@@ -908,6 +908,8 @@ class c_lowering
        needed, lowered at the end only if a lowered definition uses them
        (lower_waiting_functions); 0 for one lowered */
     owned_array<entity_index> waiting_functions;
+    /* by entity: whether it is in waiting_functions now */
+    owned_array<uint8_t> is_waiting;
     bool lowering_waiting = false;
     bool lower_waiting_functions();
     bool variable_definition(entity_index e);

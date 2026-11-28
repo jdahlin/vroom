@@ -137,9 +137,11 @@ bool c_lowering::function_definition_or_drop(entity_index e)
        since calls it */
     if (!used && !lowering_waiting && x.inline_ &&
         !x.member_definition_needed) {
-        for (entity_index w : waiting_functions)
-            if (w == e)
-                return true;
+        while (is_waiting.size() <= e)
+            is_waiting.append(0);
+        if (is_waiting[e])
+            return true;
+        is_waiting[e] = 1;
         waiting_functions.append(e);
         return true;
     }
@@ -390,7 +392,8 @@ bool c_lowering::translation_unit()
         if (!made)
             return false;
     }
-    owned_array<entity_index> done;
+    /* by entity: those of declared_names seen */
+    owned_array<uint8_t> done;
     for (const declared_name &d : analysis.declared_names) {
         if (!d.entity)
             continue;
@@ -408,13 +411,11 @@ bool c_lowering::translation_unit()
         if (analysis.explicitly_instantiated(d.entity) ==
             instantiation_kind::declaration)
             continue;
-        bool again = false;
-        for (entity_index s : done)
-            if (s == d.entity)
-                again = true;
-        if (again)
+        while (done.size() <= d.entity)
+            done.append(0);
+        if (done[d.entity])
             continue;
-        done.append(d.entity);
+        done[d.entity] = 1;
         if (x.kind == entity_kind::function) {
             if (!function_definition_or_drop(d.entity))
                 return false;
@@ -476,6 +477,7 @@ bool c_lowering::lower_waiting_functions()
             if (!e || !used_symbols[e])
                 continue;
             waiting_functions[i] = 0;
+            is_waiting[e] = 0;
             progress = true;
             if (!function_definition_or_drop(e))
                 return false;
