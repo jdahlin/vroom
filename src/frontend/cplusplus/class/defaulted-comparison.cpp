@@ -410,11 +410,10 @@ analysis_result semantic_analysis::defaulted_equality(
     /* a member's first parameter entity is its object */
     bool of_class = entity_table[last_declared].kind == entity_kind::function &&
                     entity_table[last_declared].enclosing == compared;
-    if ((!x.details().base_count && !x.member_count) || parameters.size() != 2u)
+    if (parameters.size() != 2u)
         return not_supported_because(
             current_declaration, "class.compare.default",
-            "a defaulted comparison of a class with no members or without "
-            "exactly two parameters");
+            "a defaulted comparison without exactly two parameters");
     bool three_way = entity_table[last_declared].name ==
                      operator_name(preprocessing_op_or_punc::SPACESHIP);
     if (entity_table[last_declared].name ==
@@ -539,10 +538,10 @@ analysis_result semantic_analysis::defaulted_equality(
                                        statements, constant, equality_constant,
                                        block);
     }
+    /* [class.eq]/3: "If no such index exists, V is true": a class with no
+       subobject to compare */
     if (!any)
-        return not_supported_because(
-            current_declaration, "class.compare.default",
-            "a defaulted comparison with no subobject to compare");
+        all = integer_constant(fundamental_type::bool_, 1, at);
     /* [class.compare.default]/3: "A defaulted comparison operator function
        is constexpr-compatible if it satisfies the requirements for a
        constexpr function": its parameters are of literal types and each

@@ -610,8 +610,13 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                underlying type is fixed ... both shall specify the same
                underlying type"; scoped-ness the same) */
             const entity &x = entity_table[prior];
+            /* (a definition analysis gave up in has no underlying type:
+               enum_specifier takes it away, so there is none to compare) */
+            bool other_underlying =
+                x.details().underlying != fundamental_type::none &&
+                x.details().underlying != fixed;
             if (!x.fixed_underlying || !is_fixed || x.scoped != scoped ||
-                x.details().underlying != fixed)
+                other_underlying)
                 return ill_formed_at_token(name_at,
                                            "each redeclaration of an "
                                            "enumeration shall have the same "
