@@ -2561,9 +2561,11 @@ uint32_t semantic_analysis::most_derived_place(const constant_evaluation &state,
             if (pass)
                 n = state.elements.size();
             for (size_t i = 0; i < n; i++) {
-                const constant_value *candidate = &state.objects[i].value;
+                const constant_value *candidate = nullptr;
                 if (pass)
                     candidate = &state.elements[i];
+                else
+                    candidate = &state.objects[i].value;
                 const constant_value &o = *candidate;
                 if (o.kind != constant_value_kind::class_object ||
                     !o.designator || index < o.first ||
