@@ -381,14 +381,13 @@ class record_chains
     {
         for (size_t i = next.size(); i < records.size(); i++) {
             size_t k = table_slot(key(records[i]));
-            while (ends.size() <= k)
-                ends.append(chain{0, 0});
+            chain &ends = ends_of(k);
             uint32_t at = static_cast<uint32_t>(i + 1);
-            if (ends[k].last)
-                next[ends[k].last - 1] = at;
+            if (ends.last)
+                next[ends.last - 1] = at;
             else
-                ends[k].first = at;
-            ends[k].last = at;
+                ends.first = at;
+            ends.last = at;
             next.append(0);
         }
     }
@@ -396,8 +395,8 @@ class record_chains
     template <typename Key> uint32_t first(Key key) const
     {
         size_t k = table_slot(key);
-        if (k < ends.size())
-            return ends[k].first;
+        if (k / PAGE < page_of.size() && page_of[k / PAGE])
+            return chains[(page_of[k / PAGE] - 1) * PAGE + k % PAGE].first;
         return 0;
     }
     uint32_t after(uint32_t record) const
@@ -409,7 +408,24 @@ class record_chains
     struct chain {
         uint32_t first, last;
     };
-    owned_array<chain> ends;
+    /* the chains' ends by key, in pages made for the keys that have
+       records: most keys have none, and a table with an end per entity was
+       megabytes of zeros.  page_of: a page's number plus one, 0 none */
+    static constexpr size_t PAGE = 64;
+    chain &ends_of(size_t k)
+    {
+        while (page_of.size() <= k / PAGE)
+            page_of.append(0);
+        if (!page_of[k / PAGE]) {
+            chain *made = chains.extend(PAGE);
+            for (size_t i = 0; i < PAGE; i++)
+                made[i] = chain{0, 0};
+            page_of[k / PAGE] = static_cast<uint32_t>(chains.size() / PAGE);
+        }
+        return chains[(page_of[k / PAGE] - 1) * PAGE + k % PAGE];
+    }
+    owned_array<uint32_t> page_of;
+    owned_array<chain> chains;
     owned_array<uint32_t> next;
 };
 

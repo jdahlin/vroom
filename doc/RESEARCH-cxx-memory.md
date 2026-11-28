@@ -7,13 +7,13 @@ tens of percent; the RSS figures repeat to a few MB.
 
 | file | before | after | clang++ | after / clang |
 |---|---|---|---|---|
-| network/network_command.cpp | 2119 MB | 648 MB | 963 MB | 0.67 |
-| openttd.cpp | 973 MB | 464 MB | 430 MB | 1.08 |
-| window.cpp | 504 MB | 289 MB | 281 MB | 1.03 |
+| network/network_command.cpp | 2119 MB | 591 MB | 963 MB | 0.61 |
+| openttd.cpp | 973 MB | 425 MB | 430 MB | 0.99 |
+| window.cpp | 504 MB | 269 MB | 281 MB | 0.96 |
 
 The objects `vpp -c` writes for the three are byte for byte the same before
 and after.  The target of using significantly less than clang is met for the largest
-file, not for the other two.
+file; the other two are about even with it.
 
 ## Where it went (network_command.cpp, before)
 
@@ -52,11 +52,20 @@ until either writes.  network_command.cpp 941 -> 648 MB, openttd.cpp 583 ->
 464 MB, window.cpp 345 -> 289 MB.  cxx-fe-bench: +0.28 % instructions against
 main for all the changes here.
 
+## Padding and empty chains
+
+- `entity`'s and `entity_details`' members ordered by alignment: 120 -> 104
+  and 296 -> 272 bytes.
+- `record_chains` keeps its chains' ends in pages made for keys that have
+  records.  Five of them are keyed by entity and had 8 bytes (one 4) for
+  every entity, about 40 MB in network_command.cpp.  This also took
+  cxx-fe-bench from +0.28 % to -6.6 % instructions against main.
+
 ## What is left
 
-openttd.cpp and window.cpp are still a little above clang; they have not been
-profiled by themselves.  In network_command.cpp the core record is still
-1.4 M x 120 bytes; whether the entity table or something else is now the
-largest part has not been measured.  `substitute_specialization` makes its
-own binding scope (sharing it gained under 3 MB), and the specializations' own
-scopes (`record_instantiation`) are kept per specialization.
+openttd.cpp at the previous step (463 MB resident): the core entities 82 MB,
+the details 55 MB, tokens 51 MB and preprocessing tokens 31 MB (both stay for
+the whole unit), the semantic tree 38 MB, the name binding slots 17 MB, the
+syntax tree about 23 MB, instantiation records 10 MB.  No single part is
+large any more; the candidates are details per kind, 32-bit indexes for the
+details pointer, the two token arrays, and `semantic_node` (48 bytes).

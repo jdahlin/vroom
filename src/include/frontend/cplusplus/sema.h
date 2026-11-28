@@ -611,6 +611,29 @@ struct exception_specification {
 struct entity_details {
     /* more than one entity record refers to this: a write makes a copy */
     bool shared = false;
+    /* the subclause whose missing rules made the declaration that
+       hold_names held this name not analysed (declaration() sets it from
+       that declaration's first refusal): a use of the name is refused for
+       that reason, not for [basic.lookup.unqual] or [temp.names] */
+    const char *held_because = nullptr;
+    /* with unknown_names: the subclause whose missing rules made the
+       declaration that left the scope's names not all known not
+       analysed (declaration() sets it), else the using-directive's */
+    const char *unknown_because = nullptr;
+    uint64_t offset = 0;
+    uint64_t size = 0;
+    /* a class: [abi:general] its data size (dsize), the size without the
+       tail padding a derived class may reuse (its size, for a POD for the
+       purpose of layout: [abi:pod]); its direct base classes
+       ([class.derived]/2), in the order of the base-specifier-list, are
+       semantic_analysis::class_bases[first_base .. first_base +
+       base_count) */
+    uint64_t data_size = 0;
+    uint64_t bit_offset = 0;
+    /* a class: [abi:general] nvsize and nvalign, its size and alignment
+       without its virtual bases (a base subobject's); for a class
+       without virtual bases nvsize is its data size */
+    uint64_t nv_size = 0;
     /* an instantiated member function whose body analysis does not support:
        left undefined, and a use of it is refused (body_failures' index
        plus one) */
@@ -638,19 +661,6 @@ struct entity_details {
        (semantic_analysis::expression_structure, hash-consed: one entity
        per structure), 0 for another */
     uint32_t expression = 0;
-    /* the subclause whose missing rules made the declaration that
-       hold_names held this name not analysed (declaration() sets it from
-       that declaration's first refusal): a use of the name is refused for
-       that reason, not for [basic.lookup.unqual] or [temp.names] */
-    const char *held_because = nullptr;
-    /* with no held_because: why the declaration that held the name was
-       not analysed, told in a refusal's detail */
-    held_cause held_by = held_cause::refused;
-    /* with unknown_names: the subclause whose missing rules made the
-       declaration that left the scope's names not all known not
-       analysed (declaration() sets it), else the using-directive's */
-    const char *unknown_because = nullptr;
-    held_cause unknown_by = held_cause::refused;
     /* [basic.scope.hiding]/2: "If a class name or enumeration name and a
        variable, data member, function, or enumerator are declared in the same
        declarative region (in any order) with the same name ..., the class or
@@ -666,23 +676,6 @@ struct entity_details {
        ([class.mem]/10: a brace-or-equal-initializer or braced-init-list
        node), 0 if none */
     SyntaxRef default_initializer = 0;
-    /* whether the default member initializer can throw
-       ([except.spec]/7), once a constructor
-       using it is defined (semantic_analysis::default_member_initializer) */
-    initializer_exception initializer_throws = initializer_exception::unknown;
-    /* the access of a defaulted copy or move assignment declared protected
-       or private (defaulted_copy_assignment), which the
-       entity declared at the class's end takes */
-    uint8_t defaulted_copy_access = 0, defaulted_move_access = 0;
-    uint64_t offset = 0;
-    uint64_t size = 0;
-    /* a class: [abi:general] its data size (dsize), the size without the
-       tail padding a derived class may reuse (its size, for a POD for the
-       purpose of layout: [abi:pod]); its direct base classes
-       ([class.derived]/2), in the order of the base-specifier-list, are
-       semantic_analysis::class_bases[first_base .. first_base +
-       base_count) */
-    uint64_t data_size = 0;
     uint32_t first_base = 0, base_count = 0;
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
@@ -690,9 +683,6 @@ struct entity_details {
     /* a class: the alignment its alignment-specifiers ask for, 0 if none
        ([dcl.align]) */
     uint32_t requested_alignment = 0;
-    /* [ext.clang] #pragma pack's value where the class was defined: no
-       member's alignment exceeds it (0: none) */
-    uint8_t max_field_alignment = 0;
     /* an unnamed class: [dcl.typedef]/9 "the first typedef-name declared
        by the declaration to be that class type ... is used to denote the
        class type ... for linkage purposes only" */
@@ -722,11 +712,6 @@ struct entity_details {
     /* ... and where the default arguments of a function's parameters are in
        semantic_analysis::default_argument_nodes (0: none has one) */
     uint32_t first_default = 0;
-    /* an operator function (operator_function): the operator */
-    preprocessing_op_or_punc implemented = {};
-    /* ... or one of the allocation and deallocation functions
-       ([basic.stc.dynamic]/1) */
-    allocation_function allocation = allocation_function::none;
     /* a class: the copy assignment operators it declares
        ([class.copy.assign]/1) not deleted on their first declaration */
     uint32_t user_copy_assignments = 0;
@@ -743,8 +728,6 @@ struct entity_details {
        it hold as function_templates (member_function_template), 0 if
        none */
     entity_index constructor_templates = 0;
-    uint16_t bit_width = 0;
-    uint64_t bit_offset = 0;
     /* a class that is defined: the class-key of its class-specifier */
     token_index class_key = 0;
     token_index section = 0;
@@ -752,10 +735,6 @@ struct entity_details {
        and gnu_cleanup's function */
     uint32_t gnu_priority = 0;
     entity_index gnu_cleanup = 0;
-    /* [ext:gnu_library_builtins] a function that is a compiler builtin
-       (gnu_compiler_builtin): its row of the builtin registry
-       (ext/gnu/builtin-registry.cpp), 0 if it has none */
-    uint16_t gnu_builtin_row = 0;
     /* [ext:gnu_asm_labels] a function's or variable's asm label: the
        string-literal that is its symbol, 0 if none */
     token_index asm_label = 0;
@@ -767,22 +746,6 @@ struct entity_details {
        class's constructors for ([namespace.udecl]/3): the base's
        constructor it forwards to ([class.inhctor.init]/1); implicit too */
     entity_index inherited_constructor = 0;
-    /* an enumeration ([dcl.enum]): its underlying type once it is
-       complete (none before), whether it is scoped ([dcl.enum]/2) and
-       whether its underlying type is fixed ([dcl.enum]/5) */
-    fundamental_type underlying = fundamental_type::none;
-    /* ... and, its underlying type not fixed, the bits of its values'
-       range ([dcl.enum]/8): of the largest enumerator value and of the
-       most negative one (0: none negative) */
-    uint8_t positive_bits = 0, negative_bits = 0;
-    /* ... and, its underlying type not fixed, the type it promotes to
-       ([conv.prom]/4) */
-    fundamental_type promoted = fundamental_type::none;
-    /* a function template's specialization, a member function of a class
-       template's specialization or such a class: the subject of an
-       explicit instantiation ([temp.explicit]/2) declaration (extern) or
-       definition */
-    instantiation_kind explicitly_instantiated = instantiation_kind::none;
     /* a virtual function (virtual_): its slot */
     uint32_t vtable_slot = 0;
     /* a class: [class.virtual]/1 a polymorphic (dynamic, [abi:definitions])
@@ -795,10 +758,6 @@ struct entity_details {
        construction ([class.base.init]/13.1: depth-first left-to-right, a
        base's virtual bases before it) */
     uint32_t first_virtual_base = 0, virtual_base_count = 0;
-    /* a class: [abi:general] nvsize and nvalign, its size and alignment
-       without its virtual bases (a base subobject's); for a class
-       without virtual bases nvsize is its data size */
-    uint64_t nv_size = 0;
     uint32_t nv_alignment = 0;
     /* a closure type ([expr.prim.lambda.closure]/1): its lambda-expression
        (0: the class is no closure) and its function call operator */
@@ -823,6 +782,47 @@ struct entity_details {
        first_binding + binding_count, which name it ([abi:mangle.name]) */
     entity_index first_binding = 0;
     uint32_t binding_count = 0;
+    uint16_t bit_width = 0;
+    /* [ext:gnu_library_builtins] a function that is a compiler builtin
+       (gnu_compiler_builtin): its row of the builtin registry
+       (ext/gnu/builtin-registry.cpp), 0 if it has none */
+    uint16_t gnu_builtin_row = 0;
+    /* with no held_because: why the declaration that held the name was
+       not analysed, told in a refusal's detail */
+    held_cause held_by = held_cause::refused;
+    held_cause unknown_by = held_cause::refused;
+    /* whether the default member initializer can throw
+       ([except.spec]/7), once a constructor
+       using it is defined (semantic_analysis::default_member_initializer) */
+    initializer_exception initializer_throws = initializer_exception::unknown;
+    /* the access of a defaulted copy or move assignment declared protected
+       or private (defaulted_copy_assignment), which the
+       entity declared at the class's end takes */
+    uint8_t defaulted_copy_access = 0, defaulted_move_access = 0;
+    /* [ext.clang] #pragma pack's value where the class was defined: no
+       member's alignment exceeds it (0: none) */
+    uint8_t max_field_alignment = 0;
+    /* an operator function (operator_function): the operator */
+    preprocessing_op_or_punc implemented = {};
+    /* ... or one of the allocation and deallocation functions
+       ([basic.stc.dynamic]/1) */
+    allocation_function allocation = allocation_function::none;
+    /* an enumeration ([dcl.enum]): its underlying type once it is
+       complete (none before), whether it is scoped ([dcl.enum]/2) and
+       whether its underlying type is fixed ([dcl.enum]/5) */
+    fundamental_type underlying = fundamental_type::none;
+    /* ... and, its underlying type not fixed, the bits of its values'
+       range ([dcl.enum]/8): of the largest enumerator value and of the
+       most negative one (0: none negative) */
+    uint8_t positive_bits = 0, negative_bits = 0;
+    /* ... and, its underlying type not fixed, the type it promotes to
+       ([conv.prom]/4) */
+    fundamental_type promoted = fundamental_type::none;
+    /* a function template's specialization, a member function of a class
+       template's specialization or such a class: the subject of an
+       explicit instantiation ([temp.explicit]/2) declaration (extern) or
+       definition */
+    instantiation_kind explicitly_instantiated = instantiation_kind::none;
 };
 
 /* the defaults: what an entity without details reads */
@@ -876,8 +876,7 @@ class entity_details_pointer
 };
 
 struct entity {
-    entity_kind kind = entity_kind::none;
-    linkage linkage_of_name = linkage::none;
+    uint64_t value = 0;
     /* [except.spec]/1: the function's exception specification, compared
        by redeclarations ([except.spec]/4) */
     exception_specification exceptions;
@@ -887,11 +886,6 @@ struct entity {
        class, a function); 0 at global namespace scope */
     entity_index enclosing = 0;
     qualified_type type;
-    /* [expr.const]/4: a variable usable in constant expressions: whether
-       it is (constant, with its value as expression_meaning keeps one),
-       is not, or analysis could not tell (unknown) */
-    constness usable = constness::not_constant;
-    uint64_t value = 0;
     /* the declaration that held the name (declaration() sets it), 0 if
        not known: a refusal of a use of the name gives it
        (unsupported_construct::holder) */
@@ -908,9 +902,6 @@ struct entity {
     /* the semantic tree of its definition: a function's
        semantic_kind::function_body, a variable's initializer (0: none) */
     uint32_t definition = 0;
-    /* [class.access]: a member's access (0 public, 1 protected, 2
-       private) */
-    uint8_t access = 0;
     /* a non-static member function: [class.mfct.non-static]/5 the
        cv-qualifier-seq of its declarator, which qualifies `this` */
     uint32_t member_cv = 0;
@@ -924,10 +915,6 @@ struct entity {
        ([class.mem]/6: "A class is considered a completely-defined object
        type ... at the closing } of the class-specifier") */
     uint32_t first_member = 0, member_count = 0;
-    /* a member function that is a constructor ([class.ctor]) or a
-       destructor ([class.dtor]); named by its class's name, not bound in
-       the class's scope */
-    special_member special = special_member::none;
     /* a function or variable: [ext:gnu_attributes] the GNU attributes
        its declarations gave it (gnu_attribute_flag) and a section
        attribute's string-literal, 0 if none; its aligned attribute's
@@ -942,6 +929,19 @@ struct entity {
        function_template record (semantic_analysis::function_templates)
        plus one */
     uint32_t template_record = 0;
+    entity_kind kind = entity_kind::none;
+    linkage linkage_of_name = linkage::none;
+    /* [expr.const]/4: a variable usable in constant expressions: whether
+       it is (constant, with its value as expression_meaning keeps one),
+       is not, or analysis could not tell (unknown) */
+    constness usable = constness::not_constant;
+    /* [class.access]: a member's access (0 public, 1 protected, 2
+       private) */
+    uint8_t access = 0;
+    /* a member function that is a constructor ([class.ctor]) or a
+       destructor ([class.dtor]); named by its class's name, not bound in
+       the class's scope */
+    special_member special = special_member::none;
     entity_details_pointer rest;
     const entity_details &details() const
     {
