@@ -541,14 +541,14 @@ static bool layout_class_name(const semantic_analysis &analysis,
        name for it as a base and as a scope, not as the record's own */
     uint32_t spelled_name = x.name;
     if (!spelled_name && (nested || base) && x.kind == entity_kind::class_type)
-        spelled_name = x.linkage_name;
+        spelled_name = x.details().linkage_name;
     if (spelled_name) {
         size_t length = 0;
         const char *spelled =
             tokens.pp.identifier_spelling(spelled_name - 1, &length);
         vbuffer_append(out, spelled, length);
     } else if (x.kind == entity_kind::class_type && x.defined) {
-        source_position at = tokens.position(x.class_key);
+        source_position at = tokens.position(x.details().class_key);
         vbuffer_format_append(out, "(unnamed at %u:%u)", at.line, at.column);
     } else {
         return false;
@@ -584,29 +584,32 @@ static void dump_layout_claims(const semantic_analysis &analysis,
     owned_buffer name, lines;
     for (entity_index c{1}; c.index() < analysis.entity_table.size(); c++) {
         const entity &x = analysis.entity_table[c];
-        if (x.kind != entity_kind::class_type || !x.defined || !x.size ||
-            tokens[x.class_key].preprocessing.expansion)
+        if (x.kind != entity_kind::class_type || !x.defined ||
+            !x.details().size ||
+            tokens[x.details().class_key].preprocessing.expansion)
             continue;
         name.clear();
         if (!layout_class_name(analysis, tokens, c, false, false, name.get()))
             continue;
-        source_position at = tokens.position(x.class_key);
+        source_position at = tokens.position(x.details().class_key);
         lines.clear();
         vbuffer_format_append(lines.get(), "record\t%s:%u:%u\t", at.file_name,
                               at.line, at.column);
         vbuffer_append(lines.get(), name.data(), name.size());
-        vbuffer_format_append(lines.get(), "\t%llu\t%llu\t%u\n",
-                              static_cast<unsigned long long>(x.size),
-                              static_cast<unsigned long long>(x.data_size),
-                              x.alignment);
+        vbuffer_format_append(
+            lines.get(), "\t%llu\t%llu\t%u\n",
+            static_cast<unsigned long long>(x.details().size),
+            static_cast<unsigned long long>(x.details().data_size),
+            x.details().alignment);
         bool nameable = true;
         const dynamic_class *d = analysis.dynamic_of(c);
         if (d && !d->primary_base)
             /* [abi:class-types] I: the virtual table pointer */
             vbuffer_string_append(lines.get(), "vptr\t0\n");
-        for (uint32_t i = 0; i < x.base_count; i++) {
+        for (uint32_t i = 0; i < x.details().base_count; i++) {
             const entity &b =
-                analysis.entity_table[analysis.class_bases[x.first_base + i]];
+                analysis.entity_table
+                    [analysis.class_bases[x.details().first_base + i]];
             if (b.virtual_base)
                 continue;
             name.clear();
@@ -615,8 +618,9 @@ static void dump_layout_claims(const semantic_analysis &analysis,
                     analysis.type_table[b.type.unqualified()].entity, false,
                     true, name.get()))
                 nameable = false;
-            vbuffer_format_append(lines.get(), "base\t%llu\t",
-                                  static_cast<unsigned long long>(b.offset));
+            vbuffer_format_append(
+                lines.get(), "base\t%llu\t",
+                static_cast<unsigned long long>(b.details().offset));
             vbuffer_append(lines.get(), name.data(), name.size());
             vbuffer_string_append(lines.get(), "\n");
         }
@@ -629,12 +633,12 @@ static void dump_layout_claims(const semantic_analysis &analysis,
             if (m.bit_field)
                 vbuffer_format_append(
                     lines.get(), "bits\t%llu\t%u\t",
-                    static_cast<unsigned long long>(m.bit_offset),
-                    static_cast<unsigned>(m.bit_width));
+                    static_cast<unsigned long long>(m.details().bit_offset),
+                    static_cast<unsigned>(m.details().bit_width));
             else
                 vbuffer_format_append(
                     lines.get(), "field\t%llu\t",
-                    static_cast<unsigned long long>(m.offset));
+                    static_cast<unsigned long long>(m.details().offset));
             if (m.name) {
                 size_t length = 0;
                 const char *spelled =
@@ -645,18 +649,19 @@ static void dump_layout_claims(const semantic_analysis &analysis,
         }
         /* [abi:class-types] III: the virtual bases, after the members, in
            the order of clang's dump (the order of their construction) */
-        for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+        for (uint32_t i = 0; i < x.details().virtual_base_count; i++) {
             const entity &b =
-                analysis.entity_table
-                    [analysis.class_virtual_bases[x.first_virtual_base + i]];
+                analysis.entity_table[analysis.class_virtual_bases
+                                          [x.details().first_virtual_base + i]];
             name.clear();
             if (!layout_class_name(
                     analysis, tokens,
                     analysis.type_table[b.type.unqualified()].entity, false,
                     true, name.get()))
                 nameable = false;
-            vbuffer_format_append(lines.get(), "base\t%llu\t",
-                                  static_cast<unsigned long long>(b.offset));
+            vbuffer_format_append(
+                lines.get(), "base\t%llu\t",
+                static_cast<unsigned long long>(b.details().offset));
             vbuffer_append(lines.get(), name.data(), name.size());
             vbuffer_string_append(lines.get(), "\n");
         }

@@ -84,11 +84,12 @@ uint32_t c_lowering::vtt_argument(entity_index b, token_index at)
 {
     const entity &base = analysis.entity_table[b];
     entity_index of = record(base.type).entity;
-    if (!structor_variant || !analysis.entity_table[of].virtual_base_count)
+    if (!structor_variant ||
+        !analysis.entity_table[of].details().virtual_base_count)
         return 0;
     /* [abi:vtable-ctor-vtt]: a virtual base's is one of the virtual VTTs,
        which only the complete object variants pass */
-    uint64_t offset = base.offset;
+    uint64_t offset = base.details().offset;
     if (base.virtual_base)
         offset = virtual_base_offset(structor_class, of);
     else if (base.enclosing != structor_class)
@@ -150,7 +151,7 @@ uint32_t c_lowering::vtable_pointer_stores(const semantic_node &n)
     ast_qualified_type vpp = pointer_to(vp);
     ast_qualified_type vppp = pointer_to(vpp);
     bool from_vtt = structor_variant == 2 && k == structor_class &&
-                    analysis.entity_table[k].virtual_base_count;
+                    analysis.entity_table[k].details().virtual_base_count;
     vtt_layout layout;
     if (from_vtt)
         vtt_of(k, layout);
@@ -214,8 +215,8 @@ uint32_t c_lowering::null_checked_offset(const semantic_node &n, int64_t offset,
         if (x.kind != semantic_kind::conversion)
             break;
         conversion_kind k = static_cast<conversion_kind>(x.op);
-        int64_t by =
-            static_cast<int64_t>(analysis.entity_table[x.entity_b()].offset);
+        int64_t by = static_cast<int64_t>(
+            analysis.entity_table[x.entity_b()].details().offset);
         if (k == conversion_kind::base_to_derived)
             by = -by;
         else if (k != conversion_kind::derived_to_base ||
@@ -478,7 +479,7 @@ bool c_lowering::deleting_destructor(entity_index e, token_index at,
     if (d->deallocation_sized) {
         arguments[1] = ast_builder_integer(
             c, AST_QUALIFIED_TYPE_UNQUALIFIED(parameter_type(types[1], at)),
-            static_cast<int64_t>(analysis.entity_table[k].size));
+            static_cast<int64_t>(analysis.entity_table[k].details().size));
         count = 2;
     }
     uint32_t callee =
@@ -505,11 +506,12 @@ uint32_t c_lowering::virtual_function(entity_index f, uint32_t object,
     ast_qualified_type vpp = pointer_to(vp);
     uint32_t table = dereference(
         cast(object, pointer_to(vpp), AST_CAST_POINTER_TO_POINTER), vpp);
-    uint32_t slot = make(AST_NODE_INDEX, vp, table,
-                         to_ptrdiff(ast_builder_integer(
-                             c, ast_builder_type_basic(AST_TYPE_INT),
-                             analysis.entity_table[f].vtable_slot + next)),
-                         0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t slot =
+        make(AST_NODE_INDEX, vp, table,
+             to_ptrdiff(ast_builder_integer(
+                 c, ast_builder_type_basic(AST_TYPE_INT),
+                 analysis.entity_table[f].details().vtable_slot + next)),
+             0, 0, AST_NODE_FLAG_LVALUE);
     ast_qualified_type ft = entity_type(f, at);
     return cast(slot, pointer_to(ft), AST_CAST_POINTER_TO_POINTER);
 }
@@ -614,7 +616,7 @@ bool c_lowering::with_virtual_bases(entity_index e) const
 {
     const entity &x = analysis.entity_table[e];
     return x.special != special_member::none &&
-           analysis.entity_table[x.enclosing].virtual_base_count;
+           analysis.entity_table[x.enclosing].details().virtual_base_count;
 }
 
 } // namespace cplusplus::lowering

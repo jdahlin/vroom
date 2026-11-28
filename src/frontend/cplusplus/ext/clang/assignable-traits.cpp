@@ -127,7 +127,7 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
     if (!void_operand && !unassignable) {
         if (lk.kind == type_kind::class_type) {
             require_complete(lk.entity);
-            if (!entity_table[lk.entity].size)
+            if (!entity_table[lk.entity].details().size)
                 return not_supported_because(n, "expr.ass",
                                              "an assignability trait whose "
                                              "left operand class has no size");
@@ -225,15 +225,16 @@ semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
             type_table[from.type.unqualified()].kind == type_kind::class_type) {
             require_complete(type_table[from.type.unqualified()].entity);
             entity_index uc = type_table[from.type.unqualified()].entity;
-            if (!entity_table[uc].size)
+            if (!entity_table[uc].details().size)
                 return not_supported_because(n, "dcl.init.ref",
                                              "a reference-temporary trait from "
                                              "a class that has no size");
             /* before C++17 a class prvalue is copied or moved: not
                followed for a class that cannot be */
             if (!u_reference)
-                for (entity_index k = entity_table[uc].first_constructor; k;
-                     k = entity_table[k].next_constructor)
+                for (entity_index k =
+                         entity_table[uc].details().first_constructor;
+                     k; k = entity_table[k].details().next_constructor)
                     if (entity_table[k].deleted &&
                         copy_or_move_constructor(uc, k))
                         return not_supported_because(
@@ -246,7 +247,7 @@ semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
             qualified_type target_referred =
                 type_table[t.unqualified()].operand;
             for (entity_index f = own_conversion_functions(uc); f;
-                 f = entity_table[f].next_overload) {
+                 f = entity_table[f].details().next_overload) {
                 if (which != 2 && entity_table[f].explicit_) {
                     qualified_type ret =
                         type_table[entity_table[f].type.unqualified()].operand;

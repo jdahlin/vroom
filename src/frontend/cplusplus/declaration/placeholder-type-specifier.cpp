@@ -134,7 +134,8 @@ bool semantic_analysis::other_function_of_placeholder(entity_index prior,
 {
     const entity &first = entity_table[prior];
     if (first.kind == entity_kind::function) {
-        for (entity_index o = prior; o; o = entity_table[o].next_overload)
+        for (entity_index o = prior; o;
+             o = entity_table[o].details().next_overload)
             if (entity_table[o].kind != entity_kind::function ||
                 same_parameters(type_table, entity_table[o].type.unqualified(),
                                 type.unqualified()))
@@ -233,7 +234,8 @@ analysis_result semantic_analysis::placeholder_declaration(
         scope = m.namespace_qualifier;
     entity_index prior = entity_table.find(scope, tokens.identifier(m.id));
     if (!placeholder) {
-        for (entity_index f = prior; f; f = entity_table[f].next_overload)
+        for (entity_index f = prior; f;
+             f = entity_table[f].details().next_overload)
             if (entity_table[f].kind == entity_kind::function &&
                 entity_table[f].placeholder_return)
                 return not_supported_because(
@@ -499,7 +501,7 @@ semantic_analysis::deduce_initializer_list(SyntaxElement braced, entity_index e,
                                  1, c));
     require_complete(c);
     if (entity_table[c].kind != entity_kind::class_type ||
-        !entity_table[c].size)
+        !entity_table[c].details().size)
         return analysis_result::well_formed;
     type = qualified_type::make(entity_table[c].type.unqualified(), type.cv());
     declaration_deduced =
@@ -532,9 +534,9 @@ analysis_result semantic_analysis::deduced_initialization(
        rules) was not known when its name was declared */
     entity_index closure = 0;
     if (type_table[type.unqualified()].kind == type_kind::class_type &&
-        entity_table[type_table[type.unqualified()].entity].lambda)
+        entity_table[type_table[type.unqualified()].entity].details().lambda)
         closure = type_table[type.unqualified()].entity;
-    if (closure && entity_table[closure].closure_variable == e) {
+    if (closure && entity_table[closure].details().closure_variable == e) {
         /* [abi:closure-types]: a closure type of an inline variable's
            initializer is named after the variable in every translation
            unit */
@@ -741,12 +743,12 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
                 "a variable whose placeholder type is not deduced "
                 "(its initializer was not analysed)");
         if (after.kind == entity_kind::function && after.instantiation) {
-            if (after.unsupported_body)
+            if (after.details().unsupported_body)
                 return not_supported_caused_by(
                     current_declaration, "dcl.spec.auto",
                     "a function template's specialization whose placeholder "
                     "type is not deduced",
-                    body_failures[after.unsupported_body - 1]);
+                    body_failures[after.details().unsupported_body - 1]);
             return not_supported_because(
                 current_declaration, "dcl.spec.auto",
                 "a function template's specialization whose placeholder "

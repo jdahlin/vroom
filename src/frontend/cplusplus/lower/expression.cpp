@@ -299,7 +299,7 @@ uint32_t c_lowering::expression(uint32_t index)
         /* [class.temporary]/4: one with a destructor is destroyed at the
            end of the full-expression */
         if (!n.a && !at_result_object &&
-            analysis.entity_table[record(n.type).entity].destructor)
+            analysis.entity_table[record(n.type).entity].details().destructor)
             return temporary_object(index);
         return construct(n);
     case semantic_kind::new_object:

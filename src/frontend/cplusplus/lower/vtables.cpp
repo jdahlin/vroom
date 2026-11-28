@@ -66,7 +66,7 @@ uint32_t c_lowering::vtable(entity_index k, token_index at)
         if (!table_definition(t, s, at))
             return 0;
     }
-    if (x.virtual_base_count && !vtt_define(k, s, storage, flags, at))
+    if (x.details().virtual_base_count && !vtt_define(k, s, storage, flags, at))
         return 0;
     return s;
 }
@@ -90,7 +90,9 @@ uint32_t c_lowering::address_point(entity_index k, uint32_t group,
 uint64_t c_lowering::virtual_base_offset(entity_index layout,
                                          entity_index v) const
 {
-    return analysis.entity_table[analysis.virtual_base_of(layout, v)].offset;
+    return analysis.entity_table[analysis.virtual_base_of(layout, v)]
+        .details()
+        .offset;
 }
 
 int64_t c_lowering::group_location(const table_spec &t, uint32_t group) const
@@ -114,8 +116,9 @@ bool c_lowering::group_included(const table_spec &t, uint32_t group) const
         return true;
     const vtable_group &g =
         analysis.vtable_groups[analysis.dynamic_of(t.k)->first_group + group];
-    return g.in_virtual_base ||
-           analysis.entity_table[g.subobject_class].virtual_base_count;
+    return g.in_virtual_base || analysis.entity_table[g.subobject_class]
+                                    .details()
+                                    .virtual_base_count;
 }
 
 /*
@@ -248,7 +251,8 @@ bool c_lowering::subobject_location(const table_spec &t, entity_index f,
     auto nonvirtual = [&](entity_index from, int64_t at) {
         while (from != f) {
             entity_index step = analysis.nonvirtual_step(from, f);
-            at += static_cast<int64_t>(analysis.entity_table[step].offset);
+            at += static_cast<int64_t>(
+                analysis.entity_table[step].details().offset);
             from = record(analysis.entity_table[step].type).entity;
         }
         return at;
@@ -261,13 +265,12 @@ bool c_lowering::subobject_location(const table_spec &t, entity_index f,
         return false;
     uint32_t found = 0;
     const entity &x = analysis.entity_table[t.k];
-    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++) {
         entity_index w =
-            record(
-                analysis
-                    .entity_table
-                        [analysis.class_virtual_bases[x.first_virtual_base + i]]
-                    .type)
+            record(analysis
+                       .entity_table[analysis.class_virtual_bases
+                                         [x.details().first_virtual_base + i]]
+                       .type)
                 .entity;
         if (w != f && analysis.nonvirtual_subobjects(w, f) != 1)
             continue;
@@ -365,7 +368,7 @@ void c_lowering::vtt_tables(vtt_layout &out, entity_index b, uint64_t at,
                             bool is_virtual) const
 {
     const entity &x = analysis.entity_table[b];
-    if (!x.virtual_base_count)
+    if (!x.details().virtual_base_count)
         return;
     if (b != out.k) {
         sub_vtt sub;
@@ -383,11 +386,13 @@ void c_lowering::vtt_tables(vtt_layout &out, entity_index b, uint64_t at,
     spec.is_virtual = is_virtual;
     out.tables.append(spec);
     vtt_pointer(out, at, table);
-    for (uint32_t i = 0; i < x.base_count; i++) {
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
         const entity &base =
-            analysis.entity_table[analysis.class_bases[x.first_base + i]];
+            analysis
+                .entity_table[analysis.class_bases[x.details().first_base + i]];
         if (!base.virtual_base)
-            vtt_tables(out, record(base.type).entity, at + base.offset, false);
+            vtt_tables(out, record(base.type).entity,
+                       at + base.details().offset, false);
     }
     owned_array<entity_index> seen;
     vtt_secondary_pointers(out, b, at, false, table, seen);
@@ -421,14 +426,15 @@ void c_lowering::vtt_secondary_pointers(vtt_layout &out, entity_index b,
                                         owned_array<entity_index> &seen) const
 {
     const entity &x = analysis.entity_table[b];
-    if (!x.virtual_base_count && !morally_virtual)
+    if (!x.details().virtual_base_count && !morally_virtual)
         return;
     const dynamic_class *d = analysis.dynamic_of(b);
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index specifier = analysis.class_bases[x.first_base + i];
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
+        entity_index specifier =
+            analysis.class_bases[x.details().first_base + i];
         const entity &base = analysis.entity_table[specifier];
         entity_index of = record(base.type).entity;
-        if (!analysis.entity_table[of].dynamic)
+        if (!analysis.entity_table[of].details().dynamic)
             continue;
         bool base_morally_virtual = morally_virtual, nonvirtual_primary = false;
         uint64_t base_at = 0;
@@ -438,11 +444,11 @@ void c_lowering::vtt_secondary_pointers(vtt_layout &out, entity_index b,
             base_at = virtual_base_offset(out.k, of);
             base_morally_virtual = true;
         } else {
-            base_at = at + base.offset;
+            base_at = at + base.details().offset;
             nonvirtual_primary = d && d->primary_base == specifier;
         }
         if (!nonvirtual_primary &&
-            (analysis.entity_table[of].virtual_base_count ||
+            (analysis.entity_table[of].details().virtual_base_count ||
              base_morally_virtual))
             vtt_pointer(out, base_at, table);
         vtt_secondary_pointers(out, of, base_at, base_morally_virtual, table,
@@ -454,16 +460,17 @@ void c_lowering::vtt_virtual(vtt_layout &out, entity_index b,
                              owned_array<entity_index> &seen) const
 {
     const entity &x = analysis.entity_table[b];
-    for (uint32_t i = 0; i < x.base_count; i++) {
+    for (uint32_t i = 0; i < x.details().base_count; i++) {
         const entity &base =
-            analysis.entity_table[analysis.class_bases[x.first_base + i]];
+            analysis
+                .entity_table[analysis.class_bases[x.details().first_base + i]];
         entity_index of = record(base.type).entity;
         if (base.virtual_base) {
             if (!first_time(seen, of))
                 continue;
             vtt_tables(out, of, virtual_base_offset(out.k, of), true);
         }
-        if (analysis.entity_table[of].virtual_base_count)
+        if (analysis.entity_table[of].details().virtual_base_count)
             vtt_virtual(out, of, seen);
     }
 }

@@ -65,16 +65,17 @@ bool semantic_analysis::converts_to_non_class(entity_index c,
        a base class are the derived class's; each base's are looked at the
        same way (a derived class's function that hides a base's of the same
        type is not told apart: assumed to convert) */
-    for (uint32_t i = 0; i < entity_table[c].base_count; i++)
+    for (uint32_t i = 0; i < entity_table[c].details().base_count; i++)
         if (converts_to_non_class(
                 type_table
-                    [entity_table[class_bases[entity_table[c].first_base + i]]
-                         .type.unqualified()]
+                    [entity_table
+                         [class_bases[entity_table[c].details().first_base + i]]
+                             .type.unqualified()]
                         .entity,
                 explicit_counts))
             return true;
     for (entity_index f = own_conversion_functions(c); f;
-         f = entity_table[f].next_overload) {
+         f = entity_table[f].details().next_overload) {
         if (!entity_table[f].conversion_function)
             return true;
         if (entity_table[f].explicit_ && !explicit_counts)
@@ -94,14 +95,14 @@ bool semantic_analysis::converts_to_callable(entity_index c) const
     const entity &x = entity_table[c];
     if (x.kind != entity_kind::class_type)
         return true;
-    for (uint32_t i = 0; i < x.base_count; i++)
+    for (uint32_t i = 0; i < x.details().base_count; i++)
         if (converts_to_callable(
-                type_table[entity_table[class_bases[x.first_base + i]]
+                type_table[entity_table[class_bases[x.details().first_base + i]]
                                .type.unqualified()]
                     .entity))
             return true;
     for (entity_index f = own_conversion_functions(c); f;
-         f = entity_table[f].next_overload) {
+         f = entity_table[f].details().next_overload) {
         if (!entity_table[f].conversion_function)
             return true;
         if (entity_table[f].explicit_)
@@ -201,22 +202,22 @@ bool semantic_analysis::call_surrogates_lose(
     const entity &x = entity_table[c];
     if (x.kind != entity_kind::class_type)
         return false;
-    for (uint32_t i = 0; i < x.base_count; i++)
+    for (uint32_t i = 0; i < x.details().base_count; i++)
         if (!call_surrogates_lose(
-                type_table[entity_table[class_bases[x.first_base + i]]
+                type_table[entity_table[class_bases[x.details().first_base + i]]
                                .type.unqualified()]
                     .entity,
                 calls))
             return false;
     for (entity_index f = own_conversion_functions(c); f;
-         f = entity_table[f].next_overload) {
-        if (!entity_table[f].conversion_function || !x.lambda ||
-            !x.call_operator ||
-            entity_table[x.call_operator].member_cv != cv_const)
+         f = entity_table[f].details().next_overload) {
+        if (!entity_table[f].conversion_function || !x.details().lambda ||
+            !x.details().call_operator ||
+            entity_table[x.details().call_operator].member_cv != cv_const)
             return false;
         bool visible = false;
         for (entity_index k : calls)
-            if (k == x.call_operator)
+            if (k == x.details().call_operator)
                 visible = true;
         if (!visible)
             return false;
@@ -228,15 +229,16 @@ bool semantic_analysis::converts_to_lvalue_reference(entity_index c) const
 {
     if (entity_table[c].kind != entity_kind::class_type)
         return true;
-    for (uint32_t i = 0; i < entity_table[c].base_count; i++)
+    for (uint32_t i = 0; i < entity_table[c].details().base_count; i++)
         if (converts_to_lvalue_reference(
                 type_table
-                    [entity_table[class_bases[entity_table[c].first_base + i]]
-                         .type.unqualified()]
+                    [entity_table
+                         [class_bases[entity_table[c].details().first_base + i]]
+                             .type.unqualified()]
                         .entity))
             return true;
     for (entity_index f = own_conversion_functions(c); f;
-         f = entity_table[f].next_overload) {
+         f = entity_table[f].details().next_overload) {
         if (!entity_table[f].conversion_function)
             return true;
         /* (the result's type is the referenced type, its category lvalue) */
@@ -334,9 +336,10 @@ analysis_result semantic_analysis::overloaded_operator(
        better candidate */
     if (converts && op == preprocessing_op_or_punc::LEFT_PARENTHESIS) {
         const struct type &t = type_table[operands[0].type.unqualified()];
-        if (t.kind == type_kind::class_type && entity_table[t.entity].lambda &&
-            entity_table[entity_table[t.entity].call_operator].member_cv ==
-                cv_const) {
+        if (t.kind == type_kind::class_type &&
+            entity_table[t.entity].details().lambda &&
+            entity_table[entity_table[t.entity].details().call_operator]
+                    .member_cv == cv_const) {
             converts = false;
         } else if (t.kind == type_kind::class_type &&
                    entity_table[t.entity].kind == entity_kind::class_type) {
@@ -505,13 +508,13 @@ analysis_result semantic_analysis::overloaded_operator(
             require_complete(c);
             /* (incomplete and not being defined: no member candidates) */
             if (entity_table[c].kind == entity_kind::class_type &&
-                !entity_table[c].defined && !entity_table[c].size)
+                !entity_table[c].defined && !entity_table[c].details().size)
                 members_looked_up = false;
         }
         if (members_looked_up) {
             entity_index c = t1.entity;
             if (entity_table[c].kind != entity_kind::class_type ||
-                !entity_table[c].size)
+                !entity_table[c].details().size)
                 return not_supported_because(
                     n, "over.match.oper",
                     "an operator on a left operand class that is incomplete or "
@@ -1044,7 +1047,7 @@ analysis_result semantic_analysis::overloaded_operator(
                 right_record.entity != c &&
                 entity_table[right_record.entity].kind ==
                     entity_kind::class_type &&
-                entity_table[right_record.entity].size &&
+                entity_table[right_record.entity].details().size &&
                 !base_step(right_record.entity, c, ambiguous_base) &&
                 !ambiguous_base;
             /* (an enumeration has an entity, and converts to a class by
@@ -1476,7 +1479,8 @@ analysis_result semantic_analysis::overloaded_operator(
                 "enumeration");
     }
     bool from_three_way =
-        c.rewritten && x.implemented == preprocessing_op_or_punc::SPACESHIP;
+        c.rewritten &&
+        x.details().implemented == preprocessing_op_or_punc::SPACESHIP;
     if (from_three_way && !any_class)
         /* an enumeration's built-in candidates against a rewritten one */
         return not_supported_because(

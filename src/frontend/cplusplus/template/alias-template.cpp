@@ -177,18 +177,9 @@ analysis_result semantic_analysis::alias_template_specialization(
                 id, "temp.names",
                 "an alias template-id whose constraints are not satisfied");
     }
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                           entity_table[ft.entity].enclosing);
-    for (uint32_t i = 0; i < ft.parameter_count; i++) {
-        entity_index parameter =
-            template_parameter_entities[ft.first_parameter + i];
-        if (forwarded[i]) {
-            entity_table.bind(scope, entity_table[parameter].name,
-                              forwarded[i]);
-            continue;
-        }
-        bind_template_argument(scope, parameter, arguments[i]);
-    }
+    entity_index scope =
+        argument_scope(ft.first_parameter, ft.parameter_count, arguments.data(),
+                       entity_table[ft.entity].enclosing, forwarded.data());
     entity_index saved_scope = current_scope;
     token_index saved_horizon = lookup_horizon;
     bool saved_expanding = expanding;
@@ -212,7 +203,8 @@ analysis_result semantic_analysis::alias_template_specialization(
         unsupported.resize(refusals_before);
         type = dependent_specialization(ft.entity, arguments);
         if (r == analysis_result::well_formed && !t.cv())
-            entity_table[type_table[type].entity].alias_expansion = t;
+            entity_table[type_table[type].entity].set(
+                &entity_details::alias_expansion, t);
         return analysis_result::well_formed;
     }
     /* [impl.clang] a closure type created by substituting an alias template
@@ -222,7 +214,7 @@ analysis_result semantic_analysis::alias_template_specialization(
     if (r == analysis_result::well_formed &&
         type_table[t.unqualified()].kind == type_kind::class_type) {
         entity_index c = type_table[t.unqualified()].entity;
-        if (entity_table[c].lambda && c.index() >= entities_before) {
+        if (entity_table[c].details().lambda && c.index() >= entities_before) {
             entity_index fn = saved_scope;
             while (fn && entity_table[fn].kind != entity_kind::function)
                 fn = entity_table[fn].enclosing;
@@ -262,8 +254,9 @@ analysis_result semantic_analysis::alias_template_specialization(
                each instantiation, where a failure is the deduction's */
             type = dependent_specialization(ft.entity, arguments);
             /* (the type it denotes, which [impl.clang] clang mangles) */
-            entity_table[type_table[type].entity].alias_expansion =
-                qualified_type::make(t.unqualified(), cv_none);
+            entity_table[type_table[type].entity].set(
+                &entity_details::alias_expansion,
+                qualified_type::make(t.unqualified(), cv_none));
             if (cv)
                 *cv = t.cv();
             return analysis_result::well_formed;

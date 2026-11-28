@@ -962,13 +962,21 @@ analysis_result semantic_analysis::template_constraints_satisfied(
        constraint-expression.  [temp.param]/4: a type-constraint Q
        designating a concept C, of a type-parameter T: C<T>; Q's own
        template-argument-list, C<T, A...>, with A... analysed with the
-       template's arguments bound */
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                           entity_table[ft.entity].enclosing);
-    for (uint32_t i = 0; i < ft.parameter_count; i++)
-        bind_template_argument(
-            scope, template_parameter_entities[ft.first_parameter + i],
-            values[i]);
+       template's arguments bound.  A template with neither has none to
+       bind its arguments for (most have none) */
+    bool constrained = static_cast<bool>(constraint);
+    for (uint32_t i = 0; i < ft.parameter_count && !constrained; i++) {
+        template_parameter_parts x;
+        constrained =
+            template_parameter_form(
+                template_parameter_nodes[ft.first_parameter + i], x) &&
+            x.constraint;
+    }
+    if (!constrained)
+        return analysis_result::well_formed;
+    entity_index scope =
+        argument_scope(ft.first_parameter, ft.parameter_count, values.data(),
+                       entity_table[ft.entity].enclosing);
     for (uint32_t i = 0; i < ft.parameter_count && satisfied; i++) {
         SyntaxRef p = template_parameter_nodes[ft.first_parameter + i];
         template_parameter_parts x;
