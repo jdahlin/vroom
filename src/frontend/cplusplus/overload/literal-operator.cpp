@@ -109,7 +109,7 @@ analysis_result semantic_analysis::literal_operator_declaration(SyntaxRef n,
                           "over.literal");
     /* /3: "If a parameter has a default argument ([dcl.fct.default]), the
        program is ill-formed." */
-    if (x.default_arguments)
+    if (x.details().default_arguments)
         return ill_formed(n,
                           "a literal operator's parameter shall not have a "
                           "default argument",

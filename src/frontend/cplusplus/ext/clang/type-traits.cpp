@@ -257,7 +257,7 @@ semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
                               "the operand of __underlying_type is an "
                               "enumeration type",
                               "meta.trans.other");
-        fundamental_type u = entity_table[k->entity].underlying;
+        fundamental_type u = entity_table[k->entity].details().underlying;
         if (u == fundamental_type::none)
             return not_supported_because(n, "dcl.enum",
                                          "__underlying_type of an enumeration "
@@ -351,7 +351,7 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
         answer = !is_void && ek.kind != type_kind::array;
         if (ek.kind == type_kind::class_type) {
             require_complete(ek.entity);
-            answer = entity_table[ek.entity].size != 0;
+            answer = entity_table[ek.entity].details().size != 0;
         }
         break;
     }
@@ -586,7 +586,7 @@ bool semantic_analysis::convertible_types(SyntaxRef n, qualified_type from,
            of its constructor templates too, which a template taking the
            argument by forwarding reference can win over the copy
            constructor ([over.match.best]/2.5, [over.ics.rank]/3.2.3) */
-        if (entity_table[t.entity].constructor_templates) {
+        if (entity_table[t.entity].details().constructor_templates) {
             initialized_value made;
             bool ok = false;
             analysis_result r =

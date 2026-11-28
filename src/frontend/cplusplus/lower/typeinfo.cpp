@@ -48,9 +48,9 @@ uint32_t vmi_flags(const semantic_analysis &analysis, entity_index base,
         }
     }
     const entity &x = analysis.entity_table[of];
-    for (uint32_t i = 0; i < x.base_count; i++)
-        flags |=
-            vmi_flags(analysis, analysis.class_bases[x.first_base + i], seen);
+    for (uint32_t i = 0; i < x.details().base_count; i++)
+        flags |= vmi_flags(
+            analysis, analysis.class_bases[x.details().first_base + i], seen);
     return flags;
 }
 } // namespace
@@ -159,17 +159,18 @@ uint32_t c_lowering::typeinfo(type_index t, token_index at)
         break;
     case type_kind::class_type: {
         k = r.entity;
-        if (!analysis.entity_table[k].size)
+        if (!analysis.entity_table[k].details().size)
             return fail("the std::type_info object of an incomplete class", at);
         d = analysis.dynamic_of(k);
         const entity &x = analysis.entity_table[k];
-        if (x.base_count) {
+        if (x.details().base_count) {
             /* [impl.clang]: one public non-virtual base, dynamic as
                the class is unless it is empty */
-            bool single = x.base_count == 1;
+            bool single = x.details().base_count == 1;
             if (single) {
                 const entity &b =
-                    analysis.entity_table[analysis.class_bases[x.first_base]];
+                    analysis.entity_table
+                        [analysis.class_bases[x.details().first_base]];
                 entity_index be = record(b.type).entity;
                 single =
                     !b.virtual_base && b.access == 0 &&
@@ -181,7 +182,7 @@ uint32_t c_lowering::typeinfo(type_index t, token_index at)
                 length = 3;
             } else {
                 library = "__vmi_class_type_info";
-                length = 3 + 2 * x.base_count;
+                length = 3 + 2 * x.details().base_count;
             }
         }
         break;
@@ -311,20 +312,24 @@ uint32_t c_lowering::typeinfo(type_index t, token_index at)
     }
     case type_kind::class_type: {
         const entity &x = analysis.entity_table[k];
-        if (length == 3 && x.base_count) {
+        if (length == 3 && x.details().base_count) {
             const entity &b =
-                analysis.entity_table[analysis.class_bases[x.first_base]];
+                analysis
+                    .entity_table[analysis.class_bases[x.details().first_base]];
             if (!pointee(2, b.type.unqualified()))
                 return 0;
-        } else if (x.base_count) {
+        } else if (x.details().base_count) {
             seen_bases seen;
             uint32_t vmi = 0;
-            for (uint32_t i = 0; i < x.base_count; i++)
-                vmi |= vmi_flags(analysis,
-                                 analysis.class_bases[x.first_base + i], seen);
-            integer(2, vmi | (static_cast<uint64_t>(x.base_count) << 32));
-            for (uint32_t i = 0; i < x.base_count; i++) {
-                entity_index be = analysis.class_bases[x.first_base + i];
+            for (uint32_t i = 0; i < x.details().base_count; i++)
+                vmi |= vmi_flags(
+                    analysis, analysis.class_bases[x.details().first_base + i],
+                    seen);
+            integer(
+                2, vmi | (static_cast<uint64_t>(x.details().base_count) << 32));
+            for (uint32_t i = 0; i < x.details().base_count; i++) {
+                entity_index be =
+                    analysis.class_bases[x.details().first_base + i];
                 const entity &b = analysis.entity_table[be];
                 if (!pointee(3 + 2 * i, b.type.unqualified()))
                     return 0;
@@ -332,7 +337,7 @@ uint32_t c_lowering::typeinfo(type_index t, token_index at)
                    are flags, the rest is the offset" ... a virtual base's
                    is its vbase offset's place in the virtual table
                    ([abi:vtable-components]), a negative number of bytes */
-                int64_t offset = static_cast<int64_t>(b.offset);
+                int64_t offset = static_cast<int64_t>(b.details().offset);
                 uint64_t bits = 0;
                 if (b.access == 0)
                     bits |= base_public;

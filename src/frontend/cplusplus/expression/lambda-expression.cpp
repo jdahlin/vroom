@@ -501,7 +501,7 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
         for (entity_index k{1}; k.index() < entity_table.size(); k++)
             if (entity_table[k].kind == entity_kind::class_type &&
                 entity_table[k].enclosing == scope &&
-                entity_table[k].default_argument_parameter)
+                entity_table[k].details().default_argument_parameter)
                 default_parameter++;
     } else if (initialized_member && !current_lambda()) {
         member = initialized_member;
@@ -525,18 +525,21 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
                 return closure_object(l, again, m);
             }
     entity_index c = entity_table.make(entity_kind::class_type, 0, scope);
-    entity_table[c].closure_variable = member;
-    entity_table[c].default_argument_parameter = default_parameter;
+    entity_table[c].set(&entity_details::closure_variable, member);
+    entity_table[c].set(&entity_details::default_argument_parameter,
+                        default_parameter);
     entity_table[c].type = qualified_type::make(
         type_table.of_entity(type_kind::class_type, c), cv_none);
-    entity_table[c].lambda = n;
+    entity_table[c].set(&entity_details::lambda, n);
     closure_entities.append(c);
     if (!function_state.active && deducing_variable &&
         entity_table[deducing_variable].inline_)
-        entity_table[c].closure_variable = deducing_variable;
+        entity_table[c].set(&entity_details::closure_variable,
+                            deducing_variable);
     entity_table[c].defined = true;
     entity_table[c].first_member = static_cast<uint32_t>(class_members.size());
-    entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());
+    entity_table[c].set(&entity_details::first_base,
+                        static_cast<uint32_t>(class_bases.size()));
     entity_table.add_declaration(c, n);
     l.closure = c;
     l.first_capture = static_cast<uint32_t>(lambda_captures.size());
@@ -586,12 +589,13 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
     entity_table[f].immediate = l.immediate;
     entity_table[f].defined = true;
     entity_table[f].operator_function = true;
-    entity_table[f].implemented = preprocessing_op_or_punc::LEFT_PARENTHESIS;
+    entity_table[f].set(&entity_details::implemented,
+                        preprocessing_op_or_punc::LEFT_PARENTHESIS);
     entity_table[f].placeholder_return =
         contains_placeholder(type_table[type.unqualified()].operand);
     entity_table.add_declaration(f, n);
     entity_table.bind(c, call_name, f);
-    entity_table[c].call_operator = f;
+    entity_table[c].set(&entity_details::call_operator, f);
     l.call = f;
     r = lambda_default_arguments(n, f, parameters);
     if (r != analysis_result::well_formed) {
@@ -608,7 +612,7 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
     if (r != analysis_result::well_formed) {
         entity_table[c].kind = entity_kind::none;
         note_held(c);
-        entity_table[c].size = 0;
+        entity_table[c].set(&entity_details::size, 0);
         return r;
     }
     if (kept_key) {
@@ -1074,9 +1078,10 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
     entity_table[t].constexpr_ = l.constexpr_;
     entity_table[t].immediate = l.immediate;
     entity_table[t].operator_function = true;
-    entity_table[t].implemented = preprocessing_op_or_punc::LEFT_PARENTHESIS;
+    entity_table[t].set(&entity_details::implemented,
+                        preprocessing_op_or_punc::LEFT_PARENTHESIS);
     hold_template_name(record, call_name, c);
-    entity_table[c].call_operator = t;
+    entity_table[c].set(&entity_details::call_operator, t);
     owned_array<capture_record> captures;
     for (size_t i = l.first_capture; i < lambda_captures.size(); i++)
         captures.append(lambda_captures[i]);

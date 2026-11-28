@@ -101,7 +101,7 @@ bool c_lowering::without_linkage(qualified_type t) const
             const entity &x = analysis.entity_table[r.entity];
             /* (an unnamed member class of a class with linkage has its
                class's, class_specifier) */
-            return !x.name && !x.linkage_name &&
+            return !x.name && !x.details().linkage_name &&
                    x.linkage_of_name != linkage::external &&
                    !visible_local_class(analysis.entity_table, r.entity);
         }
@@ -216,7 +216,8 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     case type_kind::enumeration: {
         /* [dcl.enum]/8: an enumeration is its underlying type's values,
            and has its representation ([basic.fundamental]/10) */
-        fundamental_type u = analysis.entity_table[r.entity].underlying;
+        fundamental_type u =
+            analysis.entity_table[r.entity].details().underlying;
         if (u == fundamental_type::none) {
             fail("an incomplete enumeration type", at);
             return ast_builder_type_basic(AST_TYPE_INT);
@@ -256,10 +257,10 @@ ast_qualified_type c_lowering::class_tag(entity_index e)
     const entity &x = analysis.entity_table[e];
     owned_buffer name;
     spelling(e, name);
-    if (!x.name && x.linkage_name) {
+    if (!x.name && x.details().linkage_name) {
         size_t length = 0;
-        const char *s =
-            tokens.pp.identifier_spelling(x.linkage_name - 1, &length);
+        const char *s = tokens.pp.identifier_spelling(
+            x.details().linkage_name - 1, &length);
         vbuffer_append(name.get(), s, length);
     }
     records[e] = ast_builder_type_record(c, name.data(), name.size(), x.union_);
@@ -305,15 +306,15 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at,
         return ast_builder_type_basic(AST_TYPE_INT);
     }
     ast_qualified_type made;
-    uint64_t whole = x.size;
+    uint64_t whole = x.details().size;
     if (data_only) {
         made = ast_builder_type_record(c, "", 0, false);
-        whole = x.data_size;
+        whole = x.details().data_size;
     } else {
         made = class_tag(e);
         deferred_class[e] = 0;
     }
-    if (!x.size)
+    if (!x.details().size)
         /* incomplete: a pointer to it is all a program can have */
         return made;
     classes_in_progress++;
@@ -380,39 +381,40 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at,
         }
         if (m.gnu_flags & gnu_packed)
             align = 1;
-        if (m.alignment > align)
-            align = m.alignment;
+        if (m.details().alignment > align)
+            align = m.details().alignment;
         if (!x.union_ && !m.bit_field) {
             uint64_t natural = end;
             if (align)
                 natural = (end + align - 1) / align * align;
-            if (m.offset > natural && m.offset > end)
-                padding(m.offset - end);
+            if (m.details().offset > natural && m.details().offset > end)
+                padding(m.details().offset - end);
             /* the next member placed inside this base's tail padding */
-            uint64_t next = x.size;
+            uint64_t next = x.details().size;
             if (i + 1 < member_order.size())
-                next = analysis.entity_table[member_order[i + 1]].offset;
+                next =
+                    analysis.entity_table[member_order[i + 1]].details().offset;
             const entity &of = analysis.entity_table[record(m.type).entity];
-            if (m.base_subobject && of.virtual_base_count) {
+            if (m.base_subobject && of.details().virtual_base_count) {
                 /* a base with virtual bases: its non-virtual part
                    ([abi:class-types] nvsize), its virtual bases the
                    class's own */
-                size = of.nv_size;
-                align = of.nv_alignment;
+                size = of.details().nv_size;
+                align = of.details().nv_alignment;
                 t = ast_builder_type_array(c, byte, size, true);
                 tail_reused[member] = 1;
-            } else if (m.base_subobject && next < m.offset + size) {
-                size = of.data_size;
+            } else if (m.base_subobject && next < m.details().offset + size) {
+                size = of.details().data_size;
                 t = data_type(record(m.type).entity, at);
                 tail_reused[member] = 1;
             }
         }
         c_fields[member] = static_cast<uint32_t>(fields.size());
-        offsets.append(m.offset);
+        offsets.append(m.details().offset);
         int32_t width = -1;
         if (m.bit_field)
-            width = m.bit_width;
-        uint32_t field_align = m.alignment;
+            width = m.details().bit_width;
+        uint32_t field_align = m.details().alignment;
         if (tail_reused[member])
             /* the base without its tail padding: its alignment */
             field_align = static_cast<uint32_t>(align);
@@ -434,9 +436,9 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at,
                 (m.gnu_flags & gnu_packed) != 0, width);
         }
         if (m.bit_field)
-            end = (m.bit_offset + m.bit_width + 7) / 8;
-        else if (m.offset + size > end)
-            end = m.offset + size;
+            end = (m.details().bit_offset + m.details().bit_width + 7) / 8;
+        else if (m.details().offset + size > end)
+            end = m.details().offset + size;
     }
     /* [abi:class-types] III: the virtual bases of a complete object, each
        its non-virtual part (an empty one has no bytes); no C name refers
@@ -444,18 +446,20 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at,
        are placed in inheritance graph order, not in the order of the
        list (clang's vbases()): by offset here */
     owned_array<uint32_t> placed;
-    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+    for (uint32_t i = 0; i < x.details().virtual_base_count; i++) {
         uint32_t at_index = static_cast<uint32_t>(placed.size());
         uint64_t offset =
             analysis
-                .entity_table
-                    [analysis.class_virtual_bases[x.first_virtual_base + i]]
+                .entity_table[analysis.class_virtual_bases
+                                  [x.details().first_virtual_base + i]]
+                .details()
                 .offset;
         while (at_index &&
-               analysis.entity_table
-                       [analysis.class_virtual_bases[x.first_virtual_base +
-                                                     placed[at_index - 1]]]
-                           .offset > offset)
+               analysis.entity_table[analysis.class_virtual_bases
+                                         [x.details().first_virtual_base +
+                                          placed[at_index - 1]]]
+                       .details()
+                       .offset > offset)
             at_index--;
         placed.append(0);
         for (uint32_t j = static_cast<uint32_t>(placed.size()) - 1;
@@ -465,19 +469,19 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at,
     }
     for (uint32_t i : placed) {
         const entity &v =
-            analysis.entity_table
-                [analysis.class_virtual_bases[x.first_virtual_base + i]];
+            analysis.entity_table[analysis.class_virtual_bases
+                                      [x.details().first_virtual_base + i]];
         const entity &of = analysis.entity_table[record(v.type).entity];
         if (analysis.empty_class(record(v.type).entity))
             continue;
-        if (v.offset > end)
-            padding(v.offset - end);
+        if (v.details().offset > end)
+            padding(v.details().offset - end);
         vbuffer_format_append(generated.get(), "__vbase%u", i);
         vbuffer_append(generated.get(), "", 1);
-        add(ast_builder_type_array(c, byte, of.nv_size, true), nullptr, 0,
-            of.nv_alignment, false, -1);
-        offsets.append(v.offset);
-        end = v.offset + of.nv_size;
+        add(ast_builder_type_array(c, byte, of.details().nv_size, true),
+            nullptr, 0, of.details().nv_alignment, false, -1);
+        offsets.append(v.details().offset);
+        end = v.details().offset + of.details().nv_size;
     }
     if (!x.member_count && !end) {
         /* [intro.object]/8: an empty class is one byte, a C struct without
@@ -490,8 +494,9 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at,
         /* the C struct's size, rounded to its alignment, may fall short of
            the class's: padding at the end where it would */
         uint64_t rounded = end;
-        if (x.alignment)
-            rounded = (end + x.alignment - 1) / x.alignment * x.alignment;
+        if (x.details().alignment)
+            rounded = (end + x.details().alignment - 1) /
+                      x.details().alignment * x.details().alignment;
         if (data_only || rounded < whole)
             padding(whole - end);
     }
@@ -505,9 +510,9 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at,
     /* [dcl.align]: the class's alignment-specifiers, as C's aligned on
        its first field (at offset 0), which raises the struct's alignment
        and rounds its size */
-    if (x.requested_alignment && !aligned.empty() &&
-        aligned[0] < x.requested_alignment)
-        aligned[0] = x.requested_alignment;
+    if (x.details().requested_alignment && !aligned.empty() &&
+        aligned[0] < x.details().requested_alignment)
+        aligned[0] = x.details().requested_alignment;
     c_fields[e] = static_cast<uint32_t>(fields.size());
     ast_builder_type_record_complete(
         c, made, fields.data(), names.data(), lengths.data(), aligned.data(),
@@ -535,13 +540,13 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at,
         entity_index member = analysis.class_members[x.first_member + i];
         const entity &m = analysis.entity_table[member];
         uint32_t f = c_fields[member];
-        uint64_t bit_off = m.offset * 8;
+        uint64_t bit_off = m.details().offset * 8;
         if (m.bit_field)
-            bit_off = m.bit_offset;
+            bit_off = m.details().bit_offset;
         if (ast_builder_type_record_bit_offset(c, made, f) != bit_off)
             ast_builder_type_record_set_offset(c, made, f, bit_off);
     }
-    uint32_t whole_alignment = static_cast<uint32_t>(x.alignment);
+    uint32_t whole_alignment = static_cast<uint32_t>(x.details().alignment);
     if (data_only)
         whole_alignment = 1;
     if (ast_builder_type_size(c, made) != whole)
@@ -576,7 +581,7 @@ ast_qualified_type c_lowering::pointee_type(qualified_type t, token_index at)
     if (!classes_in_progress || r.kind != type_kind::class_type ||
         records[r.entity] ||
         analysis.entity_table[r.entity].kind != entity_kind::class_type ||
-        !analysis.entity_table[r.entity].size)
+        !analysis.entity_table[r.entity].details().size)
         return type(t, at);
     ast_qualified_type made = class_tag(r.entity);
     deferred_class[r.entity] = 1;
@@ -611,7 +616,8 @@ bool c_lowering::built_in_place(qualified_type t) const
     const struct type &r = record(t);
     return r.kind == type_kind::class_type &&
            analysis.entity_table[r.entity].kind == entity_kind::class_type &&
-           analysis.entity_table[r.entity].size > 16 && holds_address(r.entity);
+           analysis.entity_table[r.entity].details().size > 16 &&
+           holds_address(r.entity);
 }
 
 bool c_lowering::holds_address(entity_index c_) const

@@ -207,10 +207,10 @@ analysis_result semantic_analysis::member_function_template(
         entity_table[prior].kind == entity_kind::function &&
         entity_table[prior].special == special_member::none) {
         entity_index head2 = prior;
-        prior = entity_table[head2].member_templates;
+        prior = entity_table[head2].details().member_templates;
         if (!prior) {
             prior = make_held_name(name, c);
-            entity_table[head2].member_templates = prior;
+            entity_table[head2].set(&entity_details::member_templates, prior);
         }
     } else if (prior && entity_table[prior].enclosing != c) {
         /* [namespace.udecl]/15, [temp.mem]/2: a name a using-declaration
@@ -220,19 +220,20 @@ analysis_result semantic_analysis::member_function_template(
         if (entity_table[prior].kind == entity_kind::function &&
             entity_table[prior].special == special_member::none) {
             entity copy = entity_table[prior];
-            copy.next_overload = 0;
-            copy.using_shadow_of = prior;
+            copy.set(&entity_details::next_overload, 0);
+            copy.set(&entity_details::using_shadow_of, prior);
             entity_index shadow =
                 entity_table.make(entity_kind::function, name, copy.enclosing);
             entity_index held = make_held_name(name, c);
-            entity_table[held].using_shadow_of = copy.member_templates;
-            copy.member_templates = held;
+            entity_table[held].set(&entity_details::using_shadow_of,
+                                   copy.details().member_templates);
+            copy.set(&entity_details::member_templates, held);
             entity_table[shadow] = copy;
             entity_table.bind(c, name, shadow);
             prior = held;
         } else if (member_function_template_of(prior)) {
             entity_index held = make_held_name(name, c);
-            entity_table[held].using_shadow_of = prior;
+            entity_table[held].set(&entity_details::using_shadow_of, prior);
             entity_table.bind(c, name, held);
             prior = held;
         } else {
@@ -301,9 +302,9 @@ analysis_result semantic_analysis::member_function_template(
     entity_table[t].constexpr_ = s.constexpr_;
     entity_table[t].immediate = s.consteval_;
     entity_table[t].operator_function = m.operator_function;
-    entity_table[t].allocation = m.allocation;
+    entity_table[t].set(&entity_details::allocation, m.allocation);
     entity_table[t].conversion_function = conversion;
-    entity_table[t].implemented = m.implemented;
+    entity_table[t].set(&entity_details::implemented, m.implemented);
     if (conversion) {
         entity_table[t].explicit_ = s.explicit_;
         entity_table[t].explicit_dependent = s.explicit_dependent;
@@ -314,10 +315,10 @@ analysis_result semantic_analysis::member_function_template(
         entity_table[t].special = special_member::constructor;
         entity_table[t].explicit_ = s.explicit_;
         entity_table[t].explicit_dependent = s.explicit_dependent;
-        prior = entity_table[c].constructor_templates;
+        prior = entity_table[c].details().constructor_templates;
         if (!prior) {
             prior = make_held_name(name, c);
-            entity_table[c].constructor_templates = prior;
+            entity_table[c].set(&entity_details::constructor_templates, prior);
         }
     }
     if (prior) {
@@ -380,7 +381,8 @@ analysis_result semantic_analysis::constructor_template_candidates(
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all)
 {
     owned_array<uint32_t> group;
-    function_template_overloads(entity_table[c].constructor_templates, group);
+    function_template_overloads(entity_table[c].details().constructor_templates,
+                                group);
     if (copy) {
         size_t kept = 0;
         for (uint32_t g : group)
@@ -437,11 +439,11 @@ void semantic_analysis::introduce_member_templates(entity_index c,
                                                    entity_index head,
                                                    entity_index from)
 {
-    entity_index held = entity_table[head].member_templates;
+    entity_index held = entity_table[head].details().member_templates;
     if (!held) {
         held = entity_table.make(entity_kind::none, entity_table[head].name, c);
         entity_table[held].held_by_template = true;
-        entity_table[head].member_templates = held;
+        entity_table[head].set(&entity_details::member_templates, held);
     }
     for (size_t i = 0, k = function_templates.size(); i < k; i++)
         if (function_templates[i].name == from &&
@@ -479,7 +481,7 @@ analysis_result semantic_analysis::member_template_call(
         }
     for (const expression_meaning &e : early)
         if (e.entity && entity_table[e.entity].kind == entity_kind::function &&
-            entity_table[e.entity].next_overload)
+            entity_table[e.entity].details().next_overload)
             return not_supported_because(n, "temp.deduct.call",
                                          "an overloaded function as an "
                                          "argument to a member template call");
@@ -594,7 +596,7 @@ analysis_result semantic_analysis::static_member_call(
                           "it is declared",
                           "class.access");
     if (object && object->category == value_category::prvalue &&
-        entity_table[object_class].destructor)
+        entity_table[object_class].details().destructor)
         /* the temporary's destruction ([class.temporary]/4) */
         return not_supported_because(
             n, "class.temporary",
@@ -659,7 +661,7 @@ analysis_result semantic_analysis::bound_member_call(
         VTRY(r, to_base(at, x.enclosing, e));
     }
     if (aggregate_prvalue(e) &&
-        (!at_block_scope() || entity_table[x.enclosing].destructor ||
+        (!at_block_scope() || entity_table[x.enclosing].details().destructor ||
          x.enclosing != object_class))
         return not_supported_because(
             n, "class.temporary",
