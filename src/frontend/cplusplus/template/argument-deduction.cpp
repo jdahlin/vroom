@@ -1013,8 +1013,11 @@ analysis_result semantic_analysis::deduce_from_call(
     if (f.variadic && count > fixed)
         count = fixed;
     for (uint32_t i = 0; i < count; i++) {
-        qualified_type p = parameters[i];
-        if (i >= fixed)
+        /* (the arguments past the parameters are the trailing pack's) */
+        qualified_type p;
+        if (i < fixed)
+            p = parameters[i];
+        else
             p = type_table[parameters[fixed].unqualified()].operand;
         /* /7: "Implicit conversions will be performed on a function
            argument to convert it to the type of the corresponding function
