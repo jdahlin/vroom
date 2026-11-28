@@ -481,7 +481,7 @@ bool semantic_analysis::deduce_conversion_templates(
                being substituted: no candidate, as the recursion cannot
                end otherwise */
             const uint64_t key =
-                (uint64_t(g) << 32) | uint32_t(dest.unqualified());
+                (uint64_t(g) << 32) | dest.unqualified().index();
             bool busy = false;
             for (uint64_t a : defaulting_conversions)
                 if (a == key)

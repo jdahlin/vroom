@@ -22,7 +22,7 @@ bool itanium_mangler::nested_name_of_dependent_member(entity_index e)
 {
     enc.write(terminal::N_nested_name);
     if (!prefix_of_dependent_member(
-            static_cast<type_index>(analysis.entity_table[e].value)))
+            type_index_in(analysis.entity_table[e].value)))
         return false;
     if (!source_name(analysis.entity_table[e].name))
         return false;
@@ -80,7 +80,7 @@ bool itanium_mangler::prefix_of_dependent_member(type_index q)
                 return false;
         }
     } else {
-        if (!prefix_of_dependent_member(static_cast<type_index>(prefix.value)))
+        if (!prefix_of_dependent_member(type_index_in(prefix.value)))
             return false;
         if (!source_name(prefix.name))
             return false;
@@ -557,9 +557,8 @@ bool itanium_mangler::type_transformation(const struct type &r)
     bool done = source_name(analysis.entity_table[r.entity].name);
     if (done) {
         enc.write(terminal::I_template_args);
-        done = type(
-            qualified_type::make(static_cast<type_index>(operand & 0xffffffffu),
-                                 static_cast<uint32_t>(operand >> 32)));
+        done = type(qualified_type::make(type_index_in(operand & 0xffffffffu),
+                                         static_cast<uint32_t>(operand >> 32)));
         enc.write(terminal::E_end);
     }
     return done;

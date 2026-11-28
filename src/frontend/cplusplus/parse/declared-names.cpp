@@ -132,11 +132,11 @@ scope_index declared_names::enter_namespace(uint32_t name, bool inline_)
     scope &s = scopes.make();
     s.kind = scope_kind::namespace_;
     s.enclosing = enclosing;
-    scope_index made = static_cast<scope_index>(scopes.size() - 1);
+    scope_index made = scope_index{static_cast<uint32_t>(scopes.size() - 1)};
     if (name) {
         scopes[enclosing].declarations.append(
             {name, name_kind::namespace_name, made});
-        journal.append(enclosing);
+        journal.append(enclosing.index());
     }
     /* [namespace.unnamed]/1: an unnamed-namespace-definition behaves as if
        followed by `using namespace unique;`; [namespace.def]/7: "Members of
@@ -144,7 +144,7 @@ scope_index declared_names::enter_namespace(uint32_t name, bool inline_)
        members of the enclosing namespace." */
     if (!name || inline_) {
         scopes[enclosing].searched_with.append({made, false});
-        journal.append(enclosing | 0x80000000u);
+        journal.append(enclosing.index() | 0x80000000u);
     }
     current_scope = made;
     return made;
@@ -155,7 +155,7 @@ scope_index declared_names::enter(scope_kind kind)
     scope &s = scopes.make();
     s.kind = kind;
     s.enclosing = current_scope;
-    current_scope = static_cast<scope_index>(scopes.size() - 1);
+    current_scope = scope_index{static_cast<uint32_t>(scopes.size() - 1)};
     return current_scope;
 }
 
@@ -187,7 +187,7 @@ void declared_names::declare_in(scope_index in, uint32_t name, name_kind kind,
             if (d.name == name && d.kind == name_kind::function_template)
                 kind = name_kind::function_template;
     scopes[in].declarations.append({name, kind, region, dependent});
-    journal.append(in);
+    journal.append(in.index());
     if (scopes[in].kind == scope_kind::class_ && is_template_kind(kind))
         assume_member_template(name, kind == name_kind::variable_template);
 }
@@ -227,7 +227,7 @@ void declared_names::declare_template_parameter(uint32_t name, name_kind kind)
     bool dependent =
         kind == name_kind::type_name || kind == name_kind::template_name;
     scopes[current_scope].declarations.append({name, kind, 0, dependent});
-    journal.append(current_scope);
+    journal.append(current_scope.index());
 }
 
 scope_index declared_names::declaring_scope() const
@@ -275,7 +275,7 @@ void declared_names::add_base(scope_index derived, scope_index base,
     if (derived == base)
         return;
     scopes[derived].searched_with.append({base, concrete});
-    journal.append(derived | 0x80000000u);
+    journal.append(derived.index() | 0x80000000u);
 }
 
 scope_index declared_names::snapshot(scope_index region)
@@ -288,7 +288,7 @@ scope_index declared_names::snapshot(scope_index region)
     copy.enclosing = s.enclosing;
     for (const declaration &d : s.declarations)
         copy.declarations.append(d);
-    scope_index result = static_cast<scope_index>(scopes.size() - 1);
+    scope_index result = scope_index{static_cast<uint32_t>(scopes.size() - 1)};
     /* the recursion grows scopes: no reference is kept across it */
     for (size_t i = 0; i < scopes[region].searched_with.size(); i++) {
         scope::searched other = scopes[region].searched_with[i];
@@ -315,7 +315,7 @@ void declared_names::define_class(scope_index in, uint32_t name,
              d.kind == name_kind::template_name) &&
             d.scope && d.scope != region) {
             scopes[d.scope].searched_with.append({region, false});
-            journal.append(d.scope | 0x80000000u);
+            journal.append(d.scope.index() | 0x80000000u);
         }
         return;
     }
@@ -331,13 +331,13 @@ void declared_names::declare_namespace_alias(uint32_t name,
 {
     scopes[current_scope].declarations.append(
         {name, name_kind::namespace_name, nominated});
-    journal.append(current_scope);
+    journal.append(current_scope.index());
 }
 
 void declared_names::use_namespace(scope_index nominated)
 {
     scopes[current_scope].searched_with.append({nominated, false});
-    journal.append(current_scope | 0x80000000u);
+    journal.append(current_scope.index() | 0x80000000u);
 }
 
 void declared_names::rollback(mark m)
@@ -345,7 +345,7 @@ void declared_names::rollback(mark m)
     while (journal.size() > m.journal) {
         uint32_t entry = journal.back();
         journal.resize(journal.size() - 1);
-        scope &s = scopes[entry & 0x7FFFFFFFu];
+        scope &s = scopes[scope_index{entry & 0x7FFFFFFFu}];
         if (entry & 0x80000000u)
             s.searched_with.resize(s.searched_with.size() - 1);
         else {

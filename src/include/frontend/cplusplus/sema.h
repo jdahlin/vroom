@@ -27,7 +27,7 @@ namespace cplusplus
 /* ---- types -------------------------------------------------------------- */
 
 /* a type of the translation unit's type table; 0 is no type */
-using type_index = uint32_t;
+using type_index = table_index<struct type_tag>;
 
 /* [basic.type.qualifier]/1: "a const-qualified version, a
    volatile-qualified version, and a const-volatile-qualified version";
@@ -51,6 +51,13 @@ inline uint32_t object_cv(uint32_t member_cv)
     return member_cv & (cv_const | cv_volatile);
 }
 
+/* a type_index kept in a field that holds other things too (type::bound,
+   entity::value) */
+inline type_index type_index_in(uint64_t field)
+{
+    return type_index{static_cast<uint32_t>(field)};
+}
+
 /*
  * A possibly cv-qualified type: the cv-unqualified type's index and the
  * qualifiers.  [basic.type.qualifier]/1: "The cv-qualified or
@@ -61,11 +68,11 @@ struct qualified_type {
     uint32_t bits = 0;
     static qualified_type make(type_index type, uint32_t cv)
     {
-        return {type << 3 | cv};
+        return {type.index() << 3 | cv};
     }
     type_index unqualified() const
     {
-        return bits >> 3;
+        return type_index{bits >> 3};
     }
     uint32_t cv() const
     {
@@ -244,7 +251,7 @@ class types
               type_index b) const;
     void grow();
 
-    retaining_array<type> records;
+    retaining_array<type, type_index> records;
     retaining_array<qualified_type> parameter_lists;
     /* open addressing: a type's index, 0 for an empty slot */
     owned_array<type_index> slots;
@@ -5802,6 +5809,7 @@ class semantic_analysis
        instantiations by template_entity: made as they are asked for */
     mutable record_chains templates_by_held, templates_by_identifier,
         instantiations_by_template;
+    mutable record_chains templates_by_entity, friends_by_function;
     const record_chains &held_templates() const
     {
         templates_by_held.update(
@@ -5844,6 +5852,28 @@ class semantic_analysis
        its type the parameter's); and its type-parameter or
        parameter-declaration, for its default template-argument */
     owned_array<entity_index> template_parameter_entities;
+    /* the slots of template_parameter_entities that hold an entity: a chain
+       from the entity (slot plus one, 0 ends it), written only by
+       set_template_parameter_entity */
+    owned_array<uint32_t> parameter_slot_of_entity, parameter_slot_next;
+    void set_template_parameter_entity(uint32_t slot, entity_index e)
+    {
+        if (template_parameter_entities[slot] == e)
+            return;
+        template_parameter_entities[slot] = e;
+        while (parameter_slot_of_entity.size() <= e)
+            parameter_slot_of_entity.append(0);
+        while (parameter_slot_next.size() <= slot)
+            parameter_slot_next.append(0);
+        parameter_slot_next[slot] = parameter_slot_of_entity[e];
+        parameter_slot_of_entity[e] = slot + 1;
+    }
+    uint32_t first_parameter_slot(entity_index e) const
+    {
+        if (e < parameter_slot_of_entity.size())
+            return parameter_slot_of_entity[e];
+        return 0;
+    }
     owned_array<SyntaxRef> template_parameter_nodes;
     /* per template-parameter: the first_parameter of the declaration whose
        parameter names its default template-argument uses (its own

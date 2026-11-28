@@ -88,12 +88,10 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             entity_table[ar.entity].name != entity_table[pr.entity].name)
             return false;
         return deduce_type(
-            qualified_type::make(
-                static_cast<type_index>(entity_table[pr.entity].value),
-                cv_none),
-            qualified_type::make(
-                static_cast<type_index>(entity_table[ar.entity].value),
-                cv_none),
+            qualified_type::make(type_index_in(entity_table[pr.entity].value),
+                                 cv_none),
+            qualified_type::make(type_index_in(entity_table[ar.entity].value),
+                                 cv_none),
             deduced, set, exact);
     }
     if (pr.kind == type_kind::dependent &&
@@ -354,10 +352,10 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             if (pr.entity != ar.entity || pr.bound != ar.bound)
                 return false;
         } else {
-            qualified_type pc = qualified_type::make(
-                static_cast<type_index>(pr.bound), cv_none);
-            qualified_type ac = qualified_type::make(
-                static_cast<type_index>(ar.bound), cv_none);
+            qualified_type pc =
+                qualified_type::make(type_index_in(pr.bound), cv_none);
+            qualified_type ac =
+                qualified_type::make(type_index_in(ar.bound), cv_none);
             if (ar.entity)
                 ac = qualified_type::make(
                     entity_table[ar.entity].type.unqualified(), cv_none);

@@ -196,7 +196,7 @@ type_index semantic_analysis::dependent_member_type(type_index qualifier,
                                                     uint32_t name)
 {
     return dependent_type(dependent_members, entity_kind::dependent_member,
-                          name, qualifier);
+                          name, qualifier.index());
 }
 
 /* a dependent type of kind, hash-consed in list on name and value: the

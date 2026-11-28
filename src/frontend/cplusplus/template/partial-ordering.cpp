@@ -161,9 +161,8 @@ bool semantic_analysis::orderable(qualified_type t, bool packs,
         return packs && orderable(r.operand, packs, pack_argument, value_kinds);
     case type_kind::pointer_to_member:
         if (!r.entity &&
-            !orderable(
-                qualified_type::make(static_cast<type_index>(r.bound), cv_none),
-                packs, pack_argument, value_kinds))
+            !orderable(qualified_type::make(type_index_in(r.bound), cv_none),
+                       packs, pack_argument, value_kinds))
             return false;
         return orderable(r.operand, packs, pack_argument, value_kinds);
     case type_kind::pointer:

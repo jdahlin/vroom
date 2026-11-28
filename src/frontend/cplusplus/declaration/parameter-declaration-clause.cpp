@@ -835,7 +835,7 @@ semantic_analysis::dynamic_exception_types(SyntaxRef n, bool member,
             continue;
         qualified_type type;
         VTRY(r, type_id(c, type));
-        types.append(type.unqualified());
+        types.append(type.unqualified().index());
         qualified_type base = type;
         const struct type *t = &type_table[base.unqualified()];
         bool through = false;

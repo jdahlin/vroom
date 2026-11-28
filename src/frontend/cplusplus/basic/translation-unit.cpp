@@ -198,7 +198,10 @@ bool semantic_analysis::unit_local(entity_index e) const
             if (entity_table[declared].linkage_of_name == linkage::internal)
                 return true;
         }
-        if (!x.instantiation)
+        /* (a template's, and a template parameter's, instantiation is its
+           function_template record, not an instantiation's) */
+        if (!x.instantiation || x.kind == entity_kind::template_entity ||
+            x.kind == entity_kind::typedef_name)
             continue;
         const instantiation_record &made = instantiations[x.instantiation - 1];
         for (uint32_t i = 0; i < made.argument_count; i++)

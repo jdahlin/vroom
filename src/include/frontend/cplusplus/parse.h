@@ -16,6 +16,7 @@
 #ifndef VCC_CPLUSPLUS_PARSE_H
 #define VCC_CPLUSPLUS_PARSE_H
 
+#include "frontend/cplusplus/table-index.h"
 #include "frontend/cplusplus/cplusplus.h"
 
 namespace cplusplus
@@ -343,7 +344,11 @@ enum class scope_kind : uint8_t {
     template_parameter,
 };
 
-using scope_index = uint32_t;
+/* a declarative region of declared_names.  Record 0 is the global
+   namespace, and also what a condition reads as no region */
+using scope_index = table_index<struct scope_tag>;
+/* where even the global namespace is a region, this names none */
+inline constexpr scope_index no_scope{UINT32_MAX};
 
 /*
  * The declarations of a translation unit as far as the grammar needs them:
@@ -357,7 +362,7 @@ using scope_index = uint32_t;
 class declared_names
 {
   public:
-    static constexpr scope_index global_namespace = 0;
+    static constexpr scope_index global_namespace{};
 
     declared_names();
     declared_names(const declared_names &) = delete;
@@ -562,7 +567,7 @@ class declared_names
         scope_index complete = 0;
         bool dependent_base = false;
     };
-    owned_objects<scope> scopes;
+    owned_objects<scope, scope_index> scopes;
     scope_index current_scope = 0;
     /* each change, to undo: a declaration added (where) or a scope searched
        with another (where, with the high bit) */
@@ -1409,7 +1414,7 @@ class parser
     bool type_id_only = false;
     /* the scope a template-declaration's declaration declares its name in
        (none: UINT32_MAX); a declaration there declares a template */
-    scope_index template_scope = UINT32_MAX;
+    scope_index template_scope = no_scope;
     /* the kind a declaration that would declare plain declares: a
        template's ([temp.pre]/1) when it is the template-declaration's */
     name_kind declared_kind(name_kind plain);
@@ -1432,7 +1437,7 @@ class parser
        explicit-instantiation declares its name in ([temp.pre]/5: "the
        init-declarator-list in the declaration shall contain at most one
        declarator") */
-    scope_index single_declarator_scope = UINT32_MAX;
+    scope_index single_declarator_scope = no_scope;
     /* [temp.pre]/5: a second declarator, or one after a class template's
        definition: the failure at the current token, else false */
     bool template_declarator_violates(const decl_specifier_facts &specifiers,

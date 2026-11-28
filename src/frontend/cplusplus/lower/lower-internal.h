@@ -154,7 +154,7 @@ class c_lowering
     /* [ext:clang_vla] the C type of each variable length array type (by
        the type's index), made once: its bound is lowered once, where the
        array is first named (its declaration) */
-    owned_array<ast_qualified_type> variable_arrays;
+    owned_array<ast_qualified_type, type_index> variable_arrays;
     /* a data member or base subobject: its field's number in its class's
        C struct, which has padding fields where C's layout would place a
        member earlier than the ABI does; a class: its C struct's number of
@@ -908,6 +908,8 @@ class c_lowering
        needed, lowered at the end only if a lowered definition uses them
        (lower_waiting_functions); 0 for one lowered */
     owned_array<entity_index> waiting_functions;
+    /* by entity: whether it is in waiting_functions now */
+    owned_array<uint8_t> is_waiting;
     bool lowering_waiting = false;
     bool lower_waiting_functions();
     bool variable_definition(entity_index e);
